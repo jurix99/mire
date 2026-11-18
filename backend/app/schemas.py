@@ -144,18 +144,51 @@ class JobMini(ORM):
     location: str | None
 
 
+class CriterionOut(BaseModel):
+    key: str
+    label: str
+    points: float
+    max: float
+
+
+class AssessmentOut(BaseModel):
+    """Évaluation calculée de l'offre pour l'utilisateur connecté."""
+
+    score: float | None  # note retenue : correction manuelle, sinon note calculée
+    auto_score: float | None
+    manual_score: float | None
+    verdict: str  # nouveau | ecartee
+    exclusion: str | None
+    why: str | None
+    criteria: list[CriterionOut]
+    skills_have: list[str]
+    skills_missing: list[str]
+    stale: bool  # évaluée avec une ancienne version du profil (réévaluation en attente)
+    assessed_at: datetime
+
+
 class JobOut(JobMini):
     category: str | None
     seniority: str | None
     stack: str | None
     source: str | None
     summary: str | None
+    # Note de l'utilisateur connecté : correction manuelle, sinon évaluation automatique,
+    # sinon ancienne note partagée (saisie à la main avant l'évaluation par utilisateur)
     score: float | None
     created_at: datetime
     company: CompanyMini
-    # Statut du point de vue de l'utilisateur connecté (« nouveau » s'il n'a pas de process)
+    # Statut posé par l'utilisateur connecté (« nouveau » s'il n'a pas de process)
     status: ProcessStatus = ProcessStatus.nouveau
     application_id: int | None = None
+    assessment: AssessmentOut | None = None
+    # Statut affiché : celui posé par l'utilisateur s'il a un process, sinon le verdict de l'évaluation
+    # (« nouveau » ou « ecartee »), sinon « nouveau »
+    display_status: str = "nouveau"
+
+
+class ManualScoreIn(BaseModel):
+    score: Annotated[float | None, Field(default=None, ge=0, le=10)] = None  # None = revenir à la note calculée
 
 
 class JobStatusIn(BaseModel):

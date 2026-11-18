@@ -17,7 +17,7 @@ os.environ["GEMINI_API_KEY"] = ""  # aucun appel réseau : les tests injectent u
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-from app import models  # noqa: E402, F401
+from app import models as _models  # noqa: E402, F401  (enregistre les tables)
 from app.db import Base, SessionLocal, engine, get_db  # noqa: E402
 from app.llm import ChatResult, ToolCallRecord, get_llm  # noqa: E402
 from app.main import app  # noqa: E402
@@ -111,6 +111,18 @@ class FakeLLM:
     def extract_profile(self, text: str) -> ProfileData:
         self.last_text = text
         return self.profile
+
+    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models=None):
+        """Évaluation simulée : self.grade(job_payload) -> dict de champs JobEvaluation (défaut : 0.7 partout)."""
+        from app.assessments import EvaluationBatch
+
+        self.eval_calls = getattr(self, "eval_calls", []) + [{"context": profile_context, "jobs": jobs}]
+        grade = getattr(self, "grade", None) or (lambda job: {})
+        keys = ("competences", "stade", "ownership", "ia_concrete", "xp", "references")
+        return EvaluationBatch.model_validate({"evaluations": [
+            {"job_id": j["job_id"], **dict.fromkeys(keys, 0.7), "why": f"Intéressant : {j['titre']}", **grade(j)}
+            for j in jobs if grade(j) is not None
+        ]})
 
     def analyze_profile(self, profile_json: str):
         from app.analysis import ProfileAnalysis

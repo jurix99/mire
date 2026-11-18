@@ -9,7 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, undefer
 
-from . import logos, services
+from . import assessments, logos, services
+from .assessments_api import invalidate_job
 from .db import get_db
 from .models import (
     ACTIVE_STATUSES,
@@ -47,7 +48,6 @@ from .schemas import (
 )
 from .services import company_out as _company_out
 from .services import get_or_404 as _get_or_404
-from .services import job_out as _job_out
 from .services import jobs_count_by_company as _jobs_count_by_company
 from .services import load_application as _load_application
 from .services import slugify as _slugify
@@ -197,7 +197,9 @@ def get_job(job_id: int, db: DB, user: Me) -> JobDetailOut:
 
 @router.post("/jobs", status_code=201)
 def create_job(body: JobIn, db: DB) -> JobOut:
-    return services.create_job(db, body)
+    out = services.create_job(db, body)
+    assessments.wake()  # évaluer la nouvelle offre pour chaque utilisateur
+    return out
 
 
 @router.patch("/jobs/{job_id}")
@@ -210,9 +212,10 @@ def update_job(job_id: int, body: JobPatch, db: DB, user: Me) -> JobOut:
         _get_or_404(db, Company, changes["company_id"])
     for field, value in changes.items():
         setattr(job, field, value)
+    invalidate_job(db, job.id)  # contenu modifié : réévaluer chez ceux qui ne l'ont pas traitée
     db.commit()
-    db.refresh(job, ["company"])
-    return _job_out(job, _user_apps(db, user).get(job.id))
+    assessments.wake()
+    return services.get_job(db, user, job.id)
 
 
 @router.delete("/jobs/{job_id}", status_code=204)

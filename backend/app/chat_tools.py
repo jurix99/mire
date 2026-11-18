@@ -60,7 +60,8 @@ TOOLS: list[ToolSpec] = [
              {"type": "object", "properties": {}}),
     ToolSpec("list_jobs", "Liste les postes suivis (partagés), avec le statut de l'utilisateur pour chacun, triés par note décroissante.",
              {"type": "object", "properties": {
-                 "status": _status,
+                 "status": {**_status, "enum": [*STATUS_KEYS, "ecartee"],
+                            "description": f"Statut affiché : {STATUS_HELP}, ou ecartee (écartée par l'évaluation)"},
                  "company": {"type": "string", "description": "Filtre sur le nom de l'entreprise (partiel)"},
                  "min_score": {"type": "number", "description": "Note minimale (0 à 10)"},
                  "limit": {"type": "integer", "description": "Nombre maximum de résultats (défaut 30)"},
@@ -141,7 +142,9 @@ def _compact(data: dict) -> dict:
 def _job_row(job) -> dict:
     return _compact({
         "job_id": job.id, "title": job.title, "company": job.company.name, "score": job.score,
-        "status": job.status.value, "location": job.location, "stack": _short(job.stack, 120),
+        "status": job.display_status, "location": job.location, "stack": _short(job.stack, 120),
+        "pourquoi": _short(job.assessment.why, 200) if job.assessment else None,
+        "raison_ecart": job.assessment.exclusion if job.assessment and job.display_status == "ecartee" else None,
     })
 
 
@@ -158,7 +161,9 @@ def _read(db: Session, user: User, name: str, args: dict) -> Any:
         case "get_profile":
             return _compact(profile_data(get_profile(db, user)).model_dump(exclude_none=True))
         case "list_jobs":
-            status = ProcessStatus(args["status"]) if args.get("status") else None
+            status = args.get("status") or None  # statut affiché : statut posé, ou verdict « ecartee »
+            if status and status not in (*STATUS_KEYS, "ecartee"):
+                raise ToolError(f"Statut inconnu : {status}")
             limit = max(1, min(int(args.get("limit") or 30), 100))
             jobs = services.list_jobs(db, user, company_name=args.get("company"), status=status,
                                       min_score=args.get("min_score"))

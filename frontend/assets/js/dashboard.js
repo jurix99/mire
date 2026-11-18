@@ -49,6 +49,7 @@ async function render() {
           <div class="grow">
             <button type="button" class="link-btn title" title="Voir l'offre">${j.title}</button>
             <span class="muted small">${j.company.name}${j.location ? ` · ${j.location}` : ""}</span>
+            ${j.assessment?.why ? html`<span class="small why-line">${j.assessment.why}</span>` : ""}
           </div>
           ${score(j.score)}
           ${statusSelect(j.status, `data-job="${j.id}"`)}

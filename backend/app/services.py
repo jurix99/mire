@@ -7,6 +7,8 @@ renvoyées telles quelles par l'API et transformées en message d'erreur par le 
 
 import re
 import unicodedata
+from dataclasses import dataclass
+from dataclasses import field as dc_field
 from datetime import date
 
 from fastapi import HTTPException
@@ -20,13 +22,16 @@ from .models import (
     ApplicationEvent,
     Company,
     Job,
+    JobAssessment,
     ProcessStatus,
     User,
 )
 from .schemas import (
     ApplicationOut,
     ApplicationPatch,
+    AssessmentOut,
     CompanyOut,
+    CriterionOut,
     DashboardOut,
     DashboardStats,
     JobIn,
@@ -69,11 +74,51 @@ def user_apps(db: Session, user: User) -> dict[int, Application]:
     return {a.job_id: a for a in apps}
 
 
-def job_out(job: Job, app: Application | None) -> JobOut:
+@dataclass
+class AssessmentContext:
+    """Évaluations de l'utilisateur + barème et version de son profil (pour construire les JobOut)."""
+
+    assessments: dict[int, JobAssessment] = dc_field(default_factory=dict)
+    weights: dict[str, float] = dc_field(default_factory=dict)
+    version: int = 1
+
+
+def assessment_context(db: Session, user: User) -> AssessmentContext:
+    from .profile import get_profile, profile_data
+
+    profile = get_profile(db, user)
+    rows = db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id))
+    return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, profile.version)
+
+
+def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = False) -> AssessmentOut:
+    from .profile import CRITERIA
+
+    auto = float(a.score) if a.score is not None else None
+    manual = float(a.manual_score) if a.manual_score is not None else None
+    return AssessmentOut(
+        score=manual if manual is not None else auto, auto_score=auto, manual_score=manual,
+        verdict=a.verdict, exclusion=a.exclusion, why=a.why,
+        criteria=[CriterionOut(key=k, label=CRITERIA[k][0], points=float(a.criteria.get(k, 0)), max=w)
+                  for k, w in ctx.weights.items() if a.criteria],
+        skills_have=a.skills_have or [], skills_missing=a.skills_missing or [],
+        # À réévaluer : même règle que assessments.jobs_to_assess (jamais si traitée ou note corrigée)
+        stale=a.profile_version < ctx.version and not treated and a.manual_score is None,
+        assessed_at=a.assessed_at,
+    )
+
+
+def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = None) -> JobOut:
     out = JobOut.model_validate(job)
     if app is not None:
         out.status = app.status
         out.application_id = app.id
+    a = ctx.assessments.get(job.id) if ctx else None
+    if a is not None:
+        out.assessment = assessment_out(a, ctx, treated=app is not None)
+        out.score = out.assessment.score
+    # Statut affiché : l'utilisateur a toujours le dernier mot (règle d'or)
+    out.display_status = app.status.value if app is not None else (a.verdict if a is not None else "nouveau")
     return out
 
 
@@ -112,34 +157,44 @@ def apply_status(app: Application, status: ProcessStatus, note: str | None = Non
 # --- Postes ------------------------------------------------------------------
 
 
+def _by_score(jobs: list[JobOut]) -> list[JobOut]:
+    return sorted(jobs, key=lambda j: (j.score is None, -(j.score or 0), j.title.lower()))
+
+
 def list_jobs(
     db: Session,
     user: User,
     *,
     company_id: int | None = None,
     company_name: str | None = None,
-    status: ProcessStatus | None = None,
+    status: ProcessStatus | str | None = None,
     min_score: float | None = None,
 ) -> list[JobOut]:
-    query = select(Job).options(selectinload(Job.company)).order_by(Job.score.desc().nulls_last(), Job.title)
+    """Postes avec le statut et la note DE L'UTILISATEUR, triés par note décroissante.
+
+    status : statut affiché (statut posé par l'utilisateur, ou verdict « nouveau » / « ecartee »).
+    """
+    query = select(Job).options(selectinload(Job.company))
     if company_id is not None:
         query = query.where(Job.company_id == company_id)
     if company_name:
         query = query.join(Company).where(Company.name.ilike(f"%{company_name.strip()}%"))
-    if min_score is not None:
-        query = query.where(Job.score >= min_score)
     apps = user_apps(db, user)
-    out = [job_out(job, apps.get(job.id)) for job in db.scalars(query)]
+    ctx = assessment_context(db, user)
+    out = [job_out(job, apps.get(job.id), ctx) for job in db.scalars(query)]
     if status is not None:
-        out = [j for j in out if j.status == status]
-    return out
+        wanted = status.value if isinstance(status, ProcessStatus) else status
+        out = [j for j in out if j.display_status == wanted]
+    if min_score is not None:
+        out = [j for j in out if j.score is not None and j.score >= min_score]
+    return _by_score(out)
 
 
 def get_job(db: Session, user: User, job_id: int) -> JobOut:
     job = db.scalar(select(Job).where(Job.id == job_id).options(selectinload(Job.company)))
     if job is None:
         raise ServiceError(404, "Poste introuvable")
-    return job_out(job, user_apps(db, user).get(job_id))
+    return job_out(job, user_apps(db, user).get(job_id), assessment_context(db, user))
 
 
 def create_job(db: Session, body: JobIn) -> JobOut:
@@ -161,7 +216,7 @@ def set_job_status(db: Session, user: User, job_id: int, status: ProcessStatus, 
     apply_status(app, status, note)
     db.commit()
     db.refresh(job, ["company"])
-    return job_out(job, app)
+    return job_out(job, app, assessment_context(db, user))
 
 
 # --- Process -----------------------------------------------------------------
@@ -193,10 +248,12 @@ def update_application(db: Session, user: User, app_id: int, body: ApplicationPa
 def dashboard(db: Session, user: User) -> DashboardOut:
     jobs = list(db.scalars(select(Job).options(selectinload(Job.company))))
     apps = user_apps(db, user)
-    status_of = {j.id: apps[j.id].status if j.id in apps else ProcessStatus.nouveau for j in jobs}
+    ctx = assessment_context(db, user)
+    outs = [job_out(j, apps.get(j.id), ctx) for j in jobs]
 
-    todo = [j for j in jobs if status_of[j.id] in TODO_STATUSES]
-    todo.sort(key=lambda j: -(j.score or 0))
+    # À traiter : nouveau ou « à regarder », jamais les offres écartées par l'évaluation
+    todo_keys = {s.value for s in TODO_STATUSES}
+    todo = _by_score([o for o in outs if o.display_status in todo_keys])
     active = [a for a in apps.values() if a.status in ACTIVE_STATUSES]
     active.sort(key=lambda a: (a.next_step_date or date.max, -a.updated_at.timestamp()))
 
@@ -212,7 +269,7 @@ def dashboard(db: Session, user: User) -> DashboardOut:
             interviews=sum(1 for a in active if a.status == ProcessStatus.entretien),
             companies=db.scalar(select(func.count(Company.id))) or 0,
         ),
-        priority_jobs=[job_out(j, apps.get(j.id)) for j in todo[:3]],
+        priority_jobs=todo[:3],
         processes=[ApplicationOut.model_validate(a) for a in active[:3]],
         recent_fundings=[company_out(c, counts.get(c.id, 0)) for c in fundings],
     )

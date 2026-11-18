@@ -15,7 +15,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from . import linkedin_export, pdf_import
+from . import assessments, linkedin_export, pdf_import
 from .analysis import analysis_input, analysis_proposals, compute_years, missing_topics
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
@@ -57,8 +57,9 @@ def update_profile(body: ProfilePatch, db: DB, user: Me) -> ProfileOut:
     profile = get_profile(db, user)
     fields = body.model_fields_set
     data = profile_data(profile).model_copy(update={f: getattr(body, f) for f in fields})
-    save_fields(profile, data, fields)
-    db.commit()
+    if save_fields(profile, data, fields):
+        db.commit()
+        assessments.wake()  # profil modifié : réévaluer les offres non traitées
     return profile_out(profile)
 
 
@@ -187,6 +188,7 @@ def apply_proposal(proposal_id: str, db: DB, user: Me, body: ProposalApply | Non
         add_import_trace(profile, imp.source, imp.filename)
     imp.applied_at = datetime.now(UTC)
     db.commit()
+    assessments.wake()
     return profile_out(profile)
 
 

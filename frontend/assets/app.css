@@ -381,6 +381,24 @@ dialog.job-dialog { width: min(760px, calc(100vw - 32px)); }
 .job-section { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
 .job-text { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
 .job-section .row-item .grow { justify-items: start; }
+
+/* Évaluation par utilisateur */
+.assess-bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: -6px 0 14px; color: var(--muted); }
+.why-line { color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.exclusion-line { color: #a8a29e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-row.is-excluded .title { color: var(--muted); }
+.exclusion { color: #9a3412; background: #fff7ed; border: 1px solid #fed7aa; border-radius: var(--radius-sm); padding: 8px 12px; }
+.criteria { display: grid; gap: 8px; }
+.criterion { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(60px, 1fr) 64px; align-items: center; gap: 10px; }
+.criterion .bar-track { display: block; height: 8px; }
+.criterion .bar-fill { display: block; height: 100%; background: var(--accent); }
+.criterion .n { text-align: right; font-variant-numeric: tabular-nums; }
+.tag.have { background: #f0fdf4; border-color: #bbf7d0; color: #166534; }
+.tag.missing { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
+.manual-score { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.manual-score label { display: inline-flex; align-items: center; gap: 8px; }
+.manual-score .input { width: 84px; }
+@media (max-width: 560px) { .criterion { grid-template-columns: 1fr 64px; } .criterion .bar-track { display: none; } }
 dialog.job-dialog[open] { display: flex; flex-direction: column; }
 dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
 .job-dialog .dialog-foot .btn svg { width: 14px; height: 14px; }

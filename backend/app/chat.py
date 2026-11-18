@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from . import chat_tools
+from . import assessments, chat_tools
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
 from .models import STATUS_LABELS, ChatAction, ChatConversation, ChatMessage, User
@@ -263,6 +263,7 @@ def chat_reset(db: DB, user: Me) -> HistoryOut:
 @router.post("/actions/{action_id}/confirm")
 def confirm(action_id: int, db: DB, user: Me) -> ActionResult:
     action, refresh = chat_tools.confirm_action(db, user, action_id)
+    assessments.wake()  # profil modifié ou offre ajoutée : (ré)évaluation
     return ActionResult(action=_action_out(action), refresh=list(refresh))
 
 

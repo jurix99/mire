@@ -16,7 +16,10 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
+from . import assessments
 from .api import router as api_router
+from .assessments_api import router as assessments_router
+from .llm import get_llm
 from .chat import router as chat_router
 from .profile_api import router as profile_router
 from .db import SessionLocal
@@ -49,13 +52,22 @@ async def lifespan(_: FastAPI):
     # Le schéma est créé par les migrations Alembic (lancées avant uvicorn, voir docker-compose.yml)
     with SessionLocal() as db:
         seed_catalog(db)
+    # Évaluation automatique des offres en tâche de fond (seulement si Gemini est configuré)
+    if get_llm() is not None and os.environ.get("ASSESSMENT_WORKER", "true").lower() not in ("0", "false", "no"):
+        assessments.assessor = assessments.Assessor(
+            SessionLocal, get_llm, interval=float(os.environ.get("ASSESSMENT_INTERVAL_S", "120")),
+        )
+        assessments.assessor.start()
     yield
+    if assessments.assessor is not None:
+        assessments.assessor.stop()
 
 
 app = FastAPI(title="Mire", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(profile_router)
 app.include_router(chat_router)
+app.include_router(assessments_router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,

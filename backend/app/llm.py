@@ -35,6 +35,12 @@ GEMINI_FALLBACK_MODELS = [
     for m in os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",")
     if m.strip()
 ]
+# Évaluation automatique des offres (volume élevé) : modèles les moins chers d'abord. Liste séparée par des virgules.
+GEMINI_EVAL_MODELS = [
+    m.strip()
+    for m in os.environ.get("GEMINI_EVAL_MODEL", "gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",")
+    if m.strip()
+]
 TIMEOUT_MS = 45_000
 OVERLOAD_CODES = {429, 500, 503, 504}
 QUOTA_COOLDOWN_S = 300  # un modèle hors quota est ignoré pendant 5 min (évite d'attendre sa réponse à chaque appel)
@@ -67,6 +73,8 @@ class LLM(Protocol):
     def extract_profile(self, text: str) -> ProfileData: ...
 
     def analyze_profile(self, profile_json: str) -> Any: ...  # -> analysis.ProfileAnalysis
+
+    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None) -> Any: ...
 
     def chat(
         self,
@@ -254,6 +262,16 @@ class GeminiClient:
 
         return self.structured(ANALYZE_INSTRUCTION, f"<profil>\n{profile_json}\n</profil>", ProfileAnalysis,
                                label="analyze_profile")
+
+    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None):
+        import json
+
+        from .assessments import EVALUATE_INSTRUCTION, EvaluationBatch
+
+        contents = (f"<profil>\n{profile_context}\n</profil>\n"
+                    f"<offres>\n{json.dumps(jobs, ensure_ascii=False)}\n</offres>")
+        return self.structured(EVALUATE_INSTRUCTION, contents, EvaluationBatch, label="evaluate_jobs",
+                               rounds=1, models=models or GEMINI_EVAL_MODELS)
 
     # --- Chat avec appel de fonctions -----------------------------------------
 

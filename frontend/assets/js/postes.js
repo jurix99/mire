@@ -1,23 +1,26 @@
-import { $, ICONS, STATUSES, api, attempt, boot, confirmDelete, html, logo, openForm, openJobDialog, refreshCounts, score, statusSelect, toast } from "./app.js";
+import {
+  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, html, logo, openForm, openJobDialog, refreshCounts,
+  score, statusSelect, toast,
+} from "./app.js";
 
 let jobs = [];
 let companies = [];
 const params = new URLSearchParams(location.search);
 let statusFilter = params.get("statut") ?? "";
+let pollTimer;
 
 function fields() {
   return [
     { name: "title", label: "Intitulé", required: true, full: true },
     { name: "company_id", label: "Entreprise", type: "select", required: true, options: companies.map((c) => [c.id, c.name]) },
-    { name: "score", label: "Score (0 à 10)", type: "number", step: "0.1", min: 0, max: 10 },
-    { name: "location", label: "Lieu", placeholder: "Paris · Hybride" },
+    { name: "location", label: "Lieu", placeholder: "Paris · Hybride · peu de déplacements" },
     { name: "category", label: "Catégorie", placeholder: "Platform / MLOps" },
-    { name: "seniority", label: "Expérience", placeholder: "5 ans" },
+    { name: "seniority", label: "Expérience demandée", placeholder: "5+ ans" },
     { name: "source", label: "Source", placeholder: "Welcome to the Jungle" },
     { name: "url", label: "Lien de l'offre", type: "url", full: true },
     { name: "stack", label: "Stack", full: true, placeholder: "Python, Kubernetes…" },
     { name: "summary", label: "Description de l'offre", type: "textarea", full: true, maxlength: 20000,
-      hint: "Collez le texte de l'annonce : il s'affiche dans la fiche du poste et sert à l'assistant." },
+      hint: "Collez le texte de l'annonce : il s'affiche dans la fiche du poste et sert à l'évaluation." },
   ];
 }
 
@@ -48,30 +51,41 @@ async function editJob(job) {
   }
 }
 
+/** Ligne sous le titre : pourquoi c'est intéressant, ou raison d'écart. */
+function subline(j) {
+  const a = j.assessment;
+  if (a?.exclusion && j.display_status === "ecartee") return html`<span class="small muted exclusion-line">${a.exclusion}</span>`;
+  if (a?.why) return html`<span class="small why-line">${a.why}</span>`;
+  return html`<span class="small muted">${[j.location, j.source].filter(Boolean).join(" · ")}</span>`;
+}
+
 const row = (j) => html`
-  <div class="job-row clickable" data-id="${j.id}">
+  <div class="job-row clickable ${j.display_status === "ecartee" ? "is-excluded" : ""}" data-id="${j.id}">
     ${logo(j.company)}
     <div style="min-width:0;display:grid;gap:2px">
       <button type="button" class="link-btn title" data-action="view" title="Voir l'offre">${j.title}</button>
-      <span class="small muted">${[j.location, j.source].filter(Boolean).join(" · ")}</span>
+      ${subline(j)}
     </div>
     <span class="col-company">${j.company.name}</span>
-    <span class="col-score">${score(j.score)}</span>
-    <span class="col-status">${statusSelect(j.status, `data-job="${j.id}"`)}</span>
+    <span class="col-score" title="${j.assessment?.manual_score != null ? "Note corrigée par vous" : "Note calculée selon votre profil"}">${score(j.score)}</span>
+    <span class="col-status">${statusSelect(j.display_status, `data-job="${j.id}"`)}</span>
     <span class="actions">
-      ${j.url ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre">${ICONS.link}</a>` : ""}
+      ${j.url ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
       <button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>
     </span>
   </div>`;
 
 function drawFilters() {
-  const counts = Object.fromEntries(STATUSES.map(([k]) => [k, 0]));
-  jobs.forEach((j) => counts[j.status]++);
+  const counts = {};
+  jobs.forEach((j) => (counts[j.display_status] = (counts[j.display_status] ?? 0) + 1));
+  const visible = jobs.length - (counts.ecartee ?? 0);
+  const chips = [...STATUSES, ...Object.entries(AUTO_LABEL)];
   $("#filters").innerHTML = html`
-    <button type="button" class="chip all" data-status="" aria-pressed="${!statusFilter}">Tous <span class="n">${jobs.length}</span></button>
-    ${STATUSES.filter(([k]) => counts[k] || k === statusFilter).map(([k, l]) => html`
+    <button type="button" class="chip all" data-status="" aria-pressed="${!statusFilter}"
+      title="Toutes les offres, sauf celles écartées automatiquement">Tous <span class="n">${visible}</span></button>
+    ${chips.filter(([k]) => counts[k] || k === statusFilter).map(([k, l]) => html`
       <button type="button" class="chip st-${k}" data-status="${k}" aria-pressed="${statusFilter === k}">
-        <span class="dot"></span>${l} <span class="n">${counts[k]}</span>
+        <span class="dot"></span>${l} <span class="n">${counts[k] ?? 0}</span>
       </button>`)}`.s;
 }
 
@@ -81,11 +95,64 @@ function draw() {
   const companyId = $("#company").value;
   const shown = jobs.filter(
     (j) =>
-      (!statusFilter || j.status === statusFilter) &&
+      (statusFilter ? j.display_status === statusFilter : j.display_status !== "ecartee") &&
       (!companyId || String(j.company.id) === companyId) &&
       (!q || [j.title, j.company.name, j.stack, j.category, j.location].some((v) => v?.toLowerCase().includes(q)))
   );
   $("#list").innerHTML = shown.length ? html`${shown.map(row)}`.s : html`<p class="empty">Aucun poste ne correspond.</p>`.s;
+}
+
+// --- Bandeau d'évaluation ---------------------------------------------------------
+
+function statusBar() {
+  let bar = $("#assess-bar");
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = "assess-bar";
+    bar.className = "assess-bar small";
+    const list = $("#list");
+    (list.closest(".card") ?? list).before(bar); // au-dessus du tableau
+  }
+  return bar;
+}
+
+async function drawAssessmentStatus() {
+  clearTimeout(pollTimer);
+  let st;
+  try {
+    st = await api("/assessments/status");
+  } catch {
+    return;
+  }
+  const bar = statusBar();
+  if (!st.enabled) {
+    bar.innerHTML = html`<span class="muted">Évaluation automatique désactivée : GEMINI_API_KEY n'est pas configurée.</span>`.s;
+    return;
+  }
+  if (!st.profile_ready) {
+    bar.innerHTML = html`<span>Remplissez <a href="/mon-profil">votre profil</a> pour que les offres soient notées selon vos critères.</span>`.s;
+    return;
+  }
+  bar.innerHTML = html`
+    <span>${st.pending
+      ? `${st.pending} offre${st.pending > 1 ? "s" : ""} en attente d'évaluation…`
+      : `Offres évaluées selon votre profil : ${st.kept} retenue${st.kept > 1 ? "s" : ""}, ${st.excluded} écartée${st.excluded > 1 ? "s" : ""}.`}</span>
+    ${st.pending ? html`<button type="button" class="btn ghost sm" data-run>Évaluer maintenant</button>` : ""}
+    ${st.last_error ? html`<span class="exclusion-line">Dernière erreur : ${st.last_error}</span>` : ""}`.s;
+  // Tant qu'il reste des offres à évaluer (tâche de fond), on rafraîchit régulièrement
+  if (st.pending) {
+    pollTimer = setTimeout(async () => {
+      if (!document.body.contains(bar)) return; // page quittée
+      const before = st.pending;
+      await drawAssessmentStatus();
+      if (before) await reloadJobs();
+    }, 8000);
+  }
+}
+
+async function reloadJobs() {
+  jobs = await api("/jobs");
+  draw();
 }
 
 async function reload() {
@@ -94,6 +161,7 @@ async function reload() {
   $("#company").innerHTML = html`<option value="">Toutes les entreprises</option>
     ${companies.map((c) => html`<option value="${c.id}" ${String(c.id) === current ? "selected" : ""}>${c.name}</option>`)}`.s;
   draw();
+  drawAssessmentStatus();
 }
 
 $("#search").addEventListener("input", draw);
@@ -108,6 +176,15 @@ $("#filters").addEventListener("click", (e) => {
   else url.searchParams.delete("statut");
   history.replaceState(null, "", url);
   draw();
+});
+$("main").addEventListener("click", async (e) => {
+  const run = e.target.closest("#assess-bar [data-run]");
+  if (!run) return;
+  run.disabled = true;
+  run.textContent = "Évaluation en cours…";
+  await attempt(() => api("/assessments/run", { method: "POST" })).catch(() => {});
+  await reloadJobs();
+  drawAssessmentStatus();
 });
 $("#list").addEventListener("click", (e) => {
   const rowEl = e.target.closest("[data-id]");
