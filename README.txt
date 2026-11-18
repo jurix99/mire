@@ -5,10 +5,17 @@ Architecture
 ------------------------------------------------------------------
   frontend/   HTML/CSS/JS sans build (modules ES), reprend le design de la maquette Framer
               - assets/app.css      styles + couleurs des statuts (variables --st-*)
-              - assets/js/app.js    code partagé : appels API, barre latérale, pastilles, logos, formulaires
+              - assets/js/app.js    code partagé : appels API, barre latérale, pastilles, logos, formulaires,
+                                    chat flottant de l'assistant
               - assets/js/<page>.js une page = un script
   backend/    FastAPI (projet uv) : connexion LinkedIn OpenID Connect, session, API JSON /api/...
               - app/models.py       tables (SQLAlchemy)
+              - app/services.py     fonctions métier partagées par l'API et les outils du chat
+              - app/profile.py      profil : schémas, fusion des imports, résumé pour le chat
+              - app/profile_api.py  /api/profile et imports (linkedin_export.py, pdf_import.py)
+              - app/llm.py          client Gemini (SDK google-genai)
+              - app/chat.py         /api/chat ; app/chat_tools.py : outils de l'assistant
+              - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau)
               - migrations/         migrations Alembic (appliquées automatiquement au démarrage)
               - app/seed.py         données de démonstration
   db          PostgreSQL 17 (volume Docker postgres-data)
@@ -19,6 +26,14 @@ Tables :
   jobs                  postes, rattachés à une entreprise
   applications          process de candidature : un utilisateur x un poste, avec statut
   application_events    historique des changements de statut
+  user_profiles         profil riche (1-1 avec users, créé à la volée) : identité pro, expériences, formation,
+                        compétences (points forts / à développer), préférences de recherche, règles
+                        « éviter / préférer », trace des imports. Sert de contexte à l'assistant.
+  profile_imports       imports de profil analysés, en attente de confirmation (24 h)
+  chat_conversations    conversations avec l'assistant (la plus récente est active)
+  chat_messages         messages (utilisateur / assistant) et outils appelés
+  chat_actions          écritures proposées par l'assistant, exécutées seulement après confirmation :
+                        sert aussi de journal (statut, résultat, date d'exécution)
 
 Statuts : nouveau, à postuler, postulé, relance, entretien, offre, refusé, abandonné.
 Un poste sans process est « nouveau » pour l'utilisateur. Couleurs : variables --st-* dans frontend/assets/app.css.
@@ -33,6 +48,11 @@ Lancer en local avec Docker (WSL) + connexion LinkedIn
 Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET / SESSION_SECRET
          (app LinkedIn avec le produit "Sign In with LinkedIn using OpenID Connect",
           URL de redirection : http://localhost:8080/auth/callback).
+         Assistant (facultatif) : GEMINI_API_KEY (https://aistudio.google.com/apikey),
+           GEMINI_MODEL (défaut gemini-3.8-flash), GEMINI_FALLBACK_MODEL (défaut gemini-3.5-flash-lite,
+           utilisé automatiquement si le modèle principal est saturé).
+           Sans clé : le bouton de chat est grisé, l'import PDF / texte est désactivé, le reste fonctionne.
+         Après modification de .env : docker compose up -d backend   (un simple restart ne relit pas .env)
 
 Lancer (dans WSL, depuis ce dossier) :
   docker compose up -d
@@ -57,6 +77,53 @@ Après modif de backend/pyproject.toml : docker compose run --rm --no-deps backe
 Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/me, /api/dashboard, /api/analytics, /api/statuses
          /api/companies[/{id}[/logo]], /api/jobs[/{id}[/status]], /api/applications[/{id}]
+         /api/profile                                 GET, PATCH (champs envoyés remplacés)
+         /api/profile/import/linkedin-export          POST, ZIP de l'export de données LinkedIn (20 Mo max)
+         /api/profile/import/pdf                      POST, PDF du profil ou CV (10 Mo max, via Gemini)
+         /api/profile/import/text                     POST {text}, texte collé (via Gemini)
+         /api/profile/import/{id}/apply               POST {accept: [champs]} applique l'aperçu ; DELETE /{id} l'abandonne
+         /api/chat/status, /api/chat/history          GET
+         /api/chat                                    POST {message}, réponse complète (pas de streaming)
+         /api/chat/reset                              POST, nouvelle conversation
+         /api/chat/actions/{id}/confirm | /cancel     POST, exécute ou abandonne une proposition
+
+Tests (depuis backend/, sans Docker) : uv run pytest
+  (sur le réseau de l'entreprise : UV_SYSTEM_CERTS=1 pour que uv accepte le proxy HTTPS)
+
+------------------------------------------------------------------
+Importer son profil LinkedIn
+------------------------------------------------------------------
+La connexion LinkedIn (OpenID Connect) ne donne que le nom, l'e-mail, la photo et la langue.
+LinkedIn ne fournit pas le profil complet aux applications, et Mire ne lit jamais linkedin.com.
+Depuis la page « Mon profil », bloc « Importer depuis LinkedIn » :
+  1. Export de données (recommandé, sans Gemini) :
+     LinkedIn > Moi > Préférences et confidentialité > Confidentialité des données >
+     Obtenir une copie de vos données > choisir Profil, Postes, Compétences, Formation, Langues
+     (ou l'archive complète) > Demander l'archive. Déposer le ZIP reçu par e-mail, sans le décompresser.
+     Fichiers lus : Profile.csv, Positions.csv, Skills.csv, Education.csv, Languages.csv (le reste est ignoré).
+     Le ZIP est lu en mémoire (limites de taille et de nombre de fichiers), jamais extrait sur disque.
+  2. PDF : sur votre profil LinkedIn, Plus > Enregistrer au format PDF (ou un CV). Texte extrait puis
+     structuré par Gemini.
+  3. Texte collé : même traitement que le PDF.
+Chaque import affiche un aperçu à cocher. Les ajouts sont cochés ; le remplacement d'une valeur déjà
+saisie ne l'est pas. Rien n'est supprimé : compétences, expériences et règles existantes sont gardées.
+
+------------------------------------------------------------------
+Assistant (chat Gemini)
+------------------------------------------------------------------
+Bouton en bas à droite sur toutes les pages. Contexte envoyé à Gemini : instruction système (rôle, règles,
+date du jour, résumé du profil) + les 20 derniers messages + la description des outils.
+  Lecture (exécutée directement) : get_profile, list_jobs, get_job, list_applications, get_dashboard
+  Écriture (proposition à confirmer) : update_profile, set_job_status, update_application, create_job
+Sécurité :
+  - les outils n'agissent que sur l'utilisateur connecté (son id vient de la session, jamais du modèle) ;
+  - aucun outil de suppression ;
+  - une écriture n'est exécutée qu'après clic sur « Confirmer » (recalculée sur les données à jour) ;
+    les changements de statut passent par application_events, comme dans l'API ;
+  - profil, postes et contenus importés sont présentés au modèle comme des données, pas des consignes ;
+  - 30 messages / 10 min par utilisateur, 4000 caractères par message ;
+  - la clé Gemini reste côté serveur ; les actions exécutées sont journalisées (table chat_actions,
+    logs « mire.chat.actions »).
 
 ------------------------------------------------------------------
 Ancien export Framer
