@@ -94,7 +94,7 @@ def _parse_month(value: str | None, end: bool = False) -> int | None:
     return int(m[1]) * 12 + month - 1
 
 
-INTERNSHIP = re.compile(r"(stage|stagiaire|intern|internship|alternan\w*|apprenti\w*)", re.IGNORECASE)
+INTERNSHIP = re.compile(r"\b(stage|stagiaire|intern|internship|alternan\w*|apprenti\w*)\b", re.IGNORECASE)
 
 
 def compute_years(experiences: list[Experience], today: date | None = None) -> float | None:
