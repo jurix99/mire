@@ -301,6 +301,7 @@ export async function renderShell() {
       <div class="row"><span class="muted">Prochain passage auto</span><span>Non configuré</span></div>
       <p class="small muted">Données de démonstration</p>
     </div>`.s;
+    mountChat();
   }
   try {
     await refreshCounts();
@@ -309,9 +310,18 @@ export async function renderShell() {
   }
 }
 
+let pageRender = null;
+
+/** Recharge les données de la page ouverte (ex. après une action confirmée dans le chat). */
+export async function refreshPage() {
+  const render = pageRender;
+  await Promise.allSettled([refreshCounts(), render?.()]);
+}
+
 /** Point d'entrée de chaque page. */
 export async function boot(render) {
   const main = $("main");
+  pageRender = render;
   renderShell();
   const done = (async () => {
     try {
@@ -325,6 +335,281 @@ export async function boot(render) {
   await Promise.race([done, new Promise((r) => setTimeout(r, 400))]);
   main.classList.add("ready");
   await done;
+}
+
+// --- Assistant (chat flottant, Gemini) ----------------------------------------
+// Bouton en bas à droite sur toutes les pages, panneau de conversation. Les écritures proposées par
+// l'assistant s'affichent en cartes « Confirmer / Annuler » ; rien n'est modifié sans confirmation.
+
+const CHAT_ICON = raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01"/></svg>`);
+const CLOSE_ICON = raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`);
+const RESET_ICON = raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></svg>`);
+const SEND_ICON = raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 2-7 20-4-9-9-4Z"/><path d="M22 2 11 13"/></svg>`);
+
+const ACTION_STATUS = {
+  pending: "En attente de confirmation",
+  confirmed: "Confirmé",
+  cancelled: "Annulé",
+  failed: "Échec",
+  expired: "Expiré",
+};
+const SUGGESTIONS = [
+  "Quels postes devrais-je regarder en priorité ?",
+  "Ajoute Kubernetes à mes compétences à développer",
+  "Où en sont mes process ?",
+];
+
+/**
+ * Markdown léger et sûr : le texte est d'abord entièrement échappé, puis seules quelques balises
+ * connues sont ajoutées (gras, italique, code, liens http(s) ou internes, listes, paragraphes).
+ */
+export function renderMarkdown(text) {
+  const inline = (s) => s
+    .replace(/`([^`\n]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*\n]+)\*\*/g, "<strong>$1</strong>")
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,;:!?]|$)/g, "$1<em>$2</em>")
+    .replace(/\[([^\]\n]+)\]\(((?:https?:\/\/|\/(?!\/))[^\s)]+)\)/g,
+      (_, label, url) => `<a href="${url}"${url.startsWith("/") ? "" : ' target="_blank" rel="noopener noreferrer"'}>${label}</a>`);
+  const blocks = [];
+  let list = null;
+  for (const line of esc(text).split("\n")) {
+    const item = /^\s*(?:[-*•]|\d+[.)])\s+(.*)$/.exec(line);
+    if (item) {
+      const tag = /^\s*\d/.test(line) ? "ol" : "ul";
+      if (!list || list.tag !== tag) blocks.push((list = { tag, items: [] }));
+      list.items.push(inline(item[1]));
+      continue;
+    }
+    list = null;
+    if (!line.trim()) blocks.push(null);
+    else if (typeof blocks.at(-1) === "string") blocks[blocks.length - 1] += `<br>${inline(line)}`;
+    else blocks.push(inline(line));
+  }
+  return blocks.filter(Boolean).map((b) =>
+    typeof b === "string" ? `<p>${b}</p>` : `<${b.tag}>${b.items.map((i) => `<li>${i}</li>`).join("")}</${b.tag}>`
+  ).join("");
+}
+
+const chat = { status: null, loaded: false, busy: false };
+
+function actionCard(a) {
+  const change = (c) => html`<li><span class="muted">${c.label} :</span>
+    ${c.before != null && c.before !== "" ? html`<s>${String(c.before)}</s> → ` : ""}${c.after != null ? String(c.after) : html`<em>retiré</em>`}</li>`;
+  return html`<div class="chat-action is-${a.status}" data-action="${a.id}">
+    <div class="chat-action-head"><strong>${a.summary}</strong><span class="chat-action-status">${ACTION_STATUS[a.status] ?? a.status}</span></div>
+    <ul>${a.changes.map(change)}</ul>
+    ${a.error ? html`<p class="small chat-error">${a.error}</p>` : ""}
+    ${a.status === "pending" ? html`<div class="chat-action-buttons">
+      <button type="button" class="btn sm" data-confirm="${a.id}">Confirmer</button>
+      <button type="button" class="btn ghost sm" data-cancel="${a.id}">Annuler</button>
+    </div>` : ""}
+  </div>`;
+}
+
+function messageHtml(m) {
+  if (m.role === "user") return html`<div class="chat-msg user"><div class="bubble">${m.content}</div></div>`;
+  return html`<div class="chat-msg assistant">
+    <div class="bubble md">${raw(renderMarkdown(m.content))}</div>
+    ${m.actions?.length ? html`<div class="chat-actions">${m.actions.map(actionCard)}</div>` : ""}
+  </div>`;
+}
+
+function chatLog() { return $("#chat-panel .chat-log"); }
+
+function scrollChat() {
+  const log = chatLog();
+  log.scrollTop = log.scrollHeight;
+}
+
+function appendMessage(m) {
+  $(".chat-empty", chatLog())?.remove();
+  chatLog().insertAdjacentHTML("beforeend", messageHtml(m).s);
+  scrollChat();
+}
+
+function renderEmptyChat() {
+  chatLog().innerHTML = html`<div class="chat-empty">
+    <p>Bonjour ! Je peux consulter et mettre à jour votre profil, vos postes et vos process.
+    Je vous demande toujours confirmation avant de modifier quoi que ce soit.</p>
+    <div class="chat-suggestions">${SUGGESTIONS.map((s) => html`<button type="button" class="chip" data-suggest="${s}">${s}</button>`)}</div>
+  </div>`.s;
+}
+
+async function loadHistory() {
+  chat.loaded = true;
+  try {
+    const { messages } = await api("/chat/history");
+    if (!messages.length) return renderEmptyChat();
+    chatLog().innerHTML = messages.map((m) => messageHtml(m).s).join("");
+    scrollChat();
+  } catch (err) {
+    chat.loaded = false;
+    chatLog().innerHTML = html`<p class="chat-error small">${err.message}</p>`.s;
+  }
+}
+
+function setBusy(busy) {
+  chat.busy = busy;
+  const panel = $("#chat-panel");
+  $("textarea", panel).disabled = busy;
+  $(".chat-send", panel).disabled = busy;
+  $(".chat-typing", panel)?.remove();
+  if (busy) {
+    chatLog().insertAdjacentHTML("beforeend",
+      `<div class="chat-msg assistant chat-typing" aria-label="L'assistant réfléchit"><div class="bubble"><span></span><span></span><span></span></div></div>`);
+    scrollChat();
+  }
+}
+
+async function sendMessage(text) {
+  const message = text.trim();
+  if (!message || chat.busy) return;
+  const input = $("#chat-panel textarea");
+  input.value = "";
+  updateCounter();
+  appendMessage({ role: "user", content: message });
+  setBusy(true);
+  try {
+    const res = await api("/chat", { method: "POST", body: { message } });
+    setBusy(false);
+    appendMessage(res.message);
+  } catch (err) {
+    setBusy(false);
+    chatLog().insertAdjacentHTML("beforeend", html`<p class="chat-error small">${err.message}</p>`.s);
+    scrollChat();
+    if (!input.value) input.value = message; // le message n'est pas perdu
+  } finally {
+    input.focus();
+  }
+}
+
+async function handleAction(id, verb) {
+  const card = $(`.chat-action[data-action="${id}"]`, chatLog());
+  $$("button", card).forEach((b) => (b.disabled = true));
+  try {
+    const res = await api(`/chat/actions/${id}/${verb}`, { method: "POST" });
+    card.outerHTML = actionCard(res.action).s;
+    if (verb === "confirm") {
+      toast("Modification enregistrée");
+      await refreshPage();
+    }
+  } catch (err) {
+    toast(err.message, true);
+    $$("button", card).forEach((b) => (b.disabled = false));
+    if (/déjà été traitée|expirée/.test(err.message)) loadHistory();
+  }
+}
+
+function updateCounter() {
+  const panel = $("#chat-panel");
+  const input = $("textarea", panel);
+  const max = chat.status?.max_message_chars ?? 4000;
+  const left = max - input.value.length;
+  const counter = $(".chat-counter", panel);
+  counter.textContent = left < 500 ? `${left} caractères restants` : "";
+  // Hauteur automatique (jusqu'à ~6 lignes)
+  input.style.height = "auto";
+  input.style.height = `${Math.min(input.scrollHeight, 150)}px`;
+}
+
+function openChat(open = true) {
+  const panel = $("#chat-panel");
+  const fab = $("#chat-fab");
+  panel.hidden = !open;
+  fab.setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("chat-open", open);
+  if (open) {
+    if (!chat.loaded) loadHistory();
+    $("textarea", panel).focus();
+  } else {
+    fab.focus();
+  }
+}
+
+async function mountChat() {
+  if ($("#chat-fab")) return;
+  const fab = document.createElement("button");
+  fab.id = "chat-fab";
+  fab.type = "button";
+  fab.className = "chat-fab";
+  fab.setAttribute("aria-controls", "chat-panel");
+  fab.setAttribute("aria-expanded", "false");
+  fab.setAttribute("aria-label", "Assistant");
+  fab.innerHTML = CHAT_ICON.s;
+
+  const panel = document.createElement("section");
+  panel.id = "chat-panel";
+  panel.className = "chat-panel";
+  panel.hidden = true;
+  panel.setAttribute("aria-label", "Assistant Mire");
+  panel.innerHTML = html`
+    <header class="chat-head">
+      <div><strong>Assistant</strong><span class="small muted chat-model"></span></div>
+      <div class="chat-tools">
+        <button type="button" class="icon-btn" data-reset title="Nouvelle conversation" aria-label="Nouvelle conversation">${RESET_ICON}</button>
+        <button type="button" class="icon-btn" data-close title="Fermer" aria-label="Fermer l'assistant">${CLOSE_ICON}</button>
+      </div>
+    </header>
+    <div class="chat-log" aria-live="polite"></div>
+    <form class="chat-form">
+      <textarea rows="1" maxlength="4000" placeholder="Votre message… (Entrée pour envoyer)" aria-label="Message pour l'assistant"></textarea>
+      <button type="submit" class="chat-send" aria-label="Envoyer">${SEND_ICON}</button>
+      <span class="chat-counter small muted"></span>
+    </form>`.s;
+  document.body.append(fab, panel);
+
+  fab.addEventListener("click", () => {
+    if (chat.status && !chat.status.enabled) {
+      toast("Assistant indisponible : la clé Gemini (GEMINI_API_KEY) n'est pas configurée sur le serveur.", true);
+      return;
+    }
+    openChat(panel.hidden);
+  });
+  // Échap ferme le panneau (sauf si un formulaire <dialog> est ouvert par-dessus : Échap ferme d'abord celui-ci)
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && !panel.hidden && !document.querySelector("dialog[open]")) openChat(false);
+  });
+  const input = $("textarea", panel);
+  input.addEventListener("input", updateCounter);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      sendMessage(input.value);
+    }
+  });
+  $("form", panel).addEventListener("submit", (e) => {
+    e.preventDefault();
+    sendMessage(input.value);
+  });
+  panel.addEventListener("click", async (e) => {
+    const t = e.target.closest("button");
+    if (!t) return;
+    if (t.matches("[data-close]")) openChat(false);
+    else if (t.matches("[data-suggest]")) sendMessage(t.dataset.suggest);
+    else if (t.matches("[data-confirm]")) handleAction(t.dataset.confirm, "confirm");
+    else if (t.matches("[data-cancel]")) handleAction(t.dataset.cancel, "cancel");
+    else if (t.matches("[data-reset]") && !chat.busy) {
+      if (!window.confirm("Commencer une nouvelle conversation ? L'historique actuel ne sera plus affiché.")) return;
+      await attempt(() => api("/chat/reset", { method: "POST" }));
+      renderEmptyChat();
+    }
+  });
+
+  try {
+    chat.status = await api("/chat/status");
+  } catch {
+    chat.status = { enabled: false };
+  }
+  if (chat.status.enabled) {
+    fab.title = "Assistant";
+    $(".chat-model", panel).textContent = chat.status.model ? ` · ${chat.status.model}` : "";
+    input.maxLength = chat.status.max_message_chars;
+  } else {
+    fab.classList.add("disabled");
+    fab.setAttribute("aria-disabled", "true");
+    fab.title = "Assistant indisponible : GEMINI_API_KEY n'est pas configurée sur le serveur";
+    fab.setAttribute("aria-label", fab.title);
+  }
 }
 
 // --- Navigation sans rechargement ------------------------------------------

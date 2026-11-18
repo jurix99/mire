@@ -150,9 +150,13 @@ board.addEventListener("click", (e) => {
 
 $("#add").addEventListener("click", addApp);
 
+let firstLoad = true;
 boot(async () => {
   await reload();
-  // Lien direct vers un process depuis le tableau de bord (#process-12)
+  // Lien direct vers un process depuis le tableau de bord (#process-12), au premier affichage seulement
+  // (la page est aussi rechargée après une action confirmée dans le chat)
+  if (!firstLoad) return;
+  firstLoad = false;
   const target = location.hash && document.getElementById(location.hash.slice(1));
   if (target) {
     target.scrollIntoView({ block: "center", inline: "center" });
