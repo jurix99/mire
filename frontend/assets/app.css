@@ -348,6 +348,30 @@ dialog::backdrop { background: rgba(26, 26, 26, .35); }
 .field .hint { font-weight: 400; color: var(--muted); font-size: 12px; }
 .form-error { color: #b91c1c; font-size: 13px; }
 
+/* Fiche d'un poste */
+.clickable { cursor: pointer; }
+.job-row.clickable:hover, .row-item.clickable:hover .title { color: var(--accent); }
+.link-btn { border: 0; padding: 0; background: none; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.link-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+.job-row .link-btn.title, .row-item .link-btn.title { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+dialog.job-dialog { width: min(760px, calc(100vw - 32px)); }
+.job-head { display: flex; align-items: flex-start; gap: 14px; }
+.job-head .grow { flex: 1; min-width: 0; display: grid; gap: 4px; }
+.job-head h2 { font-size: 24px; letter-spacing: -.03em; overflow-wrap: anywhere; }
+.job-head .icon-btn { font-size: 22px; line-height: 1; }
+.job-dialog .meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.job-section { display: grid; gap: 10px; padding-top: 14px; border-top: 1px solid var(--border); }
+.job-text { font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }
+.job-section .row-item .grow { justify-items: start; }
+dialog.job-dialog[open] { display: flex; flex-direction: column; }
+dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
+.job-dialog .dialog-foot .btn svg { width: 14px; height: 14px; }
+@media (max-width: 560px) {
+  dialog.job-dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 0; margin: 0; }
+  dialog.job-dialog .dialog-body { max-height: calc(100dvh - 72px); }
+  .job-dialog .dialog-foot { flex-wrap: wrap; }
+}
+
 .timeline { display: grid; gap: 8px; font-size: 13px; }
 .timeline .ev { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 

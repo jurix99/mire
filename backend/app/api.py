@@ -33,6 +33,7 @@ from .schemas import (
     CompanyPatch,
     DashboardOut,
     FunnelStep,
+    JobDetailOut,
     JobIn,
     JobOut,
     JobPatch,
@@ -184,6 +185,14 @@ def refresh_company_logo(company_id: int, db: DB) -> Response:
 @router.get("/jobs")
 def list_jobs(db: DB, user: Me, company_id: int | None = None) -> list[JobOut]:
     return services.list_jobs(db, user, company_id=company_id)
+
+
+@router.get("/jobs/{job_id}")
+def get_job(job_id: int, db: DB, user: Me) -> JobDetailOut:
+    """Détail d'un poste (contenu de l'offre) et process de l'utilisateur pour ce poste, s'il existe."""
+    job = services.get_job(db, user, job_id)
+    app = services.load_application(db, job.application_id, user) if job.application_id else None
+    return JobDetailOut(**job.model_dump(), application=ApplicationOut.model_validate(app) if app else None)
 
 
 @router.post("/jobs", status_code=201)

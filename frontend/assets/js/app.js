@@ -247,6 +247,90 @@ function fieldHtml(f, value) {
 
 export const confirmDelete = (what) => window.confirm(`Supprimer ${what} ? Cette action est définitive.`);
 
+// --- Fiche d'un poste (contenu de l'offre) ------------------------------------
+
+const httpUrl = (u) => (u && /^https?:\/\//i.test(u) ? u : null);
+
+/**
+ * Ouvre la fiche d'un poste dans un <dialog> : contenu de l'offre, stack, et process de l'utilisateur.
+ * onEdit(job) : facultatif, ajoute un bouton « Modifier » (la fiche se ferme puis onEdit est appelé).
+ */
+export async function openJobDialog(jobId, { onEdit } = {}) {
+  const dlg = document.createElement("dialog");
+  dlg.className = "job-dialog";
+  dlg.setAttribute("aria-label", "Détail du poste");
+  dlg.innerHTML = `<div class="dialog-body"><p class="muted small">Chargement…</p></div>`;
+  document.body.append(dlg);
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.addEventListener("click", (e) => { if (e.target === dlg) dlg.close(); }); // clic sur le fond
+  dlg.showModal();
+
+  let job;
+  try {
+    job = await api(`/jobs/${jobId}`);
+  } catch (err) {
+    dlg.close();
+    toast(err.message, true);
+    return;
+  }
+  const stack = (job.stack ?? "").split(/[,;·\n]/).map((s) => s.trim()).filter(Boolean);
+  const meta = [job.location, job.seniority, job.category].filter(Boolean).join(" · ");
+  const url = httpUrl(job.url);
+  const app = job.application;
+  const appRows = app ? [
+    ["Statut", pill(app.status)],
+    ["Candidature", app.applied_on ? fmtDate(app.applied_on) : ""],
+    ["Prochaine étape", [app.next_step, app.next_step_date ? `le ${fmtDate(app.next_step_date)}` : ""].filter(Boolean).join(" ")],
+  ].filter(([, v]) => v) : [];
+
+  dlg.innerHTML = html`
+    <div class="dialog-body">
+      <div class="job-head">
+        ${logo(job.company, "lg")}
+        <div class="grow">
+          <h2>${job.title}</h2>
+          <p class="muted small">${job.company.name}${meta ? ` · ${meta}` : ""}</p>
+        </div>
+        <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
+      </div>
+      <div class="meta">
+        ${pill(job.status)}${score(job.score)}
+        ${job.source ? html`<span class="small muted">Source : ${job.source}</span>` : ""}
+      </div>
+      ${stack.length ? html`<div class="tags">${stack.map((s) => html`<span class="tag">${s}</span>`)}</div>` : ""}
+      <section class="job-section">
+        <p class="label">// L'offre</p>
+        ${job.summary
+          ? html`<div class="job-text prewrap">${job.summary}</div>`
+          : html`<p class="muted small">Pas de description enregistrée pour ce poste.${url ? " Consultez l'offre originale." : ""}</p>`}
+      </section>
+      ${app ? html`<section class="job-section">
+        <p class="label">// Mon process</p>
+        <div class="rows">${appRows.map(([k, v]) => html`
+          <div class="row-item"><span class="muted small" style="min-width:120px">${k}</span><span class="grow">${v}</span></div>`)}
+        </div>
+        ${app.notes ? html`<div class="job-text prewrap small">${app.notes}</div>` : ""}
+      </section>` : ""}
+      <p class="small muted">Ajouté le ${fmtDate(job.created_at)}</p>
+    </div>
+    <div class="dialog-foot">
+      ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Voir l'offre originale ${ICONS.link}</a>` : ""}
+      <div class="right">
+        ${onEdit ? html`<button type="button" class="btn ghost" data-edit>Modifier</button>` : ""}
+        <button type="button" class="btn" data-close>Fermer</button>
+      </div>
+    </div>`.s;
+
+  dlg.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) dlg.close();
+    if (e.target.closest("[data-edit]")) {
+      dlg.close();
+      onEdit(job);
+    }
+  });
+  $("[data-close]", dlg).focus();
+}
+
 // --- Barre latérale ---------------------------------------------------------
 
 const NAV = [

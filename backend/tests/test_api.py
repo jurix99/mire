@@ -42,3 +42,18 @@ def test_dashboard(alice, catalog, as_user):
     data = as_user(alice).get("/api/dashboard").json()
     assert data["stats"]["jobs"] == 3
     assert data["priority_jobs"][0]["title"] == "Backend Engineer"
+
+
+def test_get_job_detail_with_own_application_only(alice, bob, catalog, as_user):
+    job = catalog["jobs"][0]
+    alice_client = as_user(alice)
+    app_id = alice_client.put(f"/api/jobs/{job.id}/status", json={"status": "entretien"}).json()["application_id"]
+    alice_client.patch(f"/api/applications/{app_id}", json={"notes": "Note privée"})
+
+    data = alice_client.get(f"/api/jobs/{job.id}").json()
+    assert data["title"] == "Backend Engineer" and data["stack"] == "Python, PostgreSQL"
+    assert data["application"]["notes"] == "Note privée"
+
+    bob_data = as_user(bob).get(f"/api/jobs/{job.id}").json()
+    assert bob_data["status"] == "nouveau" and bob_data["application"] is None
+    assert as_user(bob).get("/api/jobs/9999").status_code == 404

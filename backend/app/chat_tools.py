@@ -167,7 +167,7 @@ def _read(db: Session, user: User, name: str, args: dict) -> Any:
             job = services.get_job(db, user, int(args["job_id"]))
             out = _job_row(job) | _compact({
                 "url": job.url, "seniority": job.seniority, "category": job.category, "source": job.source,
-                "stack": job.stack, "summary": _short(job.summary, 2000),
+                "stack": job.stack, "summary": _short(job.summary, 4000),
             })
             if job.application_id:
                 out["application"] = _app_row(services.load_application(db, job.application_id, user))

@@ -1,4 +1,4 @@
-import { $, api, attempt, boot, daysUntil, fmtDate, fmtMoney, fmtToday, html, loadMe, logo, pill, refreshCounts, score, statusSelect } from "./app.js";
+import { $, api, attempt, boot, daysUntil, fmtDate, fmtMoney, fmtToday, html, loadMe, logo, openJobDialog, pill, refreshCounts, score, statusSelect } from "./app.js";
 
 const companyCard =(c) => html`
   <article class="card" style="display:grid;gap:14px;align-content:start">
@@ -44,10 +44,10 @@ async function render() {
 
   $("#priority").innerHTML = data.priority_jobs.length
     ? html`${data.priority_jobs.map((j) => html`
-        <div class="row-item">
+        <div class="row-item clickable" data-job-id="${j.id}">
           ${logo(j.company)}
           <div class="grow">
-            <span class="title">${j.title}</span>
+            <button type="button" class="link-btn title" title="Voir l'offre">${j.title}</button>
             <span class="muted small">${j.company.name}${j.location ? ` · ${j.location}` : ""}</span>
           </div>
           ${score(j.score)}
@@ -69,6 +69,13 @@ async function render() {
 
   $("#fundings").innerHTML = html`${data.recent_fundings.map(companyCard)}`.s;
 }
+
+// Clic sur un poste prioritaire (hors sélecteur de statut) : fiche du poste avec le contenu de l'offre
+$("main").addEventListener("click", (e) => {
+  const rowEl = e.target.closest("[data-job-id]");
+  if (!rowEl || e.target.closest("select")) return;
+  openJobDialog(Number(rowEl.dataset.jobId));
+});
 
 // Changement de statut directement depuis le tableau de bord
 // (écouteur sur <main> : il disparaît avec la page lors de la navigation sans rechargement)

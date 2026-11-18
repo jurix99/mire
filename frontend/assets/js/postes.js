@@ -1,4 +1,4 @@
-import { $, ICONS, STATUSES, api, attempt, boot, confirmDelete, html, logo, openForm, refreshCounts, score, statusSelect, toast } from "./app.js";
+import { $, ICONS, STATUSES, api, attempt, boot, confirmDelete, html, logo, openForm, openJobDialog, refreshCounts, score, statusSelect, toast } from "./app.js";
 
 let jobs = [];
 let companies = [];
@@ -16,7 +16,8 @@ function fields() {
     { name: "source", label: "Source", placeholder: "Welcome to the Jungle" },
     { name: "url", label: "Lien de l'offre", type: "url", full: true },
     { name: "stack", label: "Stack", full: true, placeholder: "Python, Kubernetes…" },
-    { name: "summary", label: "Résumé", type: "textarea", full: true },
+    { name: "summary", label: "Description de l'offre", type: "textarea", full: true, maxlength: 20000,
+      hint: "Collez le texte de l'annonce : il s'affiche dans la fiche du poste et sert à l'assistant." },
   ];
 }
 
@@ -48,10 +49,10 @@ async function editJob(job) {
 }
 
 const row = (j) => html`
-  <div class="job-row" data-id="${j.id}">
+  <div class="job-row clickable" data-id="${j.id}">
     ${logo(j.company)}
     <div style="min-width:0;display:grid;gap:2px">
-      <span class="title">${j.title}</span>
+      <button type="button" class="link-btn title" data-action="view" title="Voir l'offre">${j.title}</button>
       <span class="small muted">${[j.location, j.source].filter(Boolean).join(" · ")}</span>
     </div>
     <span class="col-company">${j.company.name}</span>
@@ -109,8 +110,13 @@ $("#filters").addEventListener("click", (e) => {
   draw();
 });
 $("#list").addEventListener("click", (e) => {
-  const btn = e.target.closest("[data-action=edit]");
-  if (btn) editJob(jobs.find((j) => j.id === Number(btn.closest("[data-id]").dataset.id)));
+  const rowEl = e.target.closest("[data-id]");
+  if (!rowEl) return;
+  const job = jobs.find((j) => j.id === Number(rowEl.dataset.id));
+  if (e.target.closest("[data-action=edit]")) return editJob(job);
+  // Clic n'importe où sur la ligne (hors statut, lien et boutons) : fiche du poste avec le contenu de l'offre
+  if (e.target.closest("select, a, button:not([data-action=view])")) return;
+  openJobDialog(job.id, { onEdit: () => editJob(job) });
 });
 $("#list").addEventListener("change", async (e) => {
   const sel = e.target.closest("select[data-job]");

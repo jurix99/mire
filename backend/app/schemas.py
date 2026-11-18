@@ -33,6 +33,7 @@ def _blank_to_none(value: str | None) -> str | None:
 
 HttpUrl = Annotated[str | None, Field(default=None, max_length=1000), AfterValidator(_http_url)]
 Text = Annotated[str | None, Field(default=None, max_length=5000), AfterValidator(_blank_to_none)]
+JobDescription = Annotated[str | None, Field(default=None, max_length=20000), AfterValidator(_blank_to_none)]
 ShortText = Annotated[str | None, Field(default=None, max_length=200), AfterValidator(_blank_to_none)]
 
 
@@ -127,7 +128,7 @@ class JobPatch(BaseModel):
     seniority: ShortText
     stack: Text
     source: ShortText
-    summary: Text
+    summary: JobDescription  # texte de l'annonce, affiché dans la fiche du poste
     score: Annotated[float | None, Field(default=None, ge=0, le=10)]
 
 
@@ -242,3 +243,9 @@ class AnalyticsOut(BaseModel):
     funnel: list[FunnelStep]
     by_company: list[CompanyActivity]
     weekly: list[WeekActivity]
+
+
+class JobDetailOut(JobOut):
+    """GET /api/jobs/{id} : poste + process de l'utilisateur (None s'il n'en a pas)."""
+
+    application: ApplicationOut | None = None
