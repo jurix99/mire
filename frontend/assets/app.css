@@ -292,6 +292,41 @@ img { display: block; }
 .legend { display: grid; gap: 10px; }
 .legend .item { display: flex; align-items: center; gap: 12px; font-size: 14px; }
 
+.prewrap { white-space: pre-wrap; }
+.block { display: block; }
+.clamp { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; white-space: pre-line; }
+.btn:disabled, .btn.disabled { opacity: .45; cursor: not-allowed; }
+
+.inline-add { display: flex; gap: 8px; flex-wrap: wrap; }
+.inline-add input { flex: 1 1 180px; }
+.inline-add select { flex: 0 0 auto; }
+
+.skill-group { display: grid; gap: 8px; }
+.tag.removable { display: inline-flex; align-items: center; padding: 0; overflow: hidden; }
+.tag.removable.strong { background: var(--accent-soft); border-color: #c7d2fe; color: var(--accent); }
+.tag-main, .tag-x { border: 0; background: none; color: inherit; cursor: pointer; font-size: 12px; }
+.tag-main { padding: 3px 4px 3px 9px; }
+.tag-x { padding: 3px 8px 3px 4px; font-size: 14px; line-height: 1; opacity: .6; }
+.tag-x:hover { opacity: 1; color: #b91c1c; }
+
+.guide { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 10px 14px; background: var(--bg); }
+.guide summary { cursor: pointer; font-weight: 500; font-size: 14px; }
+.guide ol { margin: 10px 0 2px; padding-left: 20px; display: grid; gap: 6px; }
+.import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.import-preview { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--white); }
+.changes { display: grid; gap: 4px; max-height: 420px; overflow-y: auto; }
+.change { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); cursor: pointer; }
+.change:first-child { border-top: 0; }
+.change input { margin-top: 4px; }
+.change .grow { display: grid; gap: 4px; justify-items: start; min-width: 0; overflow-wrap: anywhere; }
+.change ul { margin: 0; padding-left: 18px; }
+
+/* Cases à cocher dans les formulaires */
+fieldset.field { border: 0; padding: 0; margin: 0; min-width: 0; }
+fieldset.field legend { padding: 0; margin-bottom: 6px; }
+.check-row { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-weight: 400; font-size: 14px; cursor: pointer; }
+
 /* --- Formulaires (dialog) -------------------------------------------------- */
 
 dialog {

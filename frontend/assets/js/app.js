@@ -149,7 +149,8 @@ export async function attempt(fn, okMessage) {
 
 /**
  * Ouvre un formulaire et résout avec les valeurs saisies (null si annulé).
- * fields : [{ name, label, type: text|url|number|date|textarea|select|file, options: [[v, l]], required, full, hint, step, min, max }]
+ * fields : [{ name, label, type: text|url|number|date|textarea|select|checks|file, options: [[v, l]], required, full, hint, step, min, max, maxlength }]
+ *   (checks : cases à cocher, la valeur renvoyée est un tableau)
  * onSubmit(values) : appelé avant fermeture ; une erreur levée s'affiche dans le formulaire.
  * extra : contenu HTML ajouté sous les champs ; danger : { label, onClick } pour un bouton de suppression.
  */
@@ -192,7 +193,8 @@ export function openForm({ title, fields, values = {}, submitLabel = "Enregistre
       const out = {};
       for (const f of fields) {
         const input = form.elements[f.name];
-        if (f.type === "file") out[f.name] = input.files[0] ?? null;
+        if (f.type === "checks") out[f.name] = $$(`input[name="${f.name}"]:checked`, form).map((i) => i.value);
+        else if (f.type === "file") out[f.name] = input.files[0] ?? null;
         else if (f.type === "number") out[f.name] = input.value === "" ? null : Number(input.value);
         else out[f.name] = input.value.trim() === "" ? null : input.value.trim();
       }
@@ -216,7 +218,16 @@ export function openForm({ title, fields, values = {}, submitLabel = "Enregistre
 
 function fieldHtml(f, value) {
   const id = `f-${f.name}`;
-  const common = raw(`id="${id}" name="${esc(f.name)}" ${f.required ? "required" : ""}`);
+  if (f.type === "checks") {
+    const selected = new Set(value ?? []);
+    return html`<fieldset class="field checks ${f.full ? "full" : ""}"><legend>${f.label}</legend>
+      <div class="check-row">${f.options.map(([v, l]) => html`<label class="check">
+        <input type="checkbox" name="${f.name}" value="${v}" ${raw(selected.has(v) ? "checked" : "")}> ${l}</label>`)}</div>
+      ${f.hint ? html`<span class="hint">${f.hint}</span>` : ""}
+    </fieldset>`;
+  }
+  const extra = f.maxlength ? ` maxlength="${Number(f.maxlength)}"` : "";
+  const common = raw(`id="${id}" name="${esc(f.name)}" ${f.required ? "required" : ""}${extra}`);
   let input;
   if (f.type === "textarea") input = html`<textarea class="input" ${common}>${value ?? ""}</textarea>`;
   else if (f.type === "select")
