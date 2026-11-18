@@ -11,11 +11,16 @@ Architecture
   backend/    FastAPI (projet uv) : connexion LinkedIn OpenID Connect, session, API JSON /api/...
               - app/models.py       tables (SQLAlchemy)
               - app/services.py     fonctions métier partagées par l'API et les outils du chat
-              - app/profile.py      profil : schémas, fusion des imports, résumé pour le chat
-              - app/profile_api.py  /api/profile et imports (linkedin_export.py, pdf_import.py)
+              - app/profile.py      profil : schémas (règles, barème…), fusion, résumé pour le chat et la notation
+              - app/proposals.py    propositions de modification du profil, validées élément par élément
+              - app/profile_api.py  /api/profile, imports (linkedin_export.py, pdf_import.py), analyse (analysis.py)
+              - app/assessments.py  évaluation automatique des offres par utilisateur (+ tâche de fond)
+              - app/feedback.py     retours J'aime / Pas intéressé ; rules_synthesis.py : synthèse des règles
               - app/llm.py          client Gemini (SDK google-genai)
               - app/chat.py         /api/chat ; app/chat_tools.py : outils de l'assistant
               - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau)
+              - scripts/eval_reference.py  évaluation de référence avec le vrai Gemini (voir plus bas)
+  docs/       processus de recherche d'offres (processus-recherche.md) et exemple de profil complet
               - migrations/         migrations Alembic (appliquées automatiquement au démarrage)
               - app/seed.py         données de démonstration
   db          PostgreSQL 17 (volume Docker postgres-data)
@@ -26,17 +31,23 @@ Tables :
   jobs                  postes, rattachés à une entreprise
   applications          process de candidature : un utilisateur x un poste, avec statut
   application_events    historique des changements de statut
-  user_profiles         profil riche (1-1 avec users, créé à la volée) : identité pro, expériences, formation,
-                        compétences (points forts / à développer), préférences de recherche, règles
-                        « éviter / préférer », trace des imports. Sert de contexte à l'assistant.
-  profile_imports       imports de profil analysés, en attente de confirmation (24 h)
+  user_profiles         profil riche (1-1 avec users, créé à la volée) : identité pro, positionnement,
+                        expériences, formation, compétences (points forts / à développer), préférences
+                        (dont déplacements), règles « éviter / préférer » (origine, exemples, active),
+                        entreprises exclues, offres de référence, barème, version (-> réévaluation)
+  profile_imports       propositions en attente (import, analyse, synthèse des règles), validées élément
+                        par élément (24 h)
+  job_assessments       évaluation CALCULÉE d'une offre pour un utilisateur : note /10, détail par critère,
+                        verdict (nouveau / écartée), raison, pourquoi, compétences ; note corrigée à la main
+  job_feedback          retours J'aime / Pas intéressé (raisons, commentaire), pour la synthèse des règles
   chat_conversations    conversations avec l'assistant (la plus récente est active)
   chat_messages         messages (utilisateur / assistant) et outils appelés
   chat_actions          écritures proposées par l'assistant, exécutées seulement après confirmation :
                         sert aussi de journal (statut, résultat, date d'exécution)
 
-Statuts : nouveau, à postuler, postulé, relance, entretien, offre, refusé, abandonné.
-Un poste sans process est « nouveau » pour l'utilisateur. Couleurs : variables --st-* dans frontend/assets/app.css.
+Statuts posés par l'utilisateur : nouveau, à regarder, postulé, relance, entretien, offre, refusé,
+pas intéressé, abandonné. Statut affiché : celui posé par l'utilisateur, sinon le verdict de l'évaluation
+(« Nouveau » ou « Écartée (auto) »). Couleurs : variables --st-* dans frontend/assets/app.css.
 
 Logos : récupérés par le backend depuis "URL du logo" si renseignée, sinon depuis le favicon du site web
 (services Google puis DuckDuckGo : seul le domaine de l'entreprise leur est envoyé), puis mis en cache en base.
@@ -49,9 +60,12 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
          (app LinkedIn avec le produit "Sign In with LinkedIn using OpenID Connect",
           URL de redirection : http://localhost:8080/auth/callback).
          Assistant (facultatif) : GEMINI_API_KEY (https://aistudio.google.com/apikey),
-           GEMINI_MODEL (défaut gemini-3.8-flash), GEMINI_FALLBACK_MODEL (défaut gemini-3.5-flash-lite,
-           utilisé automatiquement si le modèle principal est saturé).
-           Sans clé : le bouton de chat est grisé, l'import PDF / texte est désactivé, le reste fonctionne.
+           GEMINI_MODEL (défaut gemini-3.8-flash), GEMINI_FALLBACK_MODEL (liste, défaut
+           gemini-3.5-flash-lite,gemini-3.1-flash-lite : utilisés si le précédent est saturé ou hors quota),
+           GEMINI_EVAL_MODEL (liste, notation des offres, modèles les moins chers d'abord),
+           ASSESSMENT_WORKER (true/false, tâche de fond d'évaluation), ASSESSMENT_INTERVAL_S (défaut 120).
+           Sans clé : chat grisé, import PDF / texte, analyse et évaluation automatique désactivés ;
+           le reste fonctionne.
          Après modification de .env : docker compose up -d backend   (un simple restart ne relit pas .env)
 
 Lancer (dans WSL, depuis ce dossier) :
@@ -81,14 +95,25 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/profile/import/linkedin-export          POST, ZIP de l'export de données LinkedIn (20 Mo max)
          /api/profile/import/pdf                      POST, PDF du profil ou CV (10 Mo max, via Gemini)
          /api/profile/import/text                     POST {text}, texte collé (via Gemini)
-         /api/profile/import/{id}/apply               POST {accept: [champs]} applique l'aperçu ; DELETE /{id} l'abandonne
+         /api/profile/proposals/{id}                  GET ; DELETE l'abandonne
+         /api/profile/proposals/{id}/apply            POST {accept: [ids d'éléments]} (absent : éléments cochés)
+         /api/profile/analyze                         POST, déductions sur le profil -> proposition
+         /api/profile/rules/synthesize                POST, règles déduites des retours -> proposition
+         /api/jobs/{id}/feedback                      POST {sentiment: like|dislike, reasons, text}
+         /api/feedback, /api/feedback/reasons         GET, retours récents (nombre de nouveaux), raisons
+         /api/jobs/{id}/assessment/manual             PUT {score|null}, correction manuelle de la note
+         /api/assessments/status, /api/assessments/run   GET état, POST évaluer tout de suite (10 offres)
          /api/chat/status, /api/chat/history          GET
-         /api/chat                                    POST {message}, réponse complète (pas de streaming)
+         /api/chat                                    POST {message, mode: normal|onboarding}
          /api/chat/reset                              POST, nouvelle conversation
          /api/chat/actions/{id}/confirm | /cancel     POST, exécute ou abandonne une proposition
 
 Tests (depuis backend/, sans Docker) : uv run pytest
   (sur le réseau de l'entreprise : UV_SYSTEM_CERTS=1 pour que uv accepte le proxy HTTPS)
+Évaluation de référence avec le vrai Gemini (base SQLite temporaire, la base de l'app n'est pas touchée) :
+  docker compose exec backend uv run python scripts/eval_reference.py
+  -> rejoue les retours de docs/processus-recherche.md (§7), vérifie que les règles proposées couvrent les
+     thèmes de docs/exemple-profil.txt et que Remanence est mieux notée qu'Ooak Data et Bluesand.
 
 ------------------------------------------------------------------
 Importer son profil LinkedIn
@@ -113,8 +138,15 @@ Assistant (chat Gemini)
 ------------------------------------------------------------------
 Bouton en bas à droite sur toutes les pages. Contexte envoyé à Gemini : instruction système (rôle, règles,
 date du jour, résumé du profil) + les 20 derniers messages + la description des outils.
-  Lecture (exécutée directement) : get_profile, list_jobs, get_job, list_applications, get_dashboard
-  Écriture (proposition à confirmer) : update_profile, set_job_status, update_application, create_job
+  Lecture (exécutée directement) : get_profile, list_jobs, get_job (avec le détail de la note),
+    list_applications, get_dashboard
+  Écriture (proposition à confirmer) : update_profile, set_job_status, update_application, create_job,
+    rate_job (correction manuelle de la note)
+  Affichage : ask_question (réponses rapides sous une question)
+Mode entretien (« Compléter mon profil avec l'assistant ») : le serveur calcule les sujets non renseignés
+(lieux, mode, stades, salaire, cloud, déplacements, secteurs, à éviter, offres aimées, rôles) ; l'assistant
+pose une question à la fois, uniquement sur eux, avec des réponses rapides ; chaque réponse devient une
+proposition update_profile à confirmer.
 Sécurité :
   - les outils n'agissent que sur l'utilisateur connecté (son id vient de la session, jamais du modèle) ;
   - aucun outil de suppression ;
@@ -124,6 +156,24 @@ Sécurité :
   - 30 messages / 10 min par utilisateur, 4000 caractères par message ;
   - la clé Gemini reste côté serveur ; les actions exécutées sont journalisées (table chat_actions,
     logs « mire.chat.actions »).
+
+------------------------------------------------------------------
+Profil appris et évaluation des offres (voir docs/processus-recherche.md)
+------------------------------------------------------------------
+1. Faits : import (EXTRACT_INSTRUCTION reste factuelle).
+2. Déductions : « Analyser mon profil » -> positionnement, rôles classés, compétences fortes / à développer,
+   années d'expérience (calculées depuis les dates, stages exclus), questions. Badge « déduit », justification,
+   confiance ; validation une par une ; une valeur saisie n'est jamais remplacée sans être cochée.
+3. Évaluation automatique, par utilisateur, sans confirmation (donnée calculée) :
+   - exclusions dures sans LLM : entreprise exclue, stage / alternance, expérience demandée >= la vôtre + 2 ans ;
+   - Gemini (par lots) : correspondance par critère, ajustement par les règles, exclusion issue d'une règle
+     (seulement si l'offre l'exige explicitement, jamais pour une offre aimée), « pourquoi », compétences ;
+   - note /10 et verdict calculés côté serveur avec VOTRE barème et VOTRE seuil (Mon profil > Barème) ;
+   - règle d'or : un statut posé par vous ou une note corrigée ne sont jamais modifiés ; quand le profil
+     change, seules les offres non traitées sont réévaluées.
+4. Retours : « J'aime » (offre de référence, direct) / « Pas intéressé » (statut + raisons). Après 3 nouveaux
+   retours, « Mettre à jour mes règles » : règles proposées citant les offres d'origine, validées une par une.
+   « Déjà passé en entretien » propose d'exclure l'entreprise.
 
 ------------------------------------------------------------------
 Ancien export Framer
