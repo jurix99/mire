@@ -19,8 +19,10 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from app import models  # noqa: E402, F401
 from app.db import Base, SessionLocal, engine, get_db  # noqa: E402
+from app.llm import ChatResult, ToolCallRecord, get_llm  # noqa: E402
 from app.main import app  # noqa: E402
 from app.models import Company, Job, User  # noqa: E402
+from app.profile import ProfileData  # noqa: E402
 from app.users import current_user  # noqa: E402
 
 
@@ -89,3 +91,37 @@ def client_for(user: User) -> TestClient:
 def as_user():
     yield client_for
     app.dependency_overrides.clear()
+
+
+class FakeLLM:
+    """Faux client Gemini : réponses scriptées, aucun appel réseau.
+
+    - extract_profile renvoie `self.profile` ;
+    - chat joue `self.script` : liste de tours, chaque tour = liste d'appels d'outils (name, args)
+      suivie du texte final. Les appels sont exécutés via le vrai callback `execute`.
+    """
+
+    model = "fake-gemini"
+
+    def __init__(self):
+        self.profile = ProfileData()
+        self.script: list[tuple[list[tuple[str, dict]], str]] = []
+        self.calls: list[dict] = []  # ce qui a été envoyé au modèle (system, history, tools)
+
+    def extract_profile(self, text: str) -> ProfileData:
+        self.last_text = text
+        return self.profile
+
+    def chat(self, system, history, tools, execute):
+        self.calls.append({"system": system, "history": history, "tools": [t.name for t in tools]})
+        tool_calls, text = self.script.pop(0) if self.script else ([], "D'accord.")
+        records = [ToolCallRecord(name, args, execute(name, args)) for name, args in tool_calls]
+        return ChatResult(text=text, tool_calls=records)
+
+
+@pytest.fixture
+def fake_llm():
+    llm = FakeLLM()
+    app.dependency_overrides[get_llm] = lambda: llm
+    yield llm
+    app.dependency_overrides.pop(get_llm, None)
