@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from fastapi import HTTPException
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .net import TLS_CONTEXT
 from .profile import FactualProfile, ProfileData
@@ -65,6 +65,8 @@ class LLM(Protocol):
     model: str
 
     def extract_profile(self, text: str) -> ProfileData: ...
+
+    def analyze_profile(self, profile_json: str) -> Any: ...  # -> analysis.ProfileAnalysis
 
     def chat(
         self,
@@ -160,22 +162,24 @@ class GeminiClient:
             ),
         )
 
-    def _generate(self, turn: dict, contents, config, rounds: int = 1):
+    def _generate(self, turn: dict, contents, config, rounds: int = 1, models: list[str] | None = None):
         """generate_content avec bascule sur les modèles de secours si le modèle courant est saturé ou hors quota.
 
         `turn` garde le modèle retenu pour tout le tour (on ne repasse pas à un modèle précédent en cours de
         boucle d'outils : les signatures de pensée sont propres à un modèle).
         `rounds` > 1 : si tous les modèles sont saturés, nouveau passage après une courte pause.
+        `models` : chaîne de modèles à utiliser à la place de la chaîne par défaut.
         """
+        chain = list(dict.fromkeys(models)) if models else self.models
         start = turn.setdefault("index", 0)
         last_exc: Exception | None = None
         for attempt in range(rounds):
             if attempt:
                 time.sleep(3 * attempt)
                 turn["index"] = start
-            while turn["index"] < len(self.models):
-                model = self.models[turn["index"]]
-                if self.quota_until.get(model, 0) > time.monotonic() and turn["index"] + 1 < len(self.models):
+            while turn["index"] < len(chain):
+                model = chain[turn["index"]]
+                if self.quota_until.get(model, 0) > time.monotonic() and turn["index"] + 1 < len(chain):
                     turn["index"] += 1  # hors quota récemment : on passe directement au suivant
                     continue
                 try:
@@ -186,10 +190,10 @@ class GeminiClient:
                     last_exc = exc
                     if exc.code == 429:
                         self.quota_until[model] = time.monotonic() + QUOTA_COOLDOWN_S
-                    nxt = self.models[turn["index"] + 1] if turn["index"] + 1 < len(self.models) else None
+                    nxt = chain[turn["index"] + 1] if turn["index"] + 1 < len(chain) else None
                     log.warning("Gemini %s indisponible (%s)%s", model, exc.code, f", bascule sur {nxt}" if nxt else "")
                     turn["index"] += 1
-        turn["index"] = len(self.models) - 1
+        turn["index"] = len(chain) - 1
         raise last_exc
 
     # --- Extraction de profil -------------------------------------------------
@@ -216,6 +220,40 @@ class GeminiClient:
         except ValidationError as exc:
             log.warning("Gemini extract_profile: sortie invalide: %s", exc)
             raise LLMError("La réponse de Gemini ne respecte pas le format attendu, réessayez.") from None
+
+    # --- Sorties structurées (analyse, synthèse des règles, évaluation) ------------
+
+    def structured(self, instruction: str, contents: str, model_cls: type[BaseModel], *, label: str,
+                   rounds: int = 2, max_tokens: int = 8_000, models: list[str] | None = None) -> BaseModel:
+        """Appel Gemini avec sortie JSON imposée (schéma simplifié de `model_cls`), validée par Pydantic.
+
+        models : liste de modèles à utiliser à la place de la chaîne par défaut (ex. le moins cher d'abord).
+        """
+        t = self.types
+        try:
+            response = self._generate(
+                {}, rounds=rounds, models=models, contents=contents,
+                config=t.GenerateContentConfig(
+                    system_instruction=instruction,
+                    response_mime_type="application/json",
+                    response_json_schema=inline_json_schema(model_cls.model_json_schema()),
+                    max_output_tokens=max_tokens,
+                ),
+            )
+        except Exception as exc:
+            log.warning("Gemini %s: %s", label, exc)
+            raise friendly_error(exc) from None
+        try:
+            return model_cls.model_validate_json(response.text or "")
+        except ValidationError as exc:
+            log.warning("Gemini %s: sortie invalide: %s", label, exc)
+            raise LLMError("La réponse de Gemini ne respecte pas le format attendu, réessayez.") from None
+
+    def analyze_profile(self, profile_json: str):
+        from .analysis import ANALYZE_INSTRUCTION, ProfileAnalysis
+
+        return self.structured(ANALYZE_INSTRUCTION, f"<profil>\n{profile_json}\n</profil>", ProfileAnalysis,
+                               label="analyze_profile")
 
     # --- Chat avec appel de fonctions -----------------------------------------
 

@@ -112,6 +112,12 @@ class FakeLLM:
         self.last_text = text
         return self.profile
 
+    def analyze_profile(self, profile_json: str):
+        from app.analysis import ProfileAnalysis
+
+        self.last_analysis_input = profile_json
+        return getattr(self, "analysis", None) or ProfileAnalysis()
+
     def chat(self, system, history, tools, execute):
         self.calls.append({"system": system, "history": history, "tools": [t.name for t in tools]})
         tool_calls, text = self.script.pop(0) if self.script else ([], "D'accord.")

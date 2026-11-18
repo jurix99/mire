@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from . import linkedin_export, pdf_import
+from .analysis import analysis_input, analysis_proposals, compute_years, missing_topics
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
 from .models import ProfileImport, User
@@ -195,3 +196,21 @@ def cancel_proposal(proposal_id: str, db: DB, user: Me) -> Response:
     db.delete(_load_proposal(db, user, proposal_id))
     db.commit()
     return Response(status_code=204)
+
+
+# --- Analyse du profil (déductions) ------------------------------------------------
+
+
+@router.post("/analyze")
+def analyze_profile(db: DB, user: Me, llm: Gemini) -> ProposalPreview:
+    """Déductions sur le profil structuré -> propositions « déduit », validées une par une."""
+    llm = require_llm(llm)
+    current = profile_data(get_profile(db, user))
+    if not current.experiences and not current.skills:
+        raise HTTPException(422, "Profil trop vide pour être analysé : importez d'abord votre profil LinkedIn ou un CV.")
+    analysis = llm.analyze_profile(analysis_input(current))
+    items = analysis_proposals(current, analysis, compute_years(current.experiences))
+    missing = missing_topics(current)
+    questions = list(analysis.questions) or [f"Pouvez-vous préciser : {t} ?" for t in missing[:6]]
+    return create_proposal(db, user, kind="analyse", source="analyse", items=items,
+                           extra={"questions": questions[:8], "missing": missing})

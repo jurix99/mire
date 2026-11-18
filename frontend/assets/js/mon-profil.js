@@ -326,7 +326,16 @@ function renderImport() {
         <label class="btn ghost ${noAi ? "disabled" : ""}">Importer un PDF<input type="file" accept=".pdf,application/pdf" data-import="pdf" hidden ${noAi ? "disabled" : ""}></label>
         <button type="button" class="btn ghost" data-paste ${noAi ? "disabled" : ""}>Coller du texte</button>
       </div>
-      ${noAi ? html`<p class="small muted">PDF et texte : nécessitent Gemini (GEMINI_API_KEY non configurée sur le serveur).</p>` : ""}
+      <div class="assist-actions">
+        <p class="label">// Avec l'assistant</p>
+        <div class="import-actions">
+          <button type="button" class="btn ghost sm" data-analyze ${noAi ? "disabled" : ""}
+            title="Déductions à partir de votre profil : point fort, rôles, compétences, années d'expérience">Analyser mon profil</button>
+          <button type="button" class="btn ghost sm" data-onboarding ${noAi ? "disabled" : ""}
+            title="L'assistant vous pose quelques questions sur ce qui manque">Compléter avec l'assistant</button>
+        </div>
+      </div>
+      ${noAi ? html`<p class="small muted">PDF, texte et assistant : nécessitent Gemini (GEMINI_API_KEY non configurée sur le serveur).</p>` : ""}
       <p class="small muted" data-import-status hidden></p>
       <div id="import-preview"></div>
     </div>`.s;
@@ -336,7 +345,10 @@ function renderImport() {
   const busy = (text) => {
     status.hidden = !text;
     status.textContent = text ?? "";
-    $$("button, input", $(".import-actions", box)).forEach((el) => (el.disabled = Boolean(text) || (noAi && el.dataset.import !== "linkedin-export")));
+    $$(".import-actions button, .import-actions input", box).forEach((el) => {
+      if (el.closest("#import-preview")) return;
+      el.disabled = Boolean(text) || (noAi && el.dataset.import !== "linkedin-export");
+    });
   };
   const run = async (fn, text) => {
     busy(text);
@@ -357,6 +369,11 @@ function renderImport() {
     run(() => api(`/profile/import/${input.dataset.import}`, { method: "POST", form }), label);
   };
   box.onclick = async (e) => {
+    if (e.target.closest("#import-preview")) return; // géré par l'aperçu
+    if (e.target.closest("[data-onboarding]")) return startOnboarding();
+    if (e.target.closest("[data-analyze]")) {
+      return run(() => api("/profile/analyze", { method: "POST" }), "Analyse de votre profil par Gemini…");
+    }
     if (!e.target.closest("[data-paste]")) return;
     const v = await openForm({
       title: "Coller du texte",

@@ -320,6 +320,7 @@ img { display: block; }
 .guide summary { cursor: pointer; font-weight: 500; font-size: 14px; }
 .guide ol { margin: 10px 0 2px; padding-left: 20px; display: grid; gap: 6px; }
 .import-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+.assist-actions { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
 .import-preview { display: grid; gap: 12px; padding: 16px; border: 1px solid var(--accent); border-radius: var(--radius-sm); background: var(--white); }
 .changes { display: grid; gap: 4px; max-height: 420px; overflow-y: auto; }
 .change { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-top: 1px solid var(--border); cursor: pointer; }
