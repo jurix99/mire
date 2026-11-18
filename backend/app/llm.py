@@ -12,6 +12,7 @@ Les tests remplacent le client via la dépendance FastAPI get_llm (aucun appel r
 import json
 import logging
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
@@ -27,10 +28,16 @@ log = logging.getLogger("mire.llm")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 # Flash stable (doc Gemini API, novembre 2026). Voir .env.example pour les alternatives.
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-3.8-flash"
-# Modèle de secours si le principal est saturé (503 / 504 / 429 après nouvelles tentatives). Vide = aucun.
-GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite").strip()
+# Modèles de secours, essayés dans l'ordre si le précédent est saturé ou hors quota (503 / 504 / 429).
+# Liste séparée par des virgules ; vide = aucun.
+GEMINI_FALLBACK_MODELS = [
+    m.strip()
+    for m in os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite,gemini-3.1-flash-lite").split(",")
+    if m.strip()
+]
 TIMEOUT_MS = 45_000
 OVERLOAD_CODES = {429, 500, 503, 504}
+QUOTA_COOLDOWN_S = 300  # un modèle hors quota est ignoré pendant 5 min (évite d'attendre sa réponse à chaque appel)
 MAX_TOOL_STEPS = 6
 
 
@@ -73,6 +80,19 @@ class LLMError(HTTPException):
         super().__init__(502, detail)
 
 
+def friendly_error(exc: Exception) -> LLMError:
+    """Erreur Gemini -> message compréhensible pour l'utilisateur."""
+    code = getattr(exc, "code", None)
+    if code == 429:
+        return LLMError("Quota Gemini dépassé pour cette clé. Réessayez plus tard, ou changez GEMINI_MODEL / "
+                        "GEMINI_FALLBACK_MODEL (limites : https://aistudio.google.com/docs/rate-limits).")
+    if code in (500, 503, 504):
+        return LLMError("Gemini est surchargé en ce moment (côté Google). Réessayez dans une minute.")
+    if code in (400, 401, 403, 404):
+        return LLMError(f"Requête refusée par Gemini ({code}) : vérifiez GEMINI_API_KEY et GEMINI_MODEL.")
+    return LLMError()
+
+
 EXTRACT_INSTRUCTION = """Tu extrais un profil professionnel structuré à partir d'un document (CV, PDF de profil LinkedIn
 ou texte collé). Réponds uniquement avec le JSON demandé.
 
@@ -103,7 +123,10 @@ def inline_json_schema(schema: dict) -> dict:
         if isinstance(node, dict):
             if "$ref" in node:
                 return walk(defs[node["$ref"].split("/")[-1]])
-            return {k: walk(v) for k, v in node.items() if k not in DROPPED_SCHEMA_KEYS}
+            out = {k: walk(v) for k, v in node.items() if k not in DROPPED_SCHEMA_KEYS and k != "properties"}
+            if "properties" in node:  # noms de champs (ex. « title » d'une expérience) : jamais filtrés
+                out["properties"] = {name: walk(sub) for name, sub in node["properties"].items()}
+            return out
         if isinstance(node, list):
             return [walk(v) for v in node]
         return node
@@ -115,14 +138,16 @@ PROFILE_SCHEMA = inline_json_schema(ProfileData.model_json_schema())
 
 
 class GeminiClient:
-    def __init__(self, api_key: str, model: str = GEMINI_MODEL, fallback: str = GEMINI_FALLBACK_MODEL):
+    def __init__(self, api_key: str, model: str = GEMINI_MODEL, fallbacks: list[str] | None = None):
         from google import genai
         from google.genai import errors, types
 
         self.types = types
         self.errors = errors
         self.model = model
-        self.models = [model] + ([fallback] if fallback and fallback != model else [])
+        fallbacks = GEMINI_FALLBACK_MODELS if fallbacks is None else fallbacks
+        self.models = list(dict.fromkeys([model, *fallbacks]))  # sans doublon, ordre conservé
+        self.quota_until: dict[str, float] = {}
         self.client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(
@@ -135,22 +160,37 @@ class GeminiClient:
             ),
         )
 
-    def _generate(self, turn: dict, contents, config):
-        """generate_content avec bascule sur le modèle de secours si le modèle courant est saturé.
+    def _generate(self, turn: dict, contents, config, rounds: int = 1):
+        """generate_content avec bascule sur les modèles de secours si le modèle courant est saturé ou hors quota.
 
-        `turn` garde le modèle retenu pour tout le tour (on ne repasse pas au modèle principal en cours de
+        `turn` garde le modèle retenu pour tout le tour (on ne repasse pas à un modèle précédent en cours de
         boucle d'outils : les signatures de pensée sont propres à un modèle).
+        `rounds` > 1 : si tous les modèles sont saturés, nouveau passage après une courte pause.
         """
-        while True:
-            model = self.models[turn.setdefault("index", 0)]
-            try:
-                return self.client.models.generate_content(model=model, contents=contents, config=config)
-            except self.errors.APIError as exc:
-                if exc.code in OVERLOAD_CODES and turn["index"] + 1 < len(self.models):
-                    log.warning("Gemini %s indisponible (%s), bascule sur %s", model, exc.code, self.models[turn["index"] + 1])
-                    turn["index"] += 1
+        start = turn.setdefault("index", 0)
+        last_exc: Exception | None = None
+        for attempt in range(rounds):
+            if attempt:
+                time.sleep(3 * attempt)
+                turn["index"] = start
+            while turn["index"] < len(self.models):
+                model = self.models[turn["index"]]
+                if self.quota_until.get(model, 0) > time.monotonic() and turn["index"] + 1 < len(self.models):
+                    turn["index"] += 1  # hors quota récemment : on passe directement au suivant
                     continue
-                raise
+                try:
+                    return self.client.models.generate_content(model=model, contents=contents, config=config)
+                except self.errors.APIError as exc:
+                    if exc.code not in OVERLOAD_CODES:
+                        raise
+                    last_exc = exc
+                    if exc.code == 429:
+                        self.quota_until[model] = time.monotonic() + QUOTA_COOLDOWN_S
+                    nxt = self.models[turn["index"] + 1] if turn["index"] + 1 < len(self.models) else None
+                    log.warning("Gemini %s indisponible (%s)%s", model, exc.code, f", bascule sur {nxt}" if nxt else "")
+                    turn["index"] += 1
+        turn["index"] = len(self.models) - 1
+        raise last_exc
 
     # --- Extraction de profil -------------------------------------------------
 
@@ -159,6 +199,7 @@ class GeminiClient:
         try:
             response = self._generate(
                 {},
+                rounds=2,  # import : on peut attendre un peu plus qu'en chat
                 contents=f"<document>\n{text}\n</document>",
                 config=t.GenerateContentConfig(
                     system_instruction=EXTRACT_INSTRUCTION,
@@ -169,7 +210,7 @@ class GeminiClient:
             )
         except Exception as exc:  # erreurs réseau / quota / clé invalide
             log.warning("Gemini extract_profile: %s", exc)
-            raise LLMError() from None
+            raise friendly_error(exc) from None
         try:
             return ProfileData.model_validate_json(response.text or "")
         except ValidationError as exc:
@@ -201,7 +242,7 @@ class GeminiClient:
                 response = self._generate(turn, contents, config)
             except Exception as exc:
                 log.warning("Gemini chat: %s", exc)
-                raise LLMError() from None
+                raise friendly_error(exc) from None
             calls = response.function_calls or []
             if not calls:
                 return ChatResult(text=(response.text or "").strip(), tool_calls=records)
