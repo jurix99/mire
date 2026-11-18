@@ -18,7 +18,16 @@ SEED_DEMO = os.environ.get("SEED_DEMO", "true").lower() in ("1", "true", "yes")
 DEV_LOGIN_BYPASS = os.environ.get("DEV_LOGIN_BYPASS", "").lower() in ("1", "true", "yes")
 DEV_USER = {"sub": "dev-local", "name": "Julien (dev)", "given_name": "Julien", "family_name": None, "email": None}
 
-PROFILE_FIELDS = ("name", "given_name", "family_name", "email", "picture")
+PROFILE_FIELDS = ("name", "given_name", "family_name", "email", "picture", "locale")
+
+
+def normalize_locale(value) -> str | None:
+    """`locale` OIDC : "fr_FR", "fr-FR" ou {"language": "fr", "country": "FR"} -> "fr_FR"."""
+    if isinstance(value, dict):
+        value = "_".join(filter(None, [value.get("language"), value.get("country")]))
+    if not isinstance(value, str) or not value.strip():
+        return None
+    return value.strip().replace("-", "_")[:20]
 
 
 def upsert_user(db: Session, info: dict) -> User:
@@ -30,7 +39,7 @@ def upsert_user(db: Session, info: dict) -> User:
         db.add(user)
     for field in PROFILE_FIELDS:
         if field in info:
-            setattr(user, field, info[field])
+            setattr(user, field, normalize_locale(info[field]) if field == "locale" else info[field])
     user.last_login_at = datetime.now(UTC)
     db.commit()
 

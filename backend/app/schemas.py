@@ -56,6 +56,7 @@ class UserOut(ORM):
     family_name: str | None
     email: str | None
     picture: str | None
+    locale: str | None = None
     created_at: datetime
 
 

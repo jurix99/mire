@@ -16,10 +16,11 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from .api import router as api_router
+from .profile_api import router as profile_router
 from .db import SessionLocal
 from .net import TLS_CONTEXT
 from .seed import seed_catalog
-from .users import upsert_user
+from .users import normalize_locale, upsert_user
 
 LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -43,6 +44,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(title="Mire", lifespan=lifespan)
 app.include_router(api_router)
+app.include_router(profile_router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
@@ -134,6 +136,7 @@ async def callback(
         "family_name": info.get("family_name"),
         "email": info.get("email"),
         "picture": info.get("picture"),
+        "locale": normalize_locale(info.get("locale")),
     }
     if not info.get("sub"):
         raise HTTPException(502, "Profil LinkedIn sans identifiant (sub)")

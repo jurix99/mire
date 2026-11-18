@@ -1,8 +1,10 @@
 """Modèle de données.
 
 users ──< applications >── jobs >── companies
-              │
-              └──< application_events (historique des changements de statut)
+  │           │
+  │           └──< application_events (historique des changements de statut)
+  ├── user_profiles      profil riche (1-1, créé à la volée), contexte du chat
+  └──< profile_imports   aperçus d'import de profil en attente de confirmation
 
 Les entreprises et les postes sont partagés (le « radar »), les process sont propres à chaque utilisateur.
 Un poste sans process pour un utilisateur est considéré comme « nouveau » pour lui.
@@ -14,6 +16,7 @@ from decimal import Decimal
 from urllib.parse import urlparse
 
 from sqlalchemy import (
+    JSON,
     Date,
     DateTime,
     Enum,
@@ -25,6 +28,7 @@ from sqlalchemy import (
     UniqueConstraint,
     func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
 
 from .db import Base
@@ -61,6 +65,11 @@ status_enum = Enum(
 )
 
 
+# JSONB sous PostgreSQL, JSON ailleurs (tests sur SQLite).
+# Les colonnes JSON sont toujours réaffectées (jamais modifiées sur place) pour être détectées par SQLAlchemy.
+JSONType = JSON().with_variant(JSONB(), "postgresql")
+
+
 class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -78,9 +87,11 @@ class User(TimestampMixin, Base):
     family_name: Mapped[str | None] = mapped_column(String(100))
     email: Mapped[str | None] = mapped_column(String(320))
     picture: Mapped[str | None] = mapped_column(Text)
+    locale: Mapped[str | None] = mapped_column(String(20))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     applications: Mapped[list["Application"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    profile: Mapped["UserProfile | None"] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Company(TimestampMixin, Base):
@@ -171,3 +182,47 @@ class ApplicationEvent(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     application: Mapped[Application] = relationship(back_populates="events")
+
+
+class UserProfile(TimestampMixin, Base):
+    """Profil riche de l'utilisateur. Structure des champs JSON : voir app/profile.py (ProfileData)."""
+
+    __tablename__ = "user_profiles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), unique=True)
+
+    # Identité professionnelle
+    headline: Mapped[str | None] = mapped_column(String(300))
+    summary: Mapped[str | None] = mapped_column(Text)
+    location: Mapped[str | None] = mapped_column(String(200))
+    years_experience: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))
+    languages: Mapped[list] = mapped_column(JSONType, default=list)
+
+    # Parcours
+    experiences: Mapped[list] = mapped_column(JSONType, default=list)
+    education: Mapped[list] = mapped_column(JSONType, default=list)
+    skills: Mapped[list] = mapped_column(JSONType, default=list)
+
+    # Préférences de recherche et règles libres (« à éviter » / « préférer »)
+    preferences: Mapped[dict] = mapped_column(JSONType, default=dict)
+    rules: Mapped[list] = mapped_column(JSONType, default=list)
+
+    # Trace des imports appliqués : [{source, filename, imported_at}] (jamais le fichier brut)
+    raw_imports: Mapped[list] = mapped_column(JSONType, default=list)
+
+    user: Mapped[User] = relationship(back_populates="profile")
+
+
+class ProfileImport(Base):
+    """Import de profil analysé, en attente de confirmation (aperçu des changements)."""
+
+    __tablename__ = "profile_imports"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # UUID
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    source: Mapped[str] = mapped_column(String(40))  # linkedin_export | pdf | text
+    filename: Mapped[str | None] = mapped_column(String(255))
+    data: Mapped[dict] = mapped_column(JSONType)  # ProfileData extrait
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
