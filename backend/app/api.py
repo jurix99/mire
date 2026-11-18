@@ -1,7 +1,5 @@
 """API JSON du site (/api/...). Toutes les routes exigent un utilisateur connecté."""
 
-import re
-import unicodedata
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
@@ -11,12 +9,11 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, undefer
 
-from . import logos
+from . import logos, services
 from .db import get_db
 from .models import (
     ACTIVE_STATUSES,
     STATUS_LABELS,
-    TODO_STATUSES,
     Application,
     ApplicationEvent,
     Company,
@@ -35,7 +32,6 @@ from .schemas import (
     CompanyOut,
     CompanyPatch,
     DashboardOut,
-    DashboardStats,
     FunnelStep,
     JobIn,
     JobOut,
@@ -48,81 +44,19 @@ from .schemas import (
     UserOut,
     WeekActivity,
 )
+from .services import company_out as _company_out
+from .services import get_or_404 as _get_or_404
+from .services import job_out as _job_out
+from .services import jobs_count_by_company as _jobs_count_by_company
+from .services import load_application as _load_application
+from .services import slugify as _slugify
+from .services import user_apps as _user_apps
 from .users import current_user
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 DB = Annotated[Session, Depends(get_db)]
 Me = Annotated[User, Depends(current_user)]
-
-
-# --- Helpers -----------------------------------------------------------------
-
-
-def _get_or_404[T](db: Session, model: type[T], obj_id: int) -> T:
-    obj = db.get(model, obj_id)
-    if obj is None:
-        raise HTTPException(404, "Introuvable")
-    return obj
-
-
-def _slugify(db: Session, name: str, exclude_id: int | None = None) -> str:
-    base = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
-    base = re.sub(r"[^a-z0-9]+", "-", base.lower()).strip("-") or "entreprise"
-    slug, n = base, 2
-    while True:
-        existing = db.scalar(select(Company.id).where(Company.slug == slug))
-        if existing is None or existing == exclude_id:
-            return slug
-        slug, n = f"{base}-{n}", n + 1
-
-
-def _user_apps(db: Session, user: User) -> dict[int, Application]:
-    apps = db.scalars(
-        select(Application)
-        .where(Application.user_id == user.id)
-        .options(selectinload(Application.job).selectinload(Job.company), selectinload(Application.events))
-    )
-    return {a.job_id: a for a in apps}
-
-
-def _job_out(job: Job, app: Application | None) -> JobOut:
-    out = JobOut.model_validate(job)
-    if app is not None:
-        out.status = app.status
-        out.application_id = app.id
-    return out
-
-
-def _company_out(company: Company, jobs_count: int) -> CompanyOut:
-    out = CompanyOut.model_validate(company)
-    out.jobs_count = jobs_count
-    return out
-
-
-def _jobs_count_by_company(db: Session) -> dict[int, int]:
-    rows = db.execute(select(Job.company_id, func.count(Job.id)).group_by(Job.company_id))
-    return dict(rows.tuples().all())
-
-
-def _load_application(db: Session, app_id: int, user: User) -> Application:
-    app = db.scalar(
-        select(Application)
-        .where(Application.id == app_id, Application.user_id == user.id)
-        .options(selectinload(Application.job).selectinload(Job.company), selectinload(Application.events))
-    )
-    if app is None:
-        raise HTTPException(404, "Process introuvable")
-    return app
-
-
-def _apply_status(app: Application, status: ProcessStatus, note: str | None = None) -> None:
-    if app.status == status:
-        return
-    app.events.append(ApplicationEvent(from_status=app.status, to_status=status, note=note))
-    app.status = status
-    if status == ProcessStatus.postule and app.applied_on is None:
-        app.applied_on = date.today()
 
 
 # --- Utilisateur -------------------------------------------------------------
@@ -249,21 +183,12 @@ def refresh_company_logo(company_id: int, db: DB) -> Response:
 
 @router.get("/jobs")
 def list_jobs(db: DB, user: Me, company_id: int | None = None) -> list[JobOut]:
-    query = select(Job).options(selectinload(Job.company)).order_by(Job.score.desc().nulls_last(), Job.title)
-    if company_id is not None:
-        query = query.where(Job.company_id == company_id)
-    apps = _user_apps(db, user)
-    return [_job_out(job, apps.get(job.id)) for job in db.scalars(query)]
+    return services.list_jobs(db, user, company_id=company_id)
 
 
 @router.post("/jobs", status_code=201)
 def create_job(body: JobIn, db: DB) -> JobOut:
-    _get_or_404(db, Company, body.company_id)
-    job = Job(**body.model_dump())
-    db.add(job)
-    db.commit()
-    db.refresh(job, ["company"])
-    return _job_out(job, None)
+    return services.create_job(db, body)
 
 
 @router.patch("/jobs/{job_id}")
@@ -291,15 +216,7 @@ def delete_job(job_id: int, db: DB) -> Response:
 @router.put("/jobs/{job_id}/status")
 def set_job_status(job_id: int, body: JobStatusIn, db: DB, user: Me) -> JobOut:
     """Change le statut d'un poste pour l'utilisateur (crée le process si besoin)."""
-    job = _get_or_404(db, Job, job_id)
-    app = _user_apps(db, user).get(job_id)
-    if app is None:
-        app = Application(user_id=user.id, job_id=job_id, status=ProcessStatus.nouveau)
-        db.add(app)
-    _apply_status(app, body.status)
-    db.commit()
-    db.refresh(job, ["company"])
-    return _job_out(job, app)
+    return services.set_job_status(db, user, job_id, body.status)
 
 
 # --- Process -----------------------------------------------------------------
@@ -307,9 +224,7 @@ def set_job_status(job_id: int, body: JobStatusIn, db: DB, user: Me) -> JobOut:
 
 @router.get("/applications")
 def list_applications(db: DB, user: Me) -> list[ApplicationOut]:
-    apps = [a for a in _user_apps(db, user).values() if a.status != ProcessStatus.nouveau]
-    apps.sort(key=lambda a: (a.next_step_date or date.max, -a.updated_at.timestamp()))
-    return [ApplicationOut.model_validate(a) for a in apps]
+    return services.list_applications(db, user)
 
 
 @router.post("/applications", status_code=201)
@@ -329,15 +244,7 @@ def create_application(body: ApplicationIn, db: DB, user: Me) -> ApplicationOut:
 
 @router.patch("/applications/{app_id}")
 def update_application(app_id: int, body: ApplicationPatch, db: DB, user: Me) -> ApplicationOut:
-    app = _load_application(db, app_id, user)
-    changes = body.model_dump(exclude_unset=True)
-    status = changes.pop("status", None)
-    for field, value in changes.items():
-        setattr(app, field, value)
-    if status is not None:
-        _apply_status(app, status)
-    db.commit()
-    return ApplicationOut.model_validate(_load_application(db, app_id, user))
+    return services.update_application(db, user, app_id, body)
 
 
 @router.delete("/applications/{app_id}", status_code=204)
@@ -352,31 +259,7 @@ def delete_application(app_id: int, db: DB, user: Me) -> Response:
 
 @router.get("/dashboard")
 def dashboard(db: DB, user: Me) -> DashboardOut:
-    jobs = list(db.scalars(select(Job).options(selectinload(Job.company))))
-    apps = _user_apps(db, user)
-    status_of = {j.id: apps[j.id].status if j.id in apps else ProcessStatus.nouveau for j in jobs}
-
-    todo = [j for j in jobs if status_of[j.id] in TODO_STATUSES]
-    todo.sort(key=lambda j: -(j.score or 0))
-    active = [a for a in apps.values() if a.status in ACTIVE_STATUSES]
-    active.sort(key=lambda a: (a.next_step_date or date.max, -a.updated_at.timestamp()))
-
-    counts = _jobs_count_by_company(db)
-    fundings = db.scalars(
-        select(Company).order_by(Company.funding_announced_on.desc().nulls_last(), Company.name).limit(3)
-    )
-    return DashboardOut(
-        stats=DashboardStats(
-            jobs=len(jobs),
-            todo=len(todo),
-            active=len(active),
-            interviews=sum(1 for a in active if a.status == ProcessStatus.entretien),
-            companies=db.scalar(select(func.count(Company.id))) or 0,
-        ),
-        priority_jobs=[_job_out(j, apps.get(j.id)) for j in todo[:3]],
-        processes=[ApplicationOut.model_validate(a) for a in active[:3]],
-        recent_fundings=[_company_out(c, counts.get(c.id, 0)) for c in fundings],
-    )
+    return services.dashboard(db, user)
 
 
 @router.get("/analytics")
