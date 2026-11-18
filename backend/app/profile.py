@@ -90,19 +90,74 @@ class Preferences(Model):
     clouds_preferred: StrList
     clouds_avoided: StrList
     sectors: StrList
+    travel: Annotated[Literal["aucun", "occasionnel", "frequent"] | None,
+                      Field(default=None, description="Tolérance aux déplacements")] = None
 
 
 RuleKind = Literal["eviter", "preferer"]
+RuleSource = Literal["manuel", "import", "analyse", "feedback", "chat"]
+RuleText = Annotated[str, Field(min_length=1, max_length=500), AfterValidator(lambda v: " ".join(v.split()))]
 
 
-class Rule(Model):
+class FactualRule(Model):
     kind: RuleKind
-    text: Annotated[str, Field(min_length=1, max_length=300), AfterValidator(lambda v: " ".join(v.split()))]
+    text: RuleText
 
 
-class ProfileData(Model):
-    """Contenu éditable du profil (aussi le schéma de sortie demandé à Gemini pour les imports)."""
+class Rule(FactualRule):
+    source: RuleSource = "manuel"
+    examples: list[int] = Field(default_factory=list, max_length=20, description="Postes qui ont fait naître la règle")
+    active: bool = True  # une règle inactive est gardée mais ignorée (évaluation, chat)
+    created_at: Annotated[str | None, Field(default=None, max_length=30)] = None  # date ISO
 
+
+class ExcludedCompany(Model):
+    name: Name
+    company_id: int | None = None
+    reason: Short
+
+
+class ReferenceJob(Model):
+    """Offre de référence (« j'aime ») : à rapprocher des nouvelles offres."""
+
+    job_id: int | None = None
+    title: Short
+    company: Short
+    why: Annotated[str | None, Field(default=None, max_length=1000), AfterValidator(_clean)]
+
+
+# Barème : clé -> (libellé, poids par défaut). Total par défaut : 10.
+CRITERIA: dict[str, tuple[str, float]] = {
+    "competences": ("Correspondance des compétences", 3),
+    "stade": ("Stade de l'entreprise et qualité des investisseurs", 2),
+    "ownership": ("Transversalité / ownership", 2),
+    "ia_concrete": ("Produit IA concret avec impact réel", 1),
+    "xp": ("Expérience demandée compatible", 1),
+    "references": ("Ressemblance avec les offres de référence", 1),
+}
+DEFAULT_THRESHOLD = 6.0
+
+
+def _check_weights(weights: dict[str, float]) -> dict[str, float]:
+    unknown = set(weights) - set(CRITERIA)
+    if unknown:
+        raise ValueError(f"Critères inconnus : {', '.join(sorted(unknown))}")
+    if any(not 0 <= w <= 10 for w in weights.values()):
+        raise ValueError("Chaque poids doit être entre 0 et 10")
+    merged = {k: float(weights.get(k, default)) for k, (_, default) in CRITERIA.items()}
+    if sum(merged.values()) <= 0:
+        raise ValueError("Au moins un critère doit avoir un poids")
+    return merged
+
+
+class Scoring(Model):
+    weights: Annotated[dict[str, float], AfterValidator(_check_weights)] = Field(
+        default_factory=lambda: {k: float(w) for k, (_, w) in CRITERIA.items()}
+    )
+    threshold: Annotated[float, Field(ge=0, le=10)] = DEFAULT_THRESHOLD
+
+
+class _ProfileFacts(Model):
     headline: Annotated[str | None, Field(default=None, max_length=300), AfterValidator(_clean)]
     summary: Long
     location: Short
@@ -112,7 +167,28 @@ class ProfileData(Model):
     education: list[Education] = Field(default_factory=list, max_length=30)
     skills: list[Skill] = Field(default_factory=list, max_length=200)
     preferences: Preferences = Field(default_factory=Preferences)
-    rules: list[Rule] = Field(default_factory=list, max_length=50)
+
+
+class FactualProfile(_ProfileFacts):
+    """Schéma de sortie de l'EXTRACTION (import PDF / texte) : uniquement des faits."""
+
+    rules: list[FactualRule] = Field(default_factory=list, max_length=50)
+
+
+class ProfileData(_ProfileFacts):
+    """Contenu éditable du profil : faits + déductions validées + règles apprises + barème."""
+
+    rules: list[Rule] = Field(default_factory=list, max_length=100)
+    positioning: Annotated[str | None, Field(default=None, max_length=1000), AfterValidator(_clean)]
+    excluded_companies: list[ExcludedCompany] = Field(default_factory=list, max_length=100)
+    reference_jobs: list[ReferenceJob] = Field(default_factory=list, max_length=50)
+    scoring: Scoring = Field(default_factory=Scoring)
+
+    @classmethod
+    def from_facts(cls, facts: "FactualProfile", source: str = "import") -> "ProfileData":
+        dumped = facts.model_dump()
+        dumped["rules"] = [{**r, "source": source} for r in dumped["rules"]]
+        return cls.model_validate(dumped)
 
 
 class ProfilePatch(ProfileData):
@@ -128,6 +204,7 @@ class ImportTrace(Model):
 class ProfileOut(ProfileData):
     raw_imports: list[ImportTrace] = []
     updated_at: datetime | None = None
+    version: int = 1
 
 
 DATA_FIELDS = tuple(ProfileData.model_fields)
@@ -143,6 +220,10 @@ FIELD_LABELS = {
     "skills": "Compétences",
     "preferences": "Préférences",
     "rules": "Règles",
+    "positioning": "Positionnement",
+    "excluded_companies": "Entreprises exclues",
+    "reference_jobs": "Offres de référence",
+    "scoring": "Barème",
 }
 
 
@@ -155,7 +236,7 @@ def get_profile(db: Session, user: User) -> UserProfile:
     if profile is None:
         profile = UserProfile(
             user_id=user.id, languages=[], experiences=[], education=[], skills=[], preferences={}, rules=[],
-            raw_imports=[],
+            raw_imports=[], excluded_companies=[], reference_jobs=[], scoring={}, version=1,
         )
         db.add(profile)
         db.commit()
@@ -166,21 +247,36 @@ def profile_data(profile: UserProfile) -> ProfileData:
     return ProfileData.model_validate({
         f: (float(v) if f == "years_experience" and v is not None else v)
         for f in DATA_FIELDS
-        if (v := getattr(profile, f)) is not None
+        if (v := getattr(profile, f)) not in (None, {})  # scoring {} -> barème par défaut
     })
 
 
 def profile_out(profile: UserProfile) -> ProfileOut:
     out = ProfileOut.model_validate({**profile_data(profile).model_dump(), "raw_imports": profile.raw_imports or []})
     out.updated_at = profile.updated_at
+    out.version = profile.version or 1
     return out
 
 
-def save_fields(profile: UserProfile, data: ProfileData, fields: set[str] | None = None) -> None:
-    """Copie les champs de `data` dans le profil (nouvelles valeurs JSON : SQLAlchemy détecte le changement)."""
+def save_fields(profile: UserProfile, data: ProfileData, fields: set[str] | None = None) -> bool:
+    """Copie les champs de `data` dans le profil (nouvelles valeurs JSON : SQLAlchemy détecte le changement).
+
+    Date les nouvelles règles, et incrémente la version du profil si quelque chose a changé (les offres
+    non traitées seront réévaluées). Retourne True si le profil a changé.
+    """
+    today = date.today().isoformat()
+    data = data.model_copy(update={"rules": [r if r.created_at else r.model_copy(update={"created_at": today})
+                                             for r in data.rules]})
+    current = profile_data(profile).model_dump(mode="json")
     dumped = data.model_dump(mode="json")
+    changed = False
     for f in fields if fields is not None else DATA_FIELDS:
+        if dumped[f] != current.get(f):
+            changed = True
         setattr(profile, f, dumped[f])
+    if changed:
+        profile.version = (profile.version or 1) + 1
+    return changed
 
 
 def add_import_trace(profile: UserProfile, source: str, filename: str | None) -> None:
@@ -203,6 +299,10 @@ def _item_key(field: str, item: BaseModel) -> tuple:
             return (_norm(item.school), _norm(item.degree))
         case "rules":
             return (_norm(item.text),)
+        case "excluded_companies":
+            return (_norm(item.name),)
+        case "reference_jobs":
+            return (str(item.job_id or ""), _norm(item.company), _norm(item.title))
         case _:  # skills, languages
             return (_norm(item.name),)
 
@@ -266,6 +366,11 @@ def _describe(field: str, item: BaseModel) -> str:
             return " · ".join(filter(None, [item.name, item.level]))
         case "rules":
             return f"{'Éviter' if item.kind == 'eviter' else 'Préférer'} : {item.text}"
+        case "excluded_companies":
+            return item.name + (f" ({item.reason})" if item.reason else "")
+        case "reference_jobs":
+            label = " – ".join(filter(None, [item.company, item.title])) or f"poste {item.job_id}"
+            return label + (f" : {item.why}" if item.why else "")
     return str(item)
 
 
@@ -280,6 +385,8 @@ def merge_profile(current: ProfileData, incoming: ProfileData) -> tuple[ProfileD
     merged = current.model_copy()
     changes: list[dict] = []
     for field in DATA_FIELDS:
+        if field == "scoring":  # le barème n'est jamais modifié par un import
+            continue
         cur, new = getattr(current, field), getattr(incoming, field)
         label = FIELD_LABELS[field]
         if field == "preferences":
@@ -321,10 +428,18 @@ def apply_import(current: ProfileData, incoming: ProfileData, accept: set[str] |
 # --- Résumé compact pour l'instruction système du chat ------------------------
 
 
-def profile_summary(user: User, data: ProfileData, max_chars: int = 2500) -> str:
+def profile_summary(user: User, data: ProfileData, job_labels: dict[int, str] | None = None,
+                    max_chars: int = 5000) -> str:
+    """Résumé compact du profil (contexte du chat et de l'évaluation des offres).
+
+    job_labels : {job_id: "Entreprise – Titre"} pour citer les offres d'exemple des règles.
+    """
+    job_labels = job_labels or {}
     lines = [f"Nom : {user.name or user.given_name or 'inconnu'}"]
     if data.headline:
         lines.append(f"Titre : {data.headline}")
+    if data.positioning:
+        lines.append(f"Point fort / positionnement : {data.positioning}")
     if data.location:
         lines.append(f"Localisation : {data.location}")
     if data.years_experience is not None:
@@ -347,13 +462,36 @@ def profile_summary(user: User, data: ProfileData, max_chars: int = 2500) -> str
     pref_text = "; ".join(f"{k} : {', '.join(v)}" for k, v in prefs if v)
     if p.min_salary_keur:
         pref_text += f"; salaire min : {p.min_salary_keur} k€"
+    if p.travel:
+        pref_text += f"; déplacements acceptés : {p.travel}"
     if pref_text:
         lines.append("Préférences : " + pref_text.strip("; "))
     for rule in data.rules:
-        lines.append("Règle : " + _describe("rules", rule))
+        if not rule.active:
+            continue
+        examples = [job_labels.get(j, f"poste #{j}") for j in rule.examples[:4]]
+        lines.append("Règle : " + _describe("rules", rule) + (f" (ex. {', '.join(examples)})" if examples else ""))
+    if data.excluded_companies:
+        lines.append("Entreprises exclues : " + ", ".join(_describe("excluded_companies", c) for c in data.excluded_companies))
+    for ref in data.reference_jobs[:8]:
+        lines.append("Offre de référence (aimée) : " + _describe("reference_jobs", ref))
+    weights = data.scoring.weights
+    lines.append("Barème : " + " · ".join(f"{CRITERIA[k][0]} /{w:g}" for k, w in weights.items())
+                 + f" ; seuil {data.scoring.threshold:g}")
     text = "\n".join(lines)
     return text if len(text) <= max_chars else text[: max_chars - 1] + "…"
 
 
 def today_label() -> str:
     return date.today().isoformat()
+
+
+def job_labels(db: Session, data: ProfileData) -> dict[int, str]:
+    """{job_id: "Entreprise – Titre"} pour les offres citées par les règles (exemples)."""
+    from .models import Job
+
+    ids = {j for r in data.rules for j in r.examples}
+    if not ids:
+        return {}
+    jobs = db.query(Job).filter(Job.id.in_(ids)).all()
+    return {j.id: f"{j.company.name} – {j.title}" for j in jobs}

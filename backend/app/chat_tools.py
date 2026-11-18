@@ -227,7 +227,7 @@ def _plan_update_profile(db: Session, user: User, args: dict) -> Plan:
     rules = data["rules"]
     for r in args.get("add_rules") or []:
         if r.get("text") and _norm(r["text"]) not in {_norm(x["text"]) for x in rules}:
-            rules.append({"kind": r.get("kind") or "eviter", "text": r["text"]})
+            rules.append({"kind": r.get("kind") or "eviter", "text": r["text"], "source": "chat"})
             label = "Règle ajoutée (éviter)" if r.get("kind") != "preferer" else "Règle ajoutée (préférer)"
             changes.append({"label": label, "before": None, "after": r["text"]})
     for text in args.get("remove_rules") or []:

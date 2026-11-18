@@ -26,6 +26,10 @@
   --st-offre-bg: #dcfce7;      --st-offre-fg: #15803d;      --st-offre-dot: #22c55e;
   --st-refuse-bg: #fee2e2;     --st-refuse-fg: #b91c1c;     --st-refuse-dot: #ef4444;
   --st-abandonne-bg: #f4f4f5;  --st-abandonne-fg: #71717a;  --st-abandonne-dot: #a1a1aa;
+  --st-pas_interesse-bg: #fdf2f8; --st-pas_interesse-fg: #9d174d; --st-pas_interesse-dot: #ec4899;
+  /* Verdicts calculés (pas des statuts posés par l'utilisateur) */
+  --st-ecartee-bg: #f5f5f4;    --st-ecartee-fg: #78716c;    --st-ecartee-dot: #d6d3d1;
+  --st-fermee-bg: #f4f4f5;     --st-fermee-fg: #52525b;     --st-fermee-dot: #52525b;
 }
 
 * { box-sizing: border-box; }
@@ -146,6 +150,9 @@ img { display: block; }
 .st-offre      { --bg: var(--st-offre-bg);      --fg: var(--st-offre-fg);      --dot: var(--st-offre-dot); }
 .st-refuse     { --bg: var(--st-refuse-bg);     --fg: var(--st-refuse-fg);     --dot: var(--st-refuse-dot); }
 .st-abandonne  { --bg: var(--st-abandonne-bg);  --fg: var(--st-abandonne-fg);  --dot: var(--st-abandonne-dot); }
+.st-pas_interesse { --bg: var(--st-pas_interesse-bg); --fg: var(--st-pas_interesse-fg); --dot: var(--st-pas_interesse-dot); }
+.st-ecartee    { --bg: var(--st-ecartee-bg);    --fg: var(--st-ecartee-fg);    --dot: var(--st-ecartee-dot); }
+.st-fermee     { --bg: var(--st-fermee-bg);     --fg: var(--st-fermee-fg);     --dot: var(--st-fermee-dot); }
 
 /* Sélecteur de statut coloré comme une pastille */
 .status-select {

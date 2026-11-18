@@ -2,12 +2,13 @@ import { $, $$, ICONS, STATUSES, api, attempt, boot, fmtToday, html, loadMe, ope
 
 const HELP = {
   nouveau: "Poste repéré, pas encore étudié",
-  a_postuler: "Poste retenu, candidature à préparer",
+  a_postuler: "Poste retenu, à regarder de près",
   postule: "Candidature envoyée",
   relance: "Pas de réponse : relance à faire ou faite",
   entretien: "Un ou plusieurs entretiens en cours",
   offre: "Proposition reçue",
   refuse: "Candidature refusée",
+  pas_interesse: "Écarté par vous (la raison aide l'assistant à affiner vos règles)",
   abandonne: "Process arrêté de votre côté",
 };
 

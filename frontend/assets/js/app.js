@@ -4,12 +4,13 @@
 
 export const STATUSES = [
   ["nouveau", "Nouveau"],
-  ["a_postuler", "À postuler"],
+  ["a_postuler", "À regarder"],
   ["postule", "Postulé"],
   ["relance", "Relance"],
   ["entretien", "Entretien"],
   ["offre", "Offre"],
   ["refuse", "Refusé"],
+  ["pas_interesse", "Pas intéressé"],
   ["abandonne", "Abandonné"],
 ];
 export const STATUS_LABEL = Object.fromEntries(STATUSES);

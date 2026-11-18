@@ -106,3 +106,80 @@ def test_profile_is_private(alice, bob, as_user):
 def test_profile_validation(alice, as_user):
     r = as_user(alice).patch("/api/profile", json={"rules": [{"kind": "peut-etre", "text": "x"}]})
     assert r.status_code == 422
+
+
+# --- Modèle enrichi : règles, barème, version ---------------------------------------
+
+
+def test_old_rules_get_defaults():
+    data = ProfileData.model_validate({"rules": [{"kind": "eviter", "text": "TypeScript au cœur du poste"}]})
+    rule = data.rules[0]
+    assert (rule.source, rule.examples, rule.active) == ("manuel", [], True)
+
+
+def test_scoring_defaults_and_validation():
+    import pytest
+    from pydantic import ValidationError
+
+    s = ProfileData().scoring
+    assert s.weights == {"competences": 3, "stade": 2, "ownership": 2, "ia_concrete": 1, "xp": 1, "references": 1}
+    assert s.threshold == 6
+    # Poids partiel : complété avec les valeurs par défaut
+    assert ProfileData.model_validate({"scoring": {"weights": {"stade": 0}}}).scoring.weights["competences"] == 3
+    with pytest.raises(ValidationError):
+        ProfileData.model_validate({"scoring": {"weights": {"inconnu": 1}}})
+    with pytest.raises(ValidationError):
+        ProfileData.model_validate({"scoring": {"threshold": 12}})
+
+
+def test_version_increments_only_on_change(alice, as_user):
+    client = as_user(alice)
+    v0 = client.get("/api/profile").json()["version"]
+    v1 = client.patch("/api/profile", json={"positioning": "Industrialiser des prototypes IA"}).json()["version"]
+    assert v1 == v0 + 1
+    v2 = client.patch("/api/profile", json={"positioning": "Industrialiser des prototypes IA"}).json()["version"]
+    assert v2 == v1  # même valeur : pas de réévaluation inutile
+
+
+def test_new_fields_roundtrip_and_rule_dated(alice, as_user):
+    data = as_user(alice).patch("/api/profile", json={
+        "excluded_companies": [{"name": "Comand AI", "reason": "Entretiens déjà faits"}],
+        "reference_jobs": [{"company": "Remanence", "title": "MTS Platform", "why": "Stack GitOps exacte"}],
+        "rules": [{"kind": "eviter", "text": "SQL au cœur du poste", "source": "feedback", "examples": [3]}],
+        "scoring": {"weights": {"competences": 4}, "threshold": 6.5},
+        "preferences": {"travel": "occasionnel"},
+    }).json()
+    assert data["excluded_companies"][0]["name"] == "Comand AI"
+    assert data["reference_jobs"][0]["company"] == "Remanence"
+    assert data["rules"][0]["created_at"] and data["rules"][0]["examples"] == [3]
+    assert data["scoring"]["weights"]["competences"] == 4 and data["scoring"]["threshold"] == 6.5
+    assert data["preferences"]["travel"] == "occasionnel"
+
+
+def test_summary_includes_learned_context():
+    from types import SimpleNamespace
+
+    from app.profile import profile_summary
+
+    data = ProfileData.model_validate({
+        "positioning": "Industrialiser des prototypes IA",
+        "rules": [
+            {"kind": "eviter", "text": "SQL au cœur du poste", "examples": [7]},
+            {"kind": "eviter", "text": "Règle désactivée", "active": False},
+        ],
+        "excluded_companies": [{"name": "Comand AI"}],
+        "reference_jobs": [{"company": "Remanence", "title": "MTS Platform"}],
+    })
+    text = profile_summary(SimpleNamespace(name="Julien", given_name=None), data, {7: "Bluesand – Data Engineer"})
+    assert "Point fort / positionnement : Industrialiser des prototypes IA" in text
+    assert "Éviter : SQL au cœur du poste (ex. Bluesand – Data Engineer)" in text
+    assert "Règle désactivée" not in text
+    assert "Entreprises exclues : Comand AI" in text
+    assert "Remanence – MTS Platform" in text
+    assert "seuil 6" in text
+
+
+def test_import_never_touches_scoring_or_learned_fields():
+    current = ProfileData.model_validate({"scoring": {"threshold": 7}, "positioning": "Mon point fort"})
+    _, changes = merge_profile(current, ProfileData())
+    assert changes == []

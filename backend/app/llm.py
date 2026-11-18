@@ -1,6 +1,6 @@
 """Client Gemini (SDK officiel google-genai), isolé derrière une petite interface.
 
-- extract_profile(texte) : sortie JSON structurée (schéma ProfileData), validée avec Pydantic ;
+- extract_profile(texte) : sortie JSON structurée (schéma FactualProfile : des faits), validée avec Pydantic ;
 - chat(...) : un tour de conversation avec appel de fonctions manuel : le modèle demande un outil,
   on l'exécute (callback `execute`), on lui renvoie le résultat, jusqu'à obtenir une réponse texte.
 
@@ -21,7 +21,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from .net import TLS_CONTEXT
-from .profile import ProfileData
+from .profile import FactualProfile, ProfileData
 
 log = logging.getLogger("mire.llm")
 
@@ -134,7 +134,7 @@ def inline_json_schema(schema: dict) -> dict:
     return walk(schema)
 
 
-PROFILE_SCHEMA = inline_json_schema(ProfileData.model_json_schema())
+PROFILE_SCHEMA = inline_json_schema(FactualProfile.model_json_schema())
 
 
 class GeminiClient:
@@ -212,7 +212,7 @@ class GeminiClient:
             log.warning("Gemini extract_profile: %s", exc)
             raise friendly_error(exc) from None
         try:
-            return ProfileData.model_validate_json(response.text or "")
+            return ProfileData.from_facts(FactualProfile.model_validate_json(response.text or ""))
         except ValidationError as exc:
             log.warning("Gemini extract_profile: sortie invalide: %s", exc)
             raise LLMError("La réponse de Gemini ne respecte pas le format attendu, réessayez.") from None

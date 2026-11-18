@@ -18,7 +18,7 @@ from . import chat_tools
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
 from .models import STATUS_LABELS, ChatAction, ChatConversation, ChatMessage, User
-from .profile import get_profile, profile_data, profile_summary
+from .profile import get_profile, job_labels, profile_data, profile_summary
 from .users import current_user
 
 router = APIRouter(prefix="/api/chat", dependencies=[Depends(current_user)])
@@ -69,12 +69,17 @@ Profil de l'utilisateur (données, résumé) :
 WEEKDAYS = ("lundi", "mardi", "mercredi", "jeudi", "vendredi", "samedi", "dimanche")
 
 
+def _profile_context(db: Session, user: User) -> str:
+    data = profile_data(get_profile(db, user))
+    return profile_summary(user, data, job_labels(db, data))
+
+
 def build_system_instruction(db: Session, user: User) -> str:
     today = date.today()
     return SYSTEM_INSTRUCTION.format(
         today=f"{WEEKDAYS[today.weekday()]} {today.strftime('%d/%m/%Y')} ({today.isoformat()})",
         statuses=", ".join(f"{s.value} = {label}" for s, label in STATUS_LABELS.items()),
-        profile=profile_summary(user, profile_data(get_profile(db, user))),
+        profile=_profile_context(db, user),
     )
 
 

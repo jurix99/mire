@@ -113,7 +113,9 @@ def test_update_profile_add_skill_then_confirm(alice, as_user, fake_llm):
     client.post(f"/api/chat/actions/{action['id']}/confirm")
     profile = client.get("/api/profile").json()
     assert profile["skills"] == [{"name": "Kubernetes", "level": None, "kind": "a_developper"}]
-    assert profile["rules"] == [{"kind": "preferer", "text": "Équipes produit"}]
+    [rule] = profile["rules"]
+    assert (rule["kind"], rule["text"], rule["source"], rule["active"]) == ("preferer", "Équipes produit", "chat", True)
+    assert rule["created_at"]
 
 
 def test_update_profile_without_change_is_refused(alice, as_user, fake_llm):

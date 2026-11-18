@@ -6,7 +6,12 @@ users ──< applications >── jobs >── companies
   ├── user_profiles      profil riche (1-1, créé à la volée), contexte du chat
   ├──< profile_imports   aperçus d'import de profil en attente de confirmation
   ├──< chat_conversations ──< chat_messages   conversations avec l'assistant Gemini
-  └──< chat_actions      écritures proposées par l'assistant (confirmées ou non) = journal des actions
+  ├──< chat_actions      écritures proposées par l'assistant (confirmées ou non) = journal des actions
+  ├──< job_feedback      retours sur les offres (j'aime / pas intéressé + raisons) -> synthèse de règles
+  └──< job_assessments   évaluation CALCULÉE d'une offre pour l'utilisateur (note, verdict, raisons)
+
+Règle d'or : l'automatisation (évaluation) n'écrit jamais dans applications (statuts posés par
+l'utilisateur) ni dans job_assessments.manual_score (note corrigée par l'utilisateur).
 
 Les entreprises et les postes sont partagés (le « radar »), les process sont propres à chaque utilisateur.
 Un poste sans process pour un utilisateur est considéré comme « nouveau » pour lui.
@@ -23,6 +28,7 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Integer,
     LargeBinary,
     Numeric,
     String,
@@ -38,23 +44,25 @@ from .db import Base
 
 class ProcessStatus(str, enum.Enum):
     nouveau = "nouveau"
-    a_postuler = "a_postuler"
+    a_postuler = "a_postuler"  # libellé « À regarder »
     postule = "postule"
     relance = "relance"
     entretien = "entretien"
     offre = "offre"
     refuse = "refuse"
+    pas_interesse = "pas_interesse"  # rejet par l'utilisateur (raison facultative -> job_feedback)
     abandonne = "abandonne"
 
 
 STATUS_LABELS: dict[ProcessStatus, str] = {
     ProcessStatus.nouveau: "Nouveau",
-    ProcessStatus.a_postuler: "À postuler",
+    ProcessStatus.a_postuler: "À regarder",
     ProcessStatus.postule: "Postulé",
     ProcessStatus.relance: "Relance",
     ProcessStatus.entretien: "Entretien",
     ProcessStatus.offre: "Offre",
     ProcessStatus.refuse: "Refusé",
+    ProcessStatus.pas_interesse: "Pas intéressé",
     ProcessStatus.abandonne: "Abandonné",
 }
 TODO_STATUSES = {ProcessStatus.nouveau, ProcessStatus.a_postuler}
@@ -213,19 +221,34 @@ class UserProfile(TimestampMixin, Base):
     # Trace des imports appliqués : [{source, filename, imported_at}] (jamais le fichier brut)
     raw_imports: Mapped[list] = mapped_column(JSONType, default=list)
 
+    # Positionnement / point fort, entreprises exclues, offres de référence, barème de notation
+    positioning: Mapped[str | None] = mapped_column(Text)
+    excluded_companies: Mapped[list] = mapped_column(JSONType, default=list)
+    reference_jobs: Mapped[list] = mapped_column(JSONType, default=list)
+    scoring: Mapped[dict] = mapped_column(JSONType, default=dict)
+    # Incrémentée à chaque changement du contenu du profil : les évaluations d'une version
+    # antérieure sont réévaluées (seulement pour les offres que l'utilisateur n'a pas traitées)
+    version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
     user: Mapped[User] = relationship(back_populates="profile")
 
 
 class ProfileImport(Base):
-    """Import de profil analysé, en attente de confirmation (aperçu des changements)."""
+    """Propositions de modification du profil, en attente de validation (élément par élément).
+
+    kind = import (fichier / texte), analyse (déductions sur le profil), regles (synthèse des retours).
+    """
 
     __tablename__ = "profile_imports"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)  # UUID
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    source: Mapped[str] = mapped_column(String(40))  # linkedin_export | pdf | text
+    kind: Mapped[str] = mapped_column(String(20), default="import", server_default="import")
+    source: Mapped[str] = mapped_column(String(40))  # linkedin_export | pdf | text | analyse | feedback
     filename: Mapped[str | None] = mapped_column(String(255))
-    data: Mapped[dict] = mapped_column(JSONType)  # ProfileData extrait
+    data: Mapped[dict | None] = mapped_column(JSONType)  # ProfileData extrait (imports)
+    proposals: Mapped[list | None] = mapped_column(JSONType)  # éléments proposés (voir proposals.py)
+    extra: Mapped[dict | None] = mapped_column(JSONType)  # ex. questions à poser (analyse)
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -279,3 +302,50 @@ class ChatAction(TimestampMixin, Base):
     executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     message: Mapped[ChatMessage | None] = relationship(back_populates="actions")
+
+
+class FeedbackSentiment(str, enum.Enum):
+    like = "like"
+    dislike = "dislike"
+
+
+class JobFeedback(Base):
+    """Retour de l'utilisateur sur une offre : alimente la synthèse des règles."""
+
+    __tablename__ = "job_feedback"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    sentiment: Mapped[str] = mapped_column(String(10))  # like | dislike
+    reasons: Mapped[list] = mapped_column(JSONType, default=list)  # clés de raisons (chips)
+    text: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Date à laquelle une synthèse de règles a pris ce retour en compte (None = nouveau retour)
+    synthesized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    job: Mapped["Job"] = relationship()
+
+
+class JobAssessment(TimestampMixin, Base):
+    """Évaluation calculée d'une offre pour un utilisateur (donnée dérivée de son profil)."""
+
+    __tablename__ = "job_assessments"
+    __table_args__ = (UniqueConstraint("user_id", "job_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    score: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))  # note /10 calculée (None si exclue)
+    criteria: Mapped[dict] = mapped_column(JSONType, default=dict)  # {critère: points}
+    verdict: Mapped[str] = mapped_column(String(20))  # nouveau | ecartee
+    exclusion: Mapped[str | None] = mapped_column(Text)  # raison d'écart en une ligne
+    why: Mapped[str | None] = mapped_column(Text)  # « pourquoi c'est intéressant » (salaire inclus si affiché)
+    skills_have: Mapped[list] = mapped_column(JSONType, default=list)
+    skills_missing: Mapped[list] = mapped_column(JSONType, default=list)
+    profile_version: Mapped[int] = mapped_column(Integer)
+    model: Mapped[str | None] = mapped_column(String(60))  # « regles » si exclusion dure, sinon modèle Gemini
+    manual_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))  # correction de l'utilisateur
+    assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    job: Mapped["Job"] = relationship()

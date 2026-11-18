@@ -1,0 +1,26 @@
+Critère	Valeur
+Expérience	5 ans
+Compétences fortes	Python (très bonne maîtrise), Terraform, CI/CD, Docker, Kubernetes, ArgoCD, Helm (GitOps), Azure (ouvert à AWS, GCP, Scaleway, OVH)
+À développer	Front-end (JS/TS, React) : pas éliminatoire si le reste colle
+Point fort	Industrialiser : transformer des prototypes (IA notamment) en systèmes fiables en production
+Rôles visés	Software / backend / fullstack, product engineer, founding engineer, platform / MLOps, AI engineer, forward deployed engineer. Ce qui compte : un rôle transverse avec de l'ownership
+Lieu	Paris (sur site ou hybride), ou remote depuis la France
+Stade	Pré-seed, seed ou Série A, levée récente. Bons fonds = plus (Index, Seedcamp, Frst, Kima, Partech, Elaia, Serena, YC, EF…)
+XP demandée	5 ans ou moins, ou « 5+ ». Exclure 8+ / 10+ ans, principal, head of, VP, stage, alternance
+Bonus	Produit IA concret avec un impact réel (santé, industrie, robotique, deeptech, B2B)
+Offres de référence	1. Uncovr – Senior Software Engineer (modèle idéal). 2. Bleu Robotics – ML Platform Engineer
+Barème (/10)	Compétences /3 · Stade et investisseurs /2 · Transversalité et ownership /2 · IA concrète /1 · XP compatible /1 · Ressemblance avec les références /1
+Seuil	Note ≥ 6 : ajoutée en « Nouveau ». En dessous ou hors critères : ajoutée en « Écartée (auto) » pour ne plus la revoir
+À éviter : FDE très client	Rôles forward deployed / déploiement chez le client avec beaucoup de relation client et de déplacements : note basse (pas trop client, pas à bouger partout)
+À éviter : IA/ML pointue	AI / ML engineer centré sur les modèles (fine-tuning, NLP, recherche ML) : écarter, mon niveau IA est le minimum. L'IA reste un bonus quand le rôle est produit, backend ou infra
+Déjà passé en entretien	Comand AI (process FDE fait jusqu'au bout, pas retenu) : ne plus proposer d'offres de cette entreprise
+Offres aimées (17/11)	Parallel – Senior Fullstack Engineer (stack infra identique : Terraform, K8s, Docker, AWS + agents IA en santé) et Alta Ares – MLOps Engineer (possède la plateforme IA, de la recherche à la prod). Chercher des offres qui leur ressemblent, comme pour Uncovr et Bleu Robotics
+Nuance FDE (17/11)	Un rôle forward deployed n'est pas éliminatoire : ça peut m'intéresser si l'occasion est bonne. Ce qui me freine, c'est surtout les déplacements fréquents. Note-le normalement s'il y a peu de déplacements (base Paris, remote ou hybride) ; baisse la note s'il faut beaucoup voyager. Indique toujours le niveau de déplacement dans « Lieu »
+Cloud (18/11)	Je n'ai pas du tout d'AWS. Écarter les offres qui exigent une expertise poussée sur un cloud précis que je n'ai pas (« deep AWS expertise », AWS obligatoire, AWS multi-région…). Préférer les offres ouvertes sur le cloud (« AWS, GCP ou Azure », « cloud provider ») ou sur Azure. Un AWS simplement cité dans la stack n'est pas éliminatoire
+XP (18/11)	Exclure aussi les offres qui demandent 7+ ans (en plus de 8+ / 10+). « 5+ » et « 6+ » restent OK
+Front / TypeScript (18/11)	Baisser la note des rôles où le front TypeScript et la base de données sont le cœur du poste (ex. Ooak Data). Le front reste acceptable s'il est secondaire
+IA (18/11)	Kuli jugé « trop IA » (agents / LangGraph / evals au cœur du poste) : l'IA doit rester le produit, pas mon métier principal
+Salaire (18/11)	55-80 k€ jugé trop peu payé. Indiquer le salaire dans « Pourquoi c'est intéressant » quand il est affiché, et baisser la note s'il est sous mes attentes
+Pas intéressé par	Breega (job board du portefeuille désactivé)
+Offres aimées (18/11)	Remanence – Member of Technical Staff, Platform Engineering : offre top. Plateforme d'une jeune boîte d'agents IA, stack GitOps exacte (Kubernetes en prod, Terraform, Helm, Argo CD, GitHub Actions, Python), Paris hybride. Chercher en priorité des offres de ce type : plateforme / infra K8s + GitOps dans une startup IA récente, sans exigence de cloud précis
+SQL / data (18/11)	Écarter les rôles où le SQL / la data engineering poussée est le cœur du poste (ex. Bluesand). Comme pour TypeScript : acceptable s'il est secondaire
