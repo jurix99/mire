@@ -125,7 +125,10 @@ Pour chaque offre, renvoie (job_id identique à celui fourni) :
   « préférer » quand elles ne sont pas éliminatoires (ex. front TypeScript au cœur du poste, beaucoup de
   déplacements, salaire affiché sous ses attentes), avec adjustment_reason.
 - exclusion : une phrase si une de ses règles demande d'écarter ce type d'offre (ex. cloud précis imposé qu'elle
-  ne maîtrise pas, rôle IA centré sur les modèles), sinon null. N'exclus pas pour un simple défaut.
+  ne maîtrise pas, rôle IA centré sur les modèles), sinon null. Applique une règle d'exclusion seulement si l'offre
+  EXIGE explicitement ce que la règle décrit (une techno simplement citée dans la stack n'est pas une exigence ;
+  un aspect secondaire du poste n'en est pas le cœur). N'exclus pas pour un simple défaut, et jamais une offre
+  très proche de ses offres de référence sans raison claire.
 - why : une ligne concrète sur ce qui rend l'offre intéressante pour elle (salaire inclus s'il est affiché ;
   niveau de déplacements s'il est indiqué).
 - skills_have / skills_missing : compétences demandées qu'elle a / qui lui manquent (noms courts).
@@ -171,8 +174,12 @@ def apply_evaluation(a: JobAssessment, ev: JobEvaluation | None, data: ProfileDa
     a.why = ev.why or None
     a.skills_have, a.skills_missing = list(ev.skills_have), list(ev.skills_missing)
     threshold = data.scoring.threshold
-    if ev.exclusion:
+    # Une offre que l'utilisateur a aimée (offre de référence) n'est jamais écartée par une règle déduite
+    liked = any(r.job_id == a.job_id for r in data.reference_jobs)
+    if ev.exclusion and not liked:
         a.verdict, a.exclusion = "ecartee", ev.exclusion
+    elif liked:
+        a.verdict, a.exclusion = "nouveau", None
     elif score >= threshold:
         a.verdict, a.exclusion = "nouveau", None
     else:

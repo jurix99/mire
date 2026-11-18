@@ -9,13 +9,14 @@ Les retours non encore synthétisés alimentent la synthèse des règles (rules_
 from datetime import datetime
 from typing import Annotated, Literal
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import assessments, services
+from . import assessments, rules_synthesis, services
 from .db import get_db
+from .llm import LLM, get_llm, require_llm
 from .models import Job, JobFeedback, ProcessStatus, User
 from .profile import ReferenceJob, get_profile, profile_data, save_fields
 from .profile_api import ProposalPreview, create_proposal
@@ -27,6 +28,7 @@ router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
 
 DB = Annotated[Session, Depends(get_db)]
 Me = Annotated[User, Depends(current_user)]
+Gemini = Annotated[LLM | None, Depends(get_llm)]
 
 SYNTHESIS_THRESHOLD = 3  # nouveaux retours avant de proposer « Mettre à jour mes règles »
 
@@ -109,6 +111,19 @@ def feedback_summary(db: DB, user: Me) -> FeedbackSummary:
                       .order_by(JobFeedback.id.desc()).limit(30)).all()
     total = db.scalar(select(func.count(JobFeedback.id)).where(JobFeedback.user_id == user.id)) or 0
     return FeedbackSummary(new=new_feedback_count(db, user), total=total, recent=[feedback_out(f) for f in rows])
+
+
+@router.post("/profile/rules/synthesize")
+def synthesize_rules(db: DB, user: Me, llm: Gemini) -> ProposalPreview:
+    """« Mettre à jour mes règles » : règles proposées à partir des retours, validées une par une."""
+    llm = require_llm(llm)
+    data = profile_data(get_profile(db, user))
+    items, used = rules_synthesis.synthesize(db, user, data, llm, REASONS)
+    if not used:
+        raise HTTPException(422, "Aucun retour sur des offres pour l'instant : utilisez « J'aime » ou « Pas intéressé ».")
+    db.commit()  # retours marqués « synthétisés »
+    return create_proposal(db, user, kind="regles", source="feedback", items=items,
+                           extra={"details": [f"{used} retour{'s' if used > 1 else ''} analysé{'s' if used > 1 else ''}"]})
 
 
 @router.post("/jobs/{job_id}/feedback")

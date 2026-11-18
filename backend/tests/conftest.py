@@ -112,6 +112,14 @@ class FakeLLM:
         self.last_text = text
         return self.profile
 
+    def synthesize_rules(self, contents: str):
+        """Synthèse simulée : self.synthesis (dict ou callable(contents) -> dict) au format RulesSynthesis."""
+        from app.rules_synthesis import RulesSynthesis
+
+        self.last_synthesis_input = contents
+        synthesis = getattr(self, "synthesis", None) or {}
+        return RulesSynthesis.model_validate(synthesis(contents) if callable(synthesis) else synthesis)
+
     def evaluate_jobs(self, profile_context: str, jobs: list[dict], models=None):
         """Évaluation simulée : self.grade(job_payload) -> dict de champs JobEvaluation (défaut : 0.7 partout)."""
         from app.assessments import EvaluationBatch

@@ -76,6 +76,8 @@ class LLM(Protocol):
 
     def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None) -> Any: ...
 
+    def synthesize_rules(self, contents: str) -> Any: ...  # -> rules_synthesis.RulesSynthesis
+
     def chat(
         self,
         system: str,
@@ -262,6 +264,11 @@ class GeminiClient:
 
         return self.structured(ANALYZE_INSTRUCTION, f"<profil>\n{profile_json}\n</profil>", ProfileAnalysis,
                                label="analyze_profile")
+
+    def synthesize_rules(self, contents: str):
+        from .rules_synthesis import SYNTHESIZE_INSTRUCTION, RulesSynthesis
+
+        return self.structured(SYNTHESIZE_INSTRUCTION, contents, RulesSynthesis, label="synthesize_rules")
 
     def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None):
         import json

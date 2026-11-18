@@ -202,3 +202,15 @@ def test_chat_tool_sees_evaluation(db, alice, catalog, as_user, fake_llm):
     assert [j["title"] for j in out["jobs"]] == ["Frontend Engineer"]
     assert out["jobs"][0]["raison_ecart"] == "Trop front"
     assert "error" in ToolRunner(db, alice)("list_jobs", {"status": "inconnu"})
+
+
+def test_liked_job_is_never_excluded_by_a_rule(db, alice, catalog, as_user, fake_llm):
+    client = as_user(alice)
+    setup_profile(as_user, alice)
+    liked = catalog["jobs"][2]
+    client.post(f"/api/jobs/{liked.id}/feedback", json={"sentiment": "like"})
+    fake_llm.grade = lambda j: {"exclusion": "Expertise AWS exigée", "competences": 0.2}
+    assess_user(db, alice, fake_llm)
+    jobs = {j["id"]: j for j in client.get("/api/jobs").json()}
+    assert jobs[liked.id]["display_status"] == "nouveau" and jobs[liked.id]["score"] < 6
+    assert jobs[catalog["jobs"][0].id]["display_status"] == "ecartee"

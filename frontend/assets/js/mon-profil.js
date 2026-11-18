@@ -22,6 +22,7 @@ const monthYear = new Intl.DateTimeFormat("fr-FR", { month: "short", year: "nume
 
 let profile;
 let gemini = { enabled: false };
+let feedback = { new: 0, total: 0, threshold: 3, recent: [] };
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -333,7 +334,14 @@ function renderImport() {
             title="Déductions à partir de votre profil : point fort, rôles, compétences, années d'expérience">Analyser mon profil</button>
           <button type="button" class="btn ghost sm" data-onboarding ${noAi ? "disabled" : ""}
             title="L'assistant vous pose quelques questions sur ce qui manque">Compléter avec l'assistant</button>
+          <button type="button" class="btn ${feedback.new >= feedback.threshold ? "" : "ghost"} sm" data-synthesize
+            ${noAi || !feedback.total ? "disabled" : ""}
+            title="${feedback.total ? "Propose des règles à partir de vos retours (J'aime / Pas intéressé)" : "Donnez d'abord des retours sur des offres (J'aime / Pas intéressé)"}">
+            Mettre à jour mes règles${feedback.new ? ` (${feedback.new} nouveau${feedback.new > 1 ? "x" : ""} retour${feedback.new > 1 ? "s" : ""})` : ""}
+          </button>
         </div>
+        ${feedback.new >= feedback.threshold && !noAi ? html`<p class="small">Vous avez ${feedback.new} nouveaux retours sur des offres :
+          l'assistant peut en déduire de nouvelles règles, que vous validerez une par une.</p>` : ""}
       </div>
       ${noAi ? html`<p class="small muted">PDF, texte et assistant : nécessitent Gemini (GEMINI_API_KEY non configurée sur le serveur).</p>` : ""}
       <p class="small muted" data-import-status hidden></p>
@@ -371,6 +379,13 @@ function renderImport() {
   box.onclick = async (e) => {
     if (e.target.closest("#import-preview")) return; // géré par l'aperçu
     if (e.target.closest("[data-onboarding]")) return startOnboarding();
+    if (e.target.closest("[data-synthesize]")) {
+      return run(async () => {
+        const preview = await api("/profile/rules/synthesize", { method: "POST" });
+        feedback = await api("/feedback");
+        return preview;
+      }, "Gemini analyse vos retours sur les offres…");
+    }
     if (e.target.closest("[data-analyze]")) {
       return run(() => api("/profile/analyze", { method: "POST" }), "Analyse de votre profil par Gemini…");
     }
@@ -504,11 +519,13 @@ function renderProfile() {
 }
 
 async function render() {
-  const [{ user, counts }, data, chat] = await Promise.all([
+  const [{ user, counts }, data, chat, fb] = await Promise.all([
     loadMe(),
     api("/profile"),
     api("/chat/status").catch(() => ({ enabled: false })),
+    api("/feedback").catch(() => ({ new: 0, total: 0, threshold: 3, recent: [] })),
   ]);
+  feedback = fb;
   profile = data;
   gemini = chat;
   const name = user.name ?? [user.given_name, user.family_name].filter(Boolean).join(" ");
