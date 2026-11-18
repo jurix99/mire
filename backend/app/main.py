@@ -16,6 +16,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from .api import router as api_router
+from .chat import router as chat_router
 from .profile_api import router as profile_router
 from .db import SessionLocal
 from .net import TLS_CONTEXT
@@ -45,6 +46,7 @@ async def lifespan(_: FastAPI):
 app = FastAPI(title="Mire", lifespan=lifespan)
 app.include_router(api_router)
 app.include_router(profile_router)
+app.include_router(chat_router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,

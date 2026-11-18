@@ -4,7 +4,9 @@ users ──< applications >── jobs >── companies
   │           │
   │           └──< application_events (historique des changements de statut)
   ├── user_profiles      profil riche (1-1, créé à la volée), contexte du chat
-  └──< profile_imports   aperçus d'import de profil en attente de confirmation
+  ├──< profile_imports   aperçus d'import de profil en attente de confirmation
+  ├──< chat_conversations ──< chat_messages   conversations avec l'assistant Gemini
+  └──< chat_actions      écritures proposées par l'assistant (confirmées ou non) = journal des actions
 
 Les entreprises et les postes sont partagés (le « radar »), les process sont propres à chaque utilisateur.
 Un poste sans process pour un utilisateur est considéré comme « nouveau » pour lui.
@@ -226,3 +228,54 @@ class ProfileImport(Base):
     data: Mapped[dict] = mapped_column(JSONType)  # ProfileData extrait
     applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ChatConversation(TimestampMixin, Base):
+    """Conversation avec l'assistant (une conversation active par utilisateur : la plus récente)."""
+
+    __tablename__ = "chat_conversations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+
+    messages: Mapped[list["ChatMessage"]] = relationship(
+        back_populates="conversation", cascade="all, delete-orphan", order_by="ChatMessage.id"
+    )
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(ForeignKey("chat_conversations.id", ondelete="CASCADE"), index=True)
+    role: Mapped[str] = mapped_column(String(20))  # user | assistant
+    content: Mapped[str] = mapped_column(Text)
+    # Outils appelés pendant ce tour : [{name, args, ok, action_id?}] (traçabilité, pas renvoyé au modèle)
+    tool_calls: Mapped[list | None] = mapped_column(JSONType)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+    conversation: Mapped[ChatConversation] = relationship(back_populates="messages")
+    actions: Mapped[list["ChatAction"]] = relationship(back_populates="message", order_by="ChatAction.id")
+
+
+class ChatAction(TimestampMixin, Base):
+    """Écriture proposée par l'assistant : exécutée seulement après confirmation de l'utilisateur.
+
+    Sert aussi de journal des actions exécutées (status = confirmed, executed_at, result).
+    """
+
+    __tablename__ = "chat_actions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    message_id: Mapped[int | None] = mapped_column(ForeignKey("chat_messages.id", ondelete="CASCADE"), index=True)
+    tool: Mapped[str] = mapped_column(String(60))
+    args: Mapped[dict] = mapped_column(JSONType)
+    summary: Mapped[str] = mapped_column(Text)  # description lisible de la proposition
+    changes: Mapped[list] = mapped_column(JSONType)  # [{label, before, after}]
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|confirmed|cancelled|failed|expired
+    result: Mapped[dict | None] = mapped_column(JSONType)
+    error: Mapped[str | None] = mapped_column(Text)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    message: Mapped[ChatMessage | None] = relationship(back_populates="actions")
