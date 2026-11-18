@@ -1,5 +1,5 @@
 import {
-  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, html, logo, openForm, openJobDialog, refreshCounts,
+  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, html, logo, openFeedback, openForm, openJobDialog, refreshCounts,
   score, statusSelect, toast,
 } from "./app.js";
 
@@ -70,6 +70,8 @@ const row = (j) => html`
     <span class="col-score" title="${j.assessment?.manual_score != null ? "Note corrigée par vous" : "Note calculée selon votre profil"}">${score(j.score)}</span>
     <span class="col-status">${statusSelect(j.display_status, `data-job="${j.id}"`)}</span>
     <span class="actions">
+      <button class="icon-btn fb-like" type="button" data-action="like" title="J'aime (offre de référence)">${ICONS.heart}</button>
+      <button class="icon-btn fb-dislike" type="button" data-action="dislike" title="Pas intéressé">${ICONS.thumbDown}</button>
       ${j.url ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
       <button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>
     </span>
@@ -191,6 +193,8 @@ $("#list").addEventListener("click", (e) => {
   if (!rowEl) return;
   const job = jobs.find((j) => j.id === Number(rowEl.dataset.id));
   if (e.target.closest("[data-action=edit]")) return editJob(job);
+  const fb = e.target.closest("[data-action=like], [data-action=dislike]");
+  if (fb) return openFeedback(job, fb.dataset.action).catch(() => {});
   // Clic n'importe où sur la ligne (hors statut, lien et boutons) : fiche du poste avec le contenu de l'offre
   if (e.target.closest("select, a, button:not([data-action=view])")) return;
   openJobDialog(job.id, { onEdit: () => editJob(job) });

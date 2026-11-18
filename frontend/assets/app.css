@@ -240,7 +240,7 @@ img { display: block; }
 
 .table-card { padding: 0; overflow: hidden; }
 .job-row {
-  display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.3fr) 56px 150px 72px;
+  display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.3fr) 56px 150px 136px;
   align-items: center; gap: 16px; padding: 14px 20px; border-top: 1px solid var(--border);
 }
 .job-row:first-child { border-top: 0; }
@@ -508,7 +508,7 @@ dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
 @media (max-width: 1100px) {
   .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-3 { grid-template-columns: 1fr; }
-  .job-row { grid-template-columns: 40px minmax(0, 1fr) 56px 150px 72px; }
+  .job-row { grid-template-columns: 40px minmax(0, 1fr) 56px 150px 136px; }
   .job-row > .col-company { display: none; }
 }
 
@@ -531,9 +531,15 @@ dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
 @media (max-width: 560px) {
   .grid-4 { grid-template-columns: 1fr 1fr; gap: 10px; }
   .stat .value { font-size: 32px; }
-  .job-row { grid-template-columns: 40px minmax(0, 1fr) 72px; row-gap: 8px; }
+  .job-row { grid-template-columns: 40px minmax(0, 1fr) 136px; row-gap: 8px; }
   .job-row.head { display: none; }
   .job-row > .col-score { display: none; }
   .job-row > .col-status { grid-column: 2 / 3; grid-row: 2; }
   .cards { grid-template-columns: 1fr; }
 }
+
+/* Retours sur les offres */
+.icon-btn.fb-like:hover { color: #db2777; }
+.icon-btn.fb-dislike:hover { color: #9d174d; }
+.feedback-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
+.feedback-buttons .btn svg { width: 14px; height: 14px; }

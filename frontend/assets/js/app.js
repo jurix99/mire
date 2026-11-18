@@ -121,6 +121,8 @@ export const ICONS = {
   image: raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-5-5L5 21"/></svg>`),
   arrow: raw(`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`),
   plus: raw(`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`),
+  heart: raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/></svg>`),
+  thumbDown: raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V2"/><path d="M9 18.1 10 14H4.2a2 2 0 0 1-2-2.4l1.4-7A2 2 0 0 1 5.6 3H17v11l-4 8a2.4 2.4 0 0 1-4-.9Z"/></svg>`),
 };
 
 // --- Notifications ----------------------------------------------------------
@@ -255,6 +257,48 @@ function fieldHtml(f, value) {
 
 export const confirmDelete = (what) => window.confirm(`Supprimer ${what} ? Cette action est définitive.`);
 
+// --- Retours sur une offre (J'aime / Pas intéressé) -------------------------------
+
+let reasonsPromise;
+
+/**
+ * Demande la raison (facultative) puis enregistre le retour. « J'aime » ajoute l'offre aux références ;
+ * « Pas intéressé » pose ce statut. Retourne la réponse de l'API (ou null si annulé).
+ */
+export async function openFeedback(job, sentiment) {
+  const like = sentiment === "like";
+  reasonsPromise ??= api("/feedback/reasons");
+  const reasons = like ? [] : await reasonsPromise;
+  const values = await openForm({
+    title: like ? `J'aime : ${job.title}` : `Pas intéressé : ${job.title}`,
+    fields: [
+      ...(like ? [] : [{ name: "reasons", label: "Pourquoi ? (facultatif)", type: "checks", full: true,
+                         options: reasons.map((r) => [r.key, r.label]) }]),
+      { name: "text", label: like ? "Qu'est-ce qui vous plaît ? (facultatif)" : "Précisez (facultatif)",
+        type: "textarea", full: true, maxlength: 1000,
+        hint: like ? "L'offre rejoint vos offres de référence : les offres qui lui ressemblent seront mieux notées."
+                   : "Vos retours servent à proposer de nouvelles règles, que vous validez une par une." },
+    ],
+    submitLabel: like ? "J'aime" : "Pas intéressé",
+  });
+  if (!values) return null;
+  const res = await attempt(() => api(`/jobs/${job.id}/feedback`, {
+    method: "POST", body: { sentiment, reasons: values.reasons ?? [], text: values.text },
+  }), like ? "Ajoutée à vos offres de référence" : "Noté : pas intéressé");
+
+  // « Déjà passé en entretien » : proposer d'exclure l'entreprise (validation explicite)
+  const it = res.proposal?.items?.[0];
+  if (it && window.confirm(`Exclure ${it.value.name} des prochaines offres ? (vous êtes déjà passé en entretien)`)) {
+    await attempt(() => api(`/profile/proposals/${res.proposal.import_id}/apply`, { method: "POST", body: { accept: [it.id] } }),
+      `${it.value.name} ajoutée aux entreprises exclues`);
+  }
+  if (res.suggest_synthesis) {
+    setTimeout(() => toast(`${res.new_feedback} nouveaux retours : mettez à jour vos règles depuis « Mon profil ».`), 2600);
+  }
+  refreshPage();
+  return res;
+}
+
 // --- Fiche d'un poste (contenu de l'offre) ------------------------------------
 
 const httpUrl = (u) => (u && /^https?:\/\//i.test(u) ? u : null);
@@ -326,7 +370,11 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
         <p class="small muted">Ajouté le ${fmtDate(job.created_at)}</p>
       </div>
       <div class="dialog-foot">
-        ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Voir l'offre originale ${ICONS.link}</a>` : ""}
+        <div class="feedback-buttons">
+          ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Voir l'offre originale ${ICONS.link}</a>` : ""}
+          <button type="button" class="btn ghost" data-feedback="like" title="Offre de référence">${ICONS.heart} J'aime</button>
+          <button type="button" class="btn ghost" data-feedback="dislike">${ICONS.thumbDown} Pas intéressé</button>
+        </div>
         <div class="right">
           ${onEdit ? html`<button type="button" class="btn ghost" data-edit>Modifier</button>` : ""}
           <button type="button" class="btn" data-close>Fermer</button>
@@ -345,6 +393,12 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
   dlg.addEventListener("click", (e) => {
     if (e.target.closest("[data-close]")) dlg.close();
     if (e.target.closest("[data-reset-score]")) saveManual(null).catch(() => {});
+    const fb = e.target.closest("[data-feedback]");
+    if (fb) {
+      openFeedback(job, fb.dataset.feedback).then((res) => {
+        if (res) { job = { ...job, ...res.job }; draw(); }
+      }).catch(() => {});
+    }
     if (e.target.closest("[data-edit]")) {
       dlg.close();
       onEdit(job);
