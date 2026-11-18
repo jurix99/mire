@@ -22,12 +22,15 @@ from pydantic import ValidationError
 from .net import TLS_CONTEXT
 from .profile import ProfileData
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("mire.llm")
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
 # Flash stable (doc Gemini API, novembre 2026). Voir .env.example pour les alternatives.
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "").strip() or "gemini-3.8-flash"
-TIMEOUT_MS = 60_000
+# Modèle de secours si le principal est saturé (503 / 504 / 429 après nouvelles tentatives). Vide = aucun.
+GEMINI_FALLBACK_MODEL = os.environ.get("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite").strip()
+TIMEOUT_MS = 45_000
+OVERLOAD_CODES = {429, 500, 503, 504}
 MAX_TOOL_STEPS = 6
 
 
@@ -86,15 +89,21 @@ Règles :
 """
 
 
+# Contraintes retirées du schéma envoyé à Gemini : elles rendent la sortie structurée trop complexe à servir
+# (« schema produces a constraint that has too many states »). Pydantic les vérifie à la réception.
+DROPPED_SCHEMA_KEYS = {"$defs", "title", "default", "maxLength", "minLength", "maxItems", "minItems",
+                       "maximum", "minimum", "exclusiveMaximum", "exclusiveMinimum", "pattern"}
+
+
 def inline_json_schema(schema: dict) -> dict:
-    """Schéma JSON Pydantic -> schéma autonome (sans $ref / $defs, sans titres ni valeurs par défaut)."""
+    """Schéma JSON Pydantic -> schéma autonome et simple (sans $ref / $defs, titres, défauts ni bornes)."""
     defs = schema.get("$defs", {})
 
     def walk(node: Any) -> Any:
         if isinstance(node, dict):
             if "$ref" in node:
                 return walk(defs[node["$ref"].split("/")[-1]])
-            return {k: walk(v) for k, v in node.items() if k not in ("$defs", "title", "default")}
+            return {k: walk(v) for k, v in node.items() if k not in DROPPED_SCHEMA_KEYS}
         if isinstance(node, list):
             return [walk(v) for v in node]
         return node
@@ -106,24 +115,50 @@ PROFILE_SCHEMA = inline_json_schema(ProfileData.model_json_schema())
 
 
 class GeminiClient:
-    def __init__(self, api_key: str, model: str = GEMINI_MODEL):
+    def __init__(self, api_key: str, model: str = GEMINI_MODEL, fallback: str = GEMINI_FALLBACK_MODEL):
         from google import genai
-        from google.genai import types
+        from google.genai import errors, types
 
         self.types = types
+        self.errors = errors
         self.model = model
+        self.models = [model] + ([fallback] if fallback and fallback != model else [])
         self.client = genai.Client(
             api_key=api_key,
-            http_options=types.HttpOptions(timeout=TIMEOUT_MS, client_args={"verify": TLS_CONTEXT}),
+            http_options=types.HttpOptions(
+                timeout=TIMEOUT_MS,
+                client_args={"verify": TLS_CONTEXT},
+                # Surcharge passagère du modèle (503) ou quota (429) : nouvelles tentatives espacées
+                retry_options=types.HttpRetryOptions(
+                    attempts=2, initial_delay=1.0, max_delay=4.0, http_status_codes=sorted(OVERLOAD_CODES)
+                ),
+            ),
         )
+
+    def _generate(self, turn: dict, contents, config):
+        """generate_content avec bascule sur le modèle de secours si le modèle courant est saturé.
+
+        `turn` garde le modèle retenu pour tout le tour (on ne repasse pas au modèle principal en cours de
+        boucle d'outils : les signatures de pensée sont propres à un modèle).
+        """
+        while True:
+            model = self.models[turn.setdefault("index", 0)]
+            try:
+                return self.client.models.generate_content(model=model, contents=contents, config=config)
+            except self.errors.APIError as exc:
+                if exc.code in OVERLOAD_CODES and turn["index"] + 1 < len(self.models):
+                    log.warning("Gemini %s indisponible (%s), bascule sur %s", model, exc.code, self.models[turn["index"] + 1])
+                    turn["index"] += 1
+                    continue
+                raise
 
     # --- Extraction de profil -------------------------------------------------
 
     def extract_profile(self, text: str) -> ProfileData:
         t = self.types
         try:
-            response = self.client.models.generate_content(
-                model=self.model,
+            response = self._generate(
+                {},
                 contents=f"<document>\n{text}\n</document>",
                 config=t.GenerateContentConfig(
                     system_instruction=EXTRACT_INSTRUCTION,
@@ -160,9 +195,10 @@ class GeminiClient:
             max_output_tokens=4_000,
         )
         records: list[ToolCallRecord] = []
+        turn: dict = {}
         for _ in range(MAX_TOOL_STEPS):
             try:
-                response = self.client.models.generate_content(model=self.model, contents=contents, config=config)
+                response = self._generate(turn, contents, config)
             except Exception as exc:
                 log.warning("Gemini chat: %s", exc)
                 raise LLMError() from None

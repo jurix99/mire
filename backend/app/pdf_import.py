@@ -10,7 +10,7 @@ MAX_PAGES = 30
 MAX_TEXT_CHARS = 60_000
 MAX_IMPORT_TEXT_CHARS = 60_000
 
-log = logging.getLogger(__name__)
+log = logging.getLogger("mire.import")
 
 
 def extract_text(data: bytes) -> str:

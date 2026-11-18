@@ -4,6 +4,7 @@ nginx appelle /auth/check (auth_request) avant de servir chaque fichier du site 
 200 = connecté, 401 = nginx redirige vers /auth/login.
 """
 
+import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
@@ -33,6 +34,14 @@ CLIENT_SECRET = os.environ.get("LINKEDIN_CLIENT_SECRET", "")
 PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8080").rstrip("/")
 REDIRECT_URI = f"{PUBLIC_URL}/auth/callback"
 SESSION_SECRET = os.environ["SESSION_SECRET"]
+
+# Journal applicatif (actions exécutées par l'assistant, erreurs Gemini…) : logger "mire", niveau INFO
+_mire_log = logging.getLogger("mire")
+if not _mire_log.handlers:
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
+    _mire_log.addHandler(_handler)
+    _mire_log.setLevel(logging.INFO)
 
 
 @asynccontextmanager
