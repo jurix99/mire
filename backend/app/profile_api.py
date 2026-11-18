@@ -1,7 +1,8 @@
-"""API du profil utilisateur (/api/profile) et imports (export LinkedIn, PDF, texte collé).
+"""API du profil utilisateur (/api/profile), imports (export LinkedIn, PDF, texte collé) et propositions.
 
-Import en deux temps : l'analyse renvoie un APERÇU (import_id + changements), rien n'est enregistré
-dans le profil avant POST /api/profile/import/{import_id}/apply.
+Tout ce qui modifie le profil sans être une saisie directe (import, analyse, synthèse des règles) passe
+par une PROPOSITION : un aperçu élément par élément (voir proposals.py). Rien n'est enregistré avant
+POST /api/profile/proposals/{id}/apply avec les éléments acceptés.
 """
 
 import uuid
@@ -23,13 +24,12 @@ from .profile import (
     ProfileOut,
     ProfilePatch,
     add_import_trace,
-    apply_import,
     get_profile,
-    merge_profile,
     profile_data,
     profile_out,
     save_fields,
 )
+from .proposals import ProposalItem, apply_items, import_proposals, select_items
 from .users import current_user
 
 router = APIRouter(prefix="/api/profile", dependencies=[Depends(current_user)])
@@ -39,7 +39,10 @@ Me = Annotated[User, Depends(current_user)]
 Gemini = Annotated[LLM | None, Depends(get_llm)]
 
 IMPORT_TTL = timedelta(hours=24)
-SOURCE_LABELS = {"linkedin_export": "Export LinkedIn", "pdf": "PDF", "text": "Texte collé"}
+SOURCE_LABELS = {
+    "linkedin_export": "Export LinkedIn", "pdf": "PDF", "text": "Texte collé",
+    "analyse": "Analyse de votre profil", "feedback": "Synthèse de vos retours sur les offres",
+}
 
 
 @router.get("")
@@ -58,24 +61,17 @@ def update_profile(body: ProfilePatch, db: DB, user: Me) -> ProfileOut:
     return profile_out(profile)
 
 
-# --- Imports -----------------------------------------------------------------
+# --- Propositions (imports, analyse, synthèse des règles) ---------------------------
 
 
-class ImportChange(BaseModel):
-    field: str
-    label: str
-    action: str  # ajout | modification
-    before: object | None = None
-    after: object | None = None
-    items: list[str] = []
-
-
-class ImportPreview(BaseModel):
-    import_id: str
+class ProposalPreview(BaseModel):
+    import_id: str  # identifiant de la proposition (nom historique)
+    kind: str  # import | analyse | regles
     source: str
     source_label: str
-    filename: str | None
-    changes: list[ImportChange]
+    filename: str | None = None
+    items: list[ProposalItem]
+    questions: list[str] = []  # questions à poser pour compléter le profil (analyse)
     details: list[str] = []  # infos sur l'analyse (fichiers reconnus…)
 
 
@@ -83,8 +79,8 @@ class ImportText(BaseModel):
     text: Annotated[str, Field(min_length=30, max_length=pdf_import.MAX_IMPORT_TEXT_CHARS)]
 
 
-class ImportApply(BaseModel):
-    # Champs à appliquer. Absent : tous les ajouts, aucune modification d'une valeur existante.
+class ProposalApply(BaseModel):
+    # Identifiants des éléments acceptés. Absent : les éléments cochés par défaut.
     accept: list[str] | None = None
 
 
@@ -94,35 +90,49 @@ def _safe_filename(name: str | None) -> str | None:
     return name.replace("\\", "/").rsplit("/", 1)[-1][:255] or None
 
 
-def create_import(
-    db: Session, user: User, source: str, filename: str | None, data: ProfileData, details: list[str] | None = None
-) -> ImportPreview:
-    # Ménage : imports expirés ou déjà appliqués de cet utilisateur
+def preview_of(imp: ProfileImport) -> ProposalPreview:
+    extra = imp.extra or {}
+    return ProposalPreview(
+        import_id=imp.id, kind=imp.kind, source=imp.source, source_label=SOURCE_LABELS.get(imp.source, imp.source),
+        filename=imp.filename, items=[ProposalItem(**i) for i in imp.proposals or []],
+        questions=extra.get("questions", []), details=extra.get("details", []),
+    )
+
+
+def create_proposal(
+    db: Session, user: User, *, kind: str, source: str, items: list[dict], filename: str | None = None,
+    data: ProfileData | None = None, extra: dict | None = None,
+) -> ProposalPreview:
+    # Ménage : propositions expirées ou déjà appliquées de cet utilisateur
     db.execute(delete(ProfileImport).where(
         ProfileImport.user_id == user.id,
         (ProfileImport.applied_at.is_not(None)) | (ProfileImport.created_at < datetime.now(UTC) - IMPORT_TTL),
     ))
-    current = profile_data(get_profile(db, user))
-    _, changes = merge_profile(current, data)
     imp = ProfileImport(
-        id=str(uuid.uuid4()), user_id=user.id, source=source, filename=_safe_filename(filename),
-        data=data.model_dump(mode="json"), created_at=datetime.now(UTC),
+        id=str(uuid.uuid4()), user_id=user.id, kind=kind, source=source, filename=_safe_filename(filename),
+        data=data.model_dump(mode="json") if data else None, proposals=items, extra=extra or {},
+        created_at=datetime.now(UTC),
     )
     db.add(imp)
     db.commit()
-    return ImportPreview(
-        import_id=imp.id, source=source, source_label=SOURCE_LABELS[source], filename=imp.filename,
-        changes=[ImportChange(**c) for c in changes], details=details or [],
-    )
+    return preview_of(imp)
 
 
-def _load_import(db: Session, user: User, import_id: str) -> ProfileImport:
-    imp = db.scalar(select(ProfileImport).where(ProfileImport.id == import_id, ProfileImport.user_id == user.id))
+def create_import(
+    db: Session, user: User, source: str, filename: str | None, data: ProfileData, details: list[str] | None = None
+) -> ProposalPreview:
+    items = import_proposals(profile_data(get_profile(db, user)), data)
+    return create_proposal(db, user, kind="import", source=source, items=items, filename=filename, data=data,
+                           extra={"details": details or []})
+
+
+def _load_proposal(db: Session, user: User, proposal_id: str) -> ProfileImport:
+    imp = db.scalar(select(ProfileImport).where(ProfileImport.id == proposal_id, ProfileImport.user_id == user.id))
     if imp is None or imp.applied_at is not None:
-        raise HTTPException(404, "Import introuvable ou déjà appliqué")
+        raise HTTPException(404, "Proposition introuvable ou déjà appliquée")
     created = imp.created_at if imp.created_at.tzinfo else imp.created_at.replace(tzinfo=UTC)
     if created < datetime.now(UTC) - IMPORT_TTL:
-        raise HTTPException(410, "Aperçu expiré, relancez l'import")
+        raise HTTPException(410, "Aperçu expiré, relancez l'opération")
     return imp
 
 
@@ -136,7 +146,7 @@ async def _read_upload(file: UploadFile, limit: int, label: str) -> bytes:
 
 
 @router.post("/import/linkedin-export")
-async def import_linkedin_export(file: UploadFile, db: DB, user: Me) -> ImportPreview:
+async def import_linkedin_export(file: UploadFile, db: DB, user: Me) -> ProposalPreview:
     data = await _read_upload(file, linkedin_export.MAX_ZIP_BYTES, "Fichier")
     profile, found = linkedin_export.parse_export(data)
     details = [f"Fichiers reconnus : {', '.join(found)}"]
@@ -144,7 +154,7 @@ async def import_linkedin_export(file: UploadFile, db: DB, user: Me) -> ImportPr
 
 
 @router.post("/import/pdf")
-async def import_pdf(file: UploadFile, db: DB, user: Me, llm: Gemini) -> ImportPreview:
+async def import_pdf(file: UploadFile, db: DB, user: Me, llm: Gemini) -> ProposalPreview:
     llm = require_llm(llm)
     data = await _read_upload(file, pdf_import.MAX_PDF_BYTES, "PDF")
     text = pdf_import.extract_text(data)
@@ -153,26 +163,35 @@ async def import_pdf(file: UploadFile, db: DB, user: Me, llm: Gemini) -> ImportP
 
 
 @router.post("/import/text")
-def import_text(body: ImportText, db: DB, user: Me, llm: Gemini) -> ImportPreview:
+def import_text(body: ImportText, db: DB, user: Me, llm: Gemini) -> ProposalPreview:
     profile = require_llm(llm).extract_profile(body.text)
     return create_import(db, user, "text", None, profile)
 
 
-@router.post("/import/{import_id}/apply")
-def apply_profile_import(import_id: str, db: DB, user: Me, body: ImportApply | None = None) -> ProfileOut:
-    imp = _load_import(db, user, import_id)
+@router.get("/proposals/{proposal_id}")
+def read_proposal(proposal_id: str, db: DB, user: Me) -> ProposalPreview:
+    return preview_of(_load_proposal(db, user, proposal_id))
+
+
+@router.post("/proposals/{proposal_id}/apply")
+@router.post("/import/{proposal_id}/apply", include_in_schema=False)  # ancien chemin
+def apply_proposal(proposal_id: str, db: DB, user: Me, body: ProposalApply | None = None) -> ProfileOut:
+    """Applique les éléments acceptés, rejoués sur le profil actuel (rien n'est supprimé)."""
+    imp = _load_proposal(db, user, proposal_id)
     profile = get_profile(db, user)
-    accept = set(body.accept) if body and body.accept is not None else None
-    merged, touched = apply_import(profile_data(profile), ProfileData.model_validate(imp.data), accept)
+    accepted = select_items(imp.proposals or [], body.accept if body else None)
+    merged, touched = apply_items(profile_data(profile), accepted)
     save_fields(profile, merged, touched)
-    add_import_trace(profile, imp.source, imp.filename)
+    if imp.kind == "import":
+        add_import_trace(profile, imp.source, imp.filename)
     imp.applied_at = datetime.now(UTC)
     db.commit()
     return profile_out(profile)
 
 
-@router.delete("/import/{import_id}", status_code=204)
-def cancel_profile_import(import_id: str, db: DB, user: Me) -> Response:
-    db.delete(_load_import(db, user, import_id))
+@router.delete("/proposals/{proposal_id}", status_code=204)
+@router.delete("/import/{proposal_id}", status_code=204, include_in_schema=False)  # ancien chemin
+def cancel_proposal(proposal_id: str, db: DB, user: Me) -> Response:
+    db.delete(_load_proposal(db, user, proposal_id))
     db.commit()
     return Response(status_code=204)

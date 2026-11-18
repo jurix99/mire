@@ -555,7 +555,7 @@ async function sendMessage(text) {
   appendMessage({ role: "user", content: message });
   setBusy(true);
   try {
-    const res = await api("/chat", { method: "POST", body: { message } });
+    const res = await api("/chat", { method: "POST", body: { message, mode: chat.mode ?? "normal" } });
     setBusy(false);
     appendMessage(res.message);
   } catch (err) {
@@ -608,6 +608,24 @@ function openChat(open = true) {
     $("textarea", panel).focus();
   } else {
     fab.focus();
+  }
+}
+
+/**
+ * Ouvre le panneau de l'assistant depuis une page. mode = "onboarding" : entretien pour compléter le profil
+ * (l'assistant pose une question à la fois sur ce qui manque).
+ */
+export async function openChatPanel({ mode = "normal" } = {}) {
+  if (!$("#chat-panel")) await mountChat();
+  if (chat.status && !chat.status.enabled) {
+    toast("Assistant indisponible : la clé Gemini (GEMINI_API_KEY) n'est pas configurée sur le serveur.", true);
+    return;
+  }
+  chat.mode = mode;
+  openChat(true);
+  if (mode === "onboarding") {
+    if (!chat.loaded) await loadHistory();
+    sendMessage("Je veux compléter mon profil : pose-moi tes questions, une à la fois.");
   }
 }
 

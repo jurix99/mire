@@ -126,9 +126,12 @@ def test_export_import_preview_then_apply(alice, as_user):
     r = client.post("/api/profile/import/linkedin-export", files={"file": ("export.zip", full_export(), "application/zip")})
     assert r.status_code == 200, r.text
     preview = r.json()
-    changes = {c["field"]: c for c in preview["changes"]}
-    assert changes["headline"]["action"] == "modification"
-    assert changes["skills"]["items"] == ["PostgreSQL (fort)", "Kubernetes (fort)"]
+    items = preview["items"]
+    headline = next(i for i in items if i["field"] == "headline")
+    # Remplacer une saisie manuelle : proposé, mais pas coché par défaut
+    assert (headline["op"], headline["checked"], headline["before"]) == ("set", False, "Dev backend (saisi à la main)")
+    assert [i["display"] for i in items if i["field"] == "skills"] == ["PostgreSQL (fort)", "Kubernetes (fort)"]
+    assert all(not i["inferred"] for i in items)  # un import ne contient que des faits
 
     # Rien n'est enregistré avant confirmation
     assert client.get("/api/profile").json()["experiences"] == []
@@ -152,8 +155,8 @@ def test_apply_accepting_modification(alice, as_user):
     client = as_user(alice)
     client.patch("/api/profile", json={"headline": "Ancien titre"})
     preview = client.post("/api/profile/import/linkedin-export", files={"file": ("e.zip", full_export())}).json()
-    profile = client.post(f"/api/profile/import/{preview['import_id']}/apply",
-                          json={"accept": ["headline", "skills"]}).json()
+    ids = [i["id"] for i in preview["items"] if i["field"] in ("headline", "skills")]
+    profile = client.post(f"/api/profile/proposals/{preview['import_id']}/apply", json={"accept": ids}).json()
     assert profile["headline"] == "Backend Engineer"
     assert len(profile["skills"]) == 3
     assert profile["experiences"] == []  # non accepté
@@ -174,7 +177,7 @@ def test_text_import_uses_gemini(alice, as_user, fake_llm):
     assert r.status_code == 200, r.text
     assert "Rust" in fake_llm.last_text
     preview = r.json()
-    assert {c["field"] for c in preview["changes"]} == {"skills", "location"}
+    assert {i["field"] for i in preview["items"]} == {"skills", "location"}
     profile = client.post(f"/api/profile/import/{preview['import_id']}/apply").json()
     assert profile["location"] == "Lyon"
     assert profile["raw_imports"][0]["source"] == "text"
@@ -190,3 +193,33 @@ def test_pdf_and_text_import_without_gemini_key(alice, as_user):
 def test_pdf_import_rejects_non_pdf(alice, as_user, fake_llm):
     r = as_user(alice).post("/api/profile/import/pdf", files={"file": ("cv.pdf", b"hello", "application/pdf")})
     assert r.status_code == 422
+
+
+def test_items_are_accepted_one_by_one(alice, as_user):
+    client = as_user(alice)
+    preview = client.post("/api/profile/import/linkedin-export", files={"file": ("e.zip", full_export())}).json()
+    skills = [i for i in preview["items"] if i["field"] == "skills"]
+    kubernetes = next(i for i in skills if i["value"]["name"] == "Kubernetes")
+    profile = client.post(f"/api/profile/proposals/{preview['import_id']}/apply",
+                          json={"accept": [kubernetes["id"]]}).json()
+    assert [s["name"] for s in profile["skills"]] == ["Kubernetes"]
+    assert profile["headline"] is None and profile["experiences"] == []
+
+
+def test_apply_replays_on_current_profile(alice, as_user):
+    """Un élément déjà ajouté à la main entre l'aperçu et l'application n'est pas dupliqué."""
+    client = as_user(alice)
+    preview = client.post("/api/profile/import/linkedin-export", files={"file": ("e.zip", full_export())}).json()
+    client.patch("/api/profile", json={"skills": [{"name": "postgresql", "level": "expert"}]})
+    profile = client.post(f"/api/profile/proposals/{preview['import_id']}/apply").json()
+    assert [(s["name"], s["level"]) for s in profile["skills"]] == [
+        ("postgresql", "expert"), ("Python", None), ("Kubernetes", None),
+    ]
+
+
+def test_proposal_cancel(alice, as_user):
+    client = as_user(alice)
+    preview = client.post("/api/profile/import/linkedin-export", files={"file": ("e.zip", full_export())}).json()
+    assert client.get(f"/api/profile/proposals/{preview['import_id']}").json()["kind"] == "import"
+    assert client.delete(f"/api/profile/proposals/{preview['import_id']}").status_code == 204
+    assert client.post(f"/api/profile/proposals/{preview['import_id']}/apply").status_code == 404

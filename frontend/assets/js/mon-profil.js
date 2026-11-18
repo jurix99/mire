@@ -1,4 +1,4 @@
-import { $, $$, ICONS, STATUSES, api, attempt, boot, fmtToday, html, loadMe, openForm, pill, toast } from "./app.js";
+import { $, $$, ICONS, STATUSES, api, attempt, boot, fmtToday, html, loadMe, openChatPanel, openForm, pill, toast } from "./app.js";
 
 const HELP = {
   nouveau: "Poste repéré, pas encore étudié",
@@ -368,44 +368,71 @@ function renderImport() {
   };
 }
 
-const shorten = (v) => {
-  const s = typeof v === "string" ? v : JSON.stringify(v);
-  return s.length > 280 ? `${s.slice(0, 280)}…` : s;
-};
+const OP_LABEL = { add: "Ajout", set: "Ajout", update: "Modification", deactivate: "Désactiver" };
+const CONFIDENCE_LABEL = { haute: "confiance haute", moyenne: "confiance moyenne", basse: "confiance basse" };
 
+/** Une ligne de proposition : case à cocher + valeur + badges + justification. */
+function proposalItem(it) {
+  const replaces = it.op === "set" && it.before;
+  return html`<label class="change">
+    <input type="checkbox" value="${it.id}" ${it.checked ? "checked" : ""}>
+    <span class="grow">
+      <span class="change-line">
+        <span class="pill plain">${replaces ? "Remplace votre saisie" : OP_LABEL[it.op] ?? it.op}</span>
+        ${it.inferred ? html`<span class="badge-inferred" title="Déduction de l'assistant, pas un fait importé">déduit</span>` : ""}
+        ${it.confidence ? html`<span class="small muted">${CONFIDENCE_LABEL[it.confidence] ?? it.confidence}</span>` : ""}
+      </span>
+      <span class="small">${it.display}</span>
+      ${it.before ? html`<span class="small muted">Actuel : ${it.before}</span>` : ""}
+      ${it.reason ? html`<span class="small muted">${it.reason}</span>` : ""}
+      ${it.examples?.length ? html`<span class="small muted">D'après : ${it.examples.join(", ")}</span>` : ""}
+    </span>
+  </label>`;
+}
+
+/**
+ * Aperçu d'une proposition (import, analyse, synthèse des règles), validée élément par élément.
+ * Les éléments sont regroupés par champ ; rien n'est enregistré avant « Appliquer ».
+ */
 function renderPreview(preview) {
   const box = $("#import-preview");
   if (!preview) { box.innerHTML = ""; return; }
-  const changes = preview.changes;
+  const groups = new Map();
+  for (const it of preview.items) {
+    if (!groups.has(it.label)) groups.set(it.label, []);
+    groups.get(it.label).push(it);
+  }
+  const intro = preview.kind === "import"
+    ? "Cochez ce que vous voulez appliquer. Rien de ce que vous avez saisi n'est supprimé."
+    : "Ce sont des suggestions (« déduit ») : acceptez-les une par une. Rien n'est modifié sans votre accord.";
   box.innerHTML = html`
     <div class="import-preview">
       <h3>Aperçu · ${preview.source_label}${preview.filename ? ` · ${preview.filename}` : ""}</h3>
       ${preview.details.map((d) => html`<p class="small muted">${d}</p>`)}
-      ${changes.length ? html`
-        <p class="small">Cochez ce que vous voulez appliquer. Rien de ce que vous avez saisi n'est supprimé.</p>
-        <div class="changes">${changes.map((c) => html`
-          <label class="change">
-            <input type="checkbox" value="${c.field}" ${c.action === "ajout" ? "checked" : ""}>
-            <span class="grow">
-              <strong>${c.label}</strong>
-              <span class="pill plain">${c.action === "ajout" ? "Ajout" : "Remplace votre saisie"}</span>
-              ${c.items.length ? html`<ul class="small">${c.items.slice(0, 12).map((i) => html`<li>${i}</li>`)}${c.items.length > 12 ? html`<li class="muted">… et ${c.items.length - 12} de plus</li>` : ""}</ul>` : ""}
-              ${c.action === "modification" ? html`<span class="small muted block">Actuel : ${shorten(c.before)}</span>` : ""}
-              ${c.after != null && !c.items.length ? html`<span class="small block">${c.action === "modification" ? "Importé : " : ""}${shorten(c.after)}</span>` : ""}
-            </span>
-          </label>`)}
-        </div>
-        <div class="import-actions">
-          <button type="button" class="btn" data-apply>Appliquer</button>
-          <button type="button" class="btn ghost" data-cancel-import>Annuler</button>
-        </div>` : html`
-        <p class="small">Rien de nouveau : votre profil contient déjà ces informations.</p>
-        <div><button type="button" class="btn ghost sm" data-cancel-import>Fermer</button></div>`}
+      ${preview.items.length ? html`
+        <p class="small">${intro}</p>
+        <div class="changes">${[...groups].map(([label, items]) => html`
+          <div class="change-group"><strong class="small">${label}</strong>${items.map(proposalItem)}</div>`)}
+        </div>` : html`<p class="small">Rien de nouveau : votre profil contient déjà ces informations.</p>`}
+      ${preview.questions?.length ? html`
+        <div class="questions">
+          <p class="small"><strong>Pour compléter votre profil :</strong></p>
+          <ul class="small">${preview.questions.map((q) => html`<li>${q}</li>`)}</ul>
+          <button type="button" class="btn ghost sm" data-onboarding>Compléter mon profil avec l'assistant</button>
+        </div>` : ""}
+      <div class="import-actions">
+        ${preview.items.length ? html`
+          <button type="button" class="btn" data-apply>Appliquer la sélection</button>
+          <button type="button" class="btn ghost" data-check-all>Tout cocher</button>` : ""}
+        <button type="button" class="btn ghost" data-cancel-import>${preview.items.length ? "Annuler" : "Fermer"}</button>
+      </div>
     </div>`.s;
 
   box.onclick = async (e) => {
+    if (e.target.closest("[data-onboarding]")) return startOnboarding();
+    if (e.target.closest("[data-check-all]")) return $$(".change input", box).forEach((i) => (i.checked = true));
     if (e.target.closest("[data-cancel-import]")) {
-      api(`/profile/import/${preview.import_id}`, { method: "DELETE" }).catch(() => {});
+      api(`/profile/proposals/${preview.import_id}`, { method: "DELETE" }).catch(() => {});
       renderPreview(null);
     }
     if (e.target.closest("[data-apply]")) {
@@ -413,15 +440,39 @@ function renderPreview(preview) {
       if (!accept.length) return toast("Rien n'est coché", true);
       e.target.disabled = true;
       try {
-        profile = await attempt(() => api(`/profile/import/${preview.import_id}/apply`, { method: "POST", body: { accept } }),
-          "Profil mis à jour");
+        profile = await attempt(() => api(`/profile/proposals/${preview.import_id}/apply`, { method: "POST", body: { accept } }),
+          `${accept.length} élément${accept.length > 1 ? "s" : ""} appliqué${accept.length > 1 ? "s" : ""}`);
+        const hadQuestions = preview.questions?.length;
         renderPreview(null);
         renderProfile();
+        if (hadQuestions || preview.kind === "import") offerOnboarding();
       } catch {
         e.target.disabled = false;
       }
     }
   };
+}
+
+/** Après un import ou une analyse : proposer de compléter le profil avec l'assistant. */
+function offerOnboarding() {
+  const box = $("#import-preview");
+  box.innerHTML = html`<div class="import-preview">
+    <p class="small">Profil mis à jour. L'assistant peut vous poser quelques questions sur ce qui manque encore
+    (lieux, stades, salaire, cloud, déplacements…).</p>
+    <div class="import-actions">
+      <button type="button" class="btn" data-onboarding>Compléter mon profil avec l'assistant</button>
+      <button type="button" class="btn ghost" data-close-offer>Plus tard</button>
+    </div>
+  </div>`.s;
+  box.onclick = (e) => {
+    if (e.target.closest("[data-onboarding]")) startOnboarding();
+    if (e.target.closest("[data-onboarding], [data-close-offer]")) box.innerHTML = "";
+  };
+}
+
+function startOnboarding() {
+  if (!gemini.enabled) return toast("L'assistant nécessite Gemini (GEMINI_API_KEY non configurée).", true);
+  openChatPanel({ mode: "onboarding" });
 }
 
 // --- Page -------------------------------------------------------------------
