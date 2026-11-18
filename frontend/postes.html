@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Postes · Mire</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script type="module" src="/assets/js/postes.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main">
+      <header class="page-head">
+        <div class="intro">
+          <p class="label">// Votre sélection</p>
+          <h1>Postes</h1>
+          <p class="muted">Changez le statut d'un poste pour l'ajouter à vos process.</p>
+        </div>
+        <button class="btn" type="button" id="add">Ajouter un poste</button>
+      </header>
+
+      <div class="toolbar" id="filters" role="group" aria-label="Filtrer par statut"></div>
+      <div class="toolbar">
+        <input class="input" type="search" id="search" placeholder="Rechercher un poste, une stack…" aria-label="Rechercher" style="flex:1;max-width:360px">
+        <select id="company" aria-label="Entreprise"></select>
+      </div>
+
+      <div class="card table-card">
+        <div class="job-row head small muted">
+          <span></span><span>Poste</span><span class="col-company">Entreprise</span><span class="col-score">Score</span><span>Statut</span><span></span>
+        </div>
+        <div id="list"></div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

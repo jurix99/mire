@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mon profil · Mire</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script type="module" src="/assets/js/mon-profil.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main">
+      <header class="page-head">
+        <div class="intro">
+          <p class="label">// Votre compte</p>
+          <h1>Mon profil</h1>
+        </div>
+      </header>
+
+      <section class="grid-2">
+        <div class="card pad-lg" style="display:grid;gap:20px;align-content:start">
+          <div style="display:flex;align-items:center;gap:18px" id="identity"></div>
+          <div class="rows" id="details"></div>
+          <div><a class="btn ghost" href="/auth/logout">Se déconnecter</a></div>
+        </div>
+        <div class="card pad-lg">
+          <div class="section-head">
+            <div class="intro"><p class="label">// Légende</p><h2>Statuts des process</h2></div>
+          </div>
+          <div class="legend" id="legend"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

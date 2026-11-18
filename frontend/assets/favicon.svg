@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <!-- Mire : anneau ouvert, point central et satellite (noir, blanc en mode sombre) -->
+  <style>
+    .ink { fill: #111; }
+    .ring { fill: none; stroke: #111; }
+    @media (prefers-color-scheme: dark) { .ink { fill: #fff; } .ring { stroke: #fff; } }
+  </style>
+  <defs>
+    <mask id="gap">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <circle cx="734" cy="290" r="108" fill="#000"/>
+    </mask>
+  </defs>
+  <circle class="ring" cx="512" cy="512" r="314" stroke-width="92" mask="url(#gap)"/>
+  <circle class="ink" cx="512" cy="512" r="84"/>
+  <circle class="ink" cx="734" cy="290" r="75"/>
+</svg>

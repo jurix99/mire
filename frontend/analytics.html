@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Analytics · Mire</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script type="module" src="/assets/js/analytics.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main">
+      <header class="page-head">
+        <div class="intro">
+          <p class="label">// Prendre du recul</p>
+          <h1>Analytics</h1>
+          <p class="muted">Où en est votre recherche, statut par statut.</p>
+        </div>
+      </header>
+
+      <section class="grid-2">
+        <div class="card pad-lg">
+          <div class="section-head"><h2>Répartition par statut</h2></div>
+          <div class="bars" id="by-status"></div>
+        </div>
+        <div class="card pad-lg">
+          <div class="section-head"><h2>Entonnoir</h2><span class="small muted" id="rate"></span></div>
+          <div class="funnel" id="funnel"></div>
+        </div>
+      </section>
+
+      <section class="section grid-2">
+        <div class="card pad-lg">
+          <div class="section-head"><h2>Activité</h2><span class="small muted">Changements de statut par semaine</span></div>
+          <div class="weeks" id="weeks"></div>
+        </div>
+        <div class="card pad-lg">
+          <div class="section-head"><h2>Par entreprise</h2></div>
+          <div class="rows" id="by-company"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

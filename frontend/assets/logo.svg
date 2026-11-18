@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" fill="currentColor">
+  <!-- Mire : anneau ouvert, point central et satellite -->
+  <defs>
+    <mask id="gap">
+      <rect width="1024" height="1024" fill="#fff"/>
+      <circle cx="734" cy="290" r="108" fill="#000"/>
+    </mask>
+  </defs>
+  <circle cx="512" cy="512" r="314" fill="none" stroke="currentColor" stroke-width="92" mask="url(#gap)"/>
+  <circle cx="512" cy="512" r="84"/>
+  <circle cx="734" cy="290" r="75"/>
+</svg>

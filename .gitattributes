@@ -1,0 +1,4 @@
+# Fins de ligne LF partout (fichiers lus sous Linux par Docker : nginx.conf, scripts, Python...)
+* text=auto eol=lf
+*.png binary
+*.woff2 binary
