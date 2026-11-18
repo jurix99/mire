@@ -1,4 +1,6 @@
-import { $, $$, ICONS, STATUSES, api, attempt, boot, fmtToday, html, loadMe, openChatPanel, openForm, pill, toast } from "./app.js";
+import {
+  $, $$, ICONS, STATUSES, api, attempt, boot, fmtToday, html, loadMe, openChatPanel, openForm, openJobDialog, pill, toast,
+} from "./app.js";
 
 const HELP = {
   nouveau: "Poste repéré, pas encore étudié",
@@ -23,6 +25,7 @@ const monthYear = new Intl.DateTimeFormat("fr-FR", { month: "short", year: "nume
 let profile;
 let gemini = { enabled: false };
 let feedback = { new: 0, total: 0, threshold: 3, recent: [] };
+let jobNames = {}; // id de poste -> « Entreprise – Titre » (offres citées par les règles)
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -56,6 +59,7 @@ function renderPro() {
   const p = profile;
   const rows = [
     ["Titre", p.headline],
+    ["Point fort", p.positioning],
     ["Localisation", p.location],
     ["Expérience", p.years_experience != null ? `${p.years_experience} an${p.years_experience >= 2 ? "s" : ""}` : null],
     ["Langues", p.languages.map((l) => (l.level ? `${l.name} (${l.level})` : l.name)).join(", ")],
@@ -77,6 +81,8 @@ function renderPro() {
       },
       fields: [
         { name: "headline", label: "Titre", full: true, maxlength: 300, placeholder: "Ex. Développeur backend senior" },
+        { name: "positioning", label: "Point fort / positionnement", type: "textarea", full: true, maxlength: 1000,
+          hint: "En 1-2 phrases, ce que vous faites de mieux (ex. industrialiser des prototypes IA en production)" },
         { name: "location", label: "Localisation", maxlength: 200 },
         { name: "years_experience", label: "Années d'expérience", type: "number", min: 0, max: 60, step: 0.5 },
         { name: "languages", label: "Langues", type: "textarea", full: true, hint: "Une par ligne, ex. « Anglais : courant »" },
@@ -84,6 +90,7 @@ function renderPro() {
       ],
       onSubmit: (v) => save({
         headline: v.headline,
+        positioning: v.positioning,
         location: v.location,
         years_experience: v.years_experience,
         summary: v.summary,
@@ -196,32 +203,158 @@ function renderSkills() {
 
 // --- Règles -----------------------------------------------------------------
 
+const RULE_SOURCE = {
+  manuel: "saisie", import: "import", analyse: "analyse", feedback: "apprise de vos retours", chat: "assistant",
+};
+const fmtDay = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "short" });
+
 function renderRules() {
   const rules = profile.rules;
+  const active = rules.filter((r) => r.active).length;
   $("#rules").innerHTML = html`
-    ${head("// Règles", "À éviter, à préférer")}
+    ${head("// Règles", "À éviter, à préférer", html`<span class="small muted">${active} active${active > 1 ? "s" : ""}</span>`)}
     <div class="rows">${rules.length ? rules.map((r, i) => html`
-      <div class="row-item">
+      <div class="row-item rule ${r.active ? "" : "inactive"}">
         <span class="pill ${r.kind === "eviter" ? "st-refuse" : "st-offre"}">${r.kind === "eviter" ? "Éviter" : "Préférer"}</span>
-        <span class="grow">${r.text}</span>
+        <span class="grow">
+          <span>${r.text}</span>
+          <span class="rule-meta small muted">
+            ${RULE_SOURCE[r.source] ?? r.source}${r.created_at ? ` · ${fmtDay.format(new Date(r.created_at))}` : ""}
+            ${r.examples.length ? html` · d'après ${r.examples.map((id) => html`<button type="button" class="link-btn example" data-job="${id}">${jobNames[id] ?? `poste #${id}`}</button>`)}` : ""}
+          </span>
+        </span>
+        <label class="switch" title="${r.active ? "Désactiver (gardée mais ignorée)" : "Réactiver"}">
+          <input type="checkbox" data-toggle-rule="${i}" ${r.active ? "checked" : ""} aria-label="Règle active">
+          <span></span>
+        </label>
         <button type="button" class="icon-btn" data-rm-rule="${i}" aria-label="Supprimer la règle">${ICONS.trash}</button>
       </div>`) : emptyRow("Aucune règle. Exemple : « Écarter les postes où TypeScript est au cœur du poste ».")}
     </div>
     <form class="inline-add" data-add-rule style="margin-top:12px">
       <select class="input" name="kind" aria-label="Type de règle">${RULE_KINDS.map(([v, l]) => html`<option value="${v}">${l}</option>`)}</select>
-      <input class="input" name="text" placeholder="Ex. postes avec astreintes" maxlength="300" required aria-label="Règle">
+      <input class="input" name="text" placeholder="Ex. postes avec astreintes" maxlength="500" required aria-label="Règle">
       <button class="btn sm">Ajouter</button>
     </form>`.s;
 
   const box = $("#rules");
   box.onclick = (e) => {
     const rm = e.target.closest("[data-rm-rule]");
-    if (rm) save({ rules: rules.filter((_, i) => i !== Number(rm.dataset.rmRule)) }, "Règle supprimée");
+    if (rm && window.confirm("Supprimer cette règle ? (vous pouvez aussi la désactiver pour la garder)")) {
+      save({ rules: rules.filter((_, i) => i !== Number(rm.dataset.rmRule)) }, "Règle supprimée");
+    }
+    const ex = e.target.closest("[data-job]");
+    if (ex) openJobDialog(Number(ex.dataset.job));
+  };
+  box.onchange = (e) => {
+    const t = e.target.closest("[data-toggle-rule]");
+    if (!t) return;
+    const i = Number(t.dataset.toggleRule);
+    save({ rules: rules.map((r, j) => (j === i ? { ...r, active: t.checked } : r)) },
+      t.checked ? "Règle réactivée" : "Règle désactivée (gardée, mais ignorée)");
   };
   box.onsubmit = (e) => {
     e.preventDefault();
     const text = e.target.elements.text.value.trim();
-    if (text) save({ rules: [...rules, { kind: e.target.elements.kind.value, text }] }, "Règle ajoutée");
+    if (text) save({ rules: [...rules, { kind: e.target.elements.kind.value, text, source: "manuel" }] }, "Règle ajoutée");
+  };
+}
+
+// --- Entreprises exclues et offres de référence ---------------------------------------
+
+function renderLearned() {
+  const excluded = profile.excluded_companies;
+  const refs = profile.reference_jobs;
+  $("#learned").innerHTML = html`
+    ${head("// Appris de vos retours", "Exclusions et références")}
+    <p class="small"><strong>Offres de référence</strong> <span class="muted">· les offres qui leur ressemblent sont mieux notées</span></p>
+    <div class="rows">${refs.length ? refs.map((r, i) => html`
+      <div class="row-item">
+        <span class="grow">
+          ${r.job_id ? html`<button type="button" class="link-btn title" data-job="${r.job_id}">${[r.company, r.title].filter(Boolean).join(" – ")}</button>`
+                     : html`<span class="title">${[r.company, r.title].filter(Boolean).join(" – ")}</span>`}
+          ${r.why ? html`<span class="small muted">${r.why}</span>` : ""}
+        </span>
+        <button type="button" class="icon-btn" data-rm-ref="${i}" aria-label="Retirer des références">${ICONS.trash}</button>
+      </div>`) : emptyRow("Aucune pour l'instant : cliquez sur « J'aime » sur une offre.")}
+    </div>
+    <p class="small" style="margin-top:16px"><strong>Entreprises exclues</strong> <span class="muted">· leurs offres sont écartées automatiquement</span></p>
+    <div class="rows">${excluded.length ? excluded.map((c, i) => html`
+      <div class="row-item">
+        <span class="grow"><span class="title">${c.name}</span>${c.reason ? html`<span class="small muted">${c.reason}</span>` : ""}</span>
+        <button type="button" class="icon-btn" data-rm-excluded="${i}" aria-label="Ne plus exclure ${c.name}">${ICONS.trash}</button>
+      </div>`) : emptyRow("Aucune entreprise exclue.")}
+    </div>
+    <form class="inline-add" data-add-excluded style="margin-top:12px">
+      <input class="input" name="name" placeholder="Entreprise à exclure" maxlength="120" required aria-label="Entreprise">
+      <input class="input" name="reason" placeholder="Raison (facultatif)" maxlength="200" aria-label="Raison">
+      <button class="btn sm">Exclure</button>
+    </form>`.s;
+
+  const box = $("#learned");
+  box.onclick = (e) => {
+    const job = e.target.closest("[data-job]");
+    if (job) return openJobDialog(Number(job.dataset.job));
+    const ref = e.target.closest("[data-rm-ref]");
+    if (ref) save({ reference_jobs: refs.filter((_, i) => i !== Number(ref.dataset.rmRef)) }, "Retirée des références");
+    const ex = e.target.closest("[data-rm-excluded]");
+    if (ex) save({ excluded_companies: excluded.filter((_, i) => i !== Number(ex.dataset.rmExcluded)) }, "Entreprise réintégrée");
+  };
+  box.onsubmit = (e) => {
+    e.preventDefault();
+    const name = e.target.elements.name.value.trim();
+    if (!name) return;
+    if (excluded.some((c) => c.name.toLowerCase() === name.toLowerCase())) return toast("Déjà exclue", true);
+    save({ excluded_companies: [...excluded, { name, reason: e.target.elements.reason.value.trim() || null }] },
+      `${name} exclue`);
+  };
+}
+
+// --- Barème de notation --------------------------------------------------------
+
+const CRITERIA_LABELS = {
+  competences: "Correspondance des compétences",
+  stade: "Stade de l'entreprise et qualité des investisseurs",
+  ownership: "Transversalité / ownership",
+  ia_concrete: "Produit IA concret avec impact réel",
+  xp: "Expérience demandée compatible",
+  references: "Ressemblance avec les offres de référence",
+};
+const DEFAULT_WEIGHTS = { competences: 3, stade: 2, ownership: 2, ia_concrete: 1, xp: 1, references: 1 };
+
+function renderScoring() {
+  const { weights, threshold } = profile.scoring;
+  const total = Object.values(weights).reduce((a, b) => a + b, 0);
+  $("#scoring").innerHTML = html`
+    ${head("// Notation", "Barème", html`<span class="small muted">Total ${total.toLocaleString("fr-FR")} · ramené sur 10</span>`)}
+    <form class="scoring" data-scoring>
+      ${Object.entries(CRITERIA_LABELS).map(([k, label]) => html`
+        <label class="scoring-row">
+          <span class="small">${label}</span>
+          <input class="input" type="number" name="${k}" min="0" max="10" step="0.5" value="${weights[k] ?? 0}" aria-label="Poids : ${label}">
+        </label>`)}
+      <label class="scoring-row threshold">
+        <span class="small"><strong>Seuil</strong> · en dessous, l'offre est « Écartée (auto) »</span>
+        <input class="input" type="number" name="threshold" min="0" max="10" step="0.5" value="${threshold}" aria-label="Seuil">
+      </label>
+      <div class="import-actions">
+        <button class="btn sm">Enregistrer le barème</button>
+        <button type="button" class="btn ghost sm" data-default-scoring>Valeurs par défaut</button>
+      </div>
+      <p class="small muted">Modifier le barème réévalue les offres que vous n'avez pas encore traitées.</p>
+    </form>`.s;
+
+  const box = $("#scoring");
+  box.onsubmit = (e) => {
+    e.preventDefault();
+    const f = e.target.elements;
+    const next = Object.fromEntries(Object.keys(CRITERIA_LABELS).map((k) => [k, Number(f[k].value || 0)]));
+    if (!Object.values(next).some((w) => w > 0)) return toast("Au moins un critère doit avoir un poids", true);
+    save({ scoring: { weights: next, threshold: Number(f.threshold.value || 0) } }, "Barème enregistré : réévaluation en cours");
+  };
+  box.onclick = (e) => {
+    if (e.target.closest("[data-default-scoring]")) {
+      save({ scoring: { weights: DEFAULT_WEIGHTS, threshold: 6 } }, "Barème par défaut rétabli");
+    }
   };
 }
 
@@ -511,6 +644,8 @@ function startOnboarding() {
 
 function renderProfile() {
   renderPro();
+  renderLearned();
+  renderScoring();
   renderPrefs();
   renderSkills();
   renderRules();
@@ -524,6 +659,7 @@ async function render() {
     api("/profile"),
     api("/chat/status").catch(() => ({ enabled: false })),
     api("/feedback").catch(() => ({ new: 0, total: 0, threshold: 3, recent: [] })),
+    api("/jobs").then((jobs) => (jobNames = Object.fromEntries(jobs.map((j) => [j.id, `${j.company.name} – ${j.title}`])))).catch(() => {}),
   ]);
   feedback = fb;
   profile = data;
