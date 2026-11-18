@@ -30,7 +30,8 @@ def test_no_delete_tool():
     names = {t.name for t in TOOLS}
     assert not any("delete" in n or "remove_job" in n for n in names)
     assert names == {"get_profile", "list_jobs", "get_job", "list_applications", "get_dashboard",
-                     "update_profile", "set_job_status", "update_application", "create_job"}
+                     "update_profile", "set_job_status", "update_application", "create_job", "rate_job",
+                     "ask_question"}
 
 
 def test_read_tools_run_directly(alice, catalog, as_user, fake_llm):

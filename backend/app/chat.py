@@ -7,7 +7,7 @@ Réponse complète (pas de streaming) : plus simple avec la boucle d'appels d'ou
 """
 
 from datetime import UTC, date, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
@@ -18,6 +18,7 @@ from . import assessments, chat_tools
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
 from .models import STATUS_LABELS, ChatAction, ChatConversation, ChatMessage, User
+from .analysis import missing_topics
 from .profile import get_profile, job_labels, profile_data, profile_summary
 from .users import current_user
 
@@ -74,13 +75,40 @@ def _profile_context(db: Session, user: User) -> str:
     return profile_summary(user, data, job_labels(db, data))
 
 
-def build_system_instruction(db: Session, user: User) -> str:
+ONBOARDING_INSTRUCTION = """
+MODE ENTRETIEN : tu aides la personne à compléter son profil pour mieux trier les offres.
+- Pose UNE seule question à la fois, courte, puis attends la réponse. 6 à 10 questions au total au maximum.
+- Ne pose des questions QUE sur ces sujets non renseignés, dans cet ordre de priorité :
+{topics}
+- Ne redemande jamais un sujet déjà renseigné dans le profil.
+- À chaque question, appelle l'outil ask_question avec la question et 3 à 6 réponses rapides pertinentes
+  (ex. « Paris », « Remote », « Seed », « Série A », « Peu de déplacements »).
+- Quand la personne répond, propose la modification avec update_profile (elle confirmera avec le bouton), puis
+  pose la question suivante DANS LE MÊME TOUR, avec ask_question (réponses rapides) : chaque question doit
+  avoir ses réponses rapides.
+- Pour « offres aimées », demande un exemple et pourquoi : propose une règle "preferer" avec update_profile.
+- Quand tous les sujets sont traités (ou si elle veut arrêter), remercie-la et résume ce qui a été proposé.
+"""
+
+ONBOARDING_DONE = """
+MODE ENTRETIEN : le profil contient déjà l'essentiel (lieux, mode, stades, salaire, cloud, déplacements, secteurs,
+règles, offres aimées). Dis-le simplement et propose d'affiner une règle ou de donner un retour sur des offres.
+"""
+
+
+def build_system_instruction(db: Session, user: User, mode: str = "normal") -> str:
     today = date.today()
-    return SYSTEM_INSTRUCTION.format(
+    text = SYSTEM_INSTRUCTION.format(
         today=f"{WEEKDAYS[today.weekday()]} {today.strftime('%d/%m/%Y')} ({today.isoformat()})",
         statuses=", ".join(f"{s.value} = {label}" for s, label in STATUS_LABELS.items()),
         profile=_profile_context(db, user),
     )
+    if mode == "onboarding":
+        # Sujets manquants calculés par le serveur : le modèle ne redemande pas ce qui est renseigné
+        topics = missing_topics(profile_data(get_profile(db, user)))
+        text += ONBOARDING_INSTRUCTION.format(topics="\n".join(f"  - {t}" for t in topics)) if topics \
+            else ONBOARDING_DONE
+    return text
 
 
 # --- Schémas -----------------------------------------------------------------
@@ -88,6 +116,7 @@ def build_system_instruction(db: Session, user: User) -> str:
 
 class ChatIn(BaseModel):
     message: Annotated[str, Field(min_length=1, max_length=MAX_MESSAGE_CHARS)]
+    mode: Literal["normal", "onboarding"] = "normal"  # onboarding : entretien pour compléter le profil
 
 
 class ActionOut(BaseModel):
@@ -106,6 +135,7 @@ class MessageOut(BaseModel):
     content: str
     created_at: datetime
     actions: list[ActionOut] = []
+    quick_replies: list[str] = []  # réponses rapides proposées par l'assistant (outil ask_question)
 
 
 class ChatStatus(BaseModel):
@@ -134,9 +164,42 @@ def _action_out(a: ChatAction) -> ActionOut:
                      executed_at=a.executed_at)
 
 
+# Réponses rapides par sujet (entretien), si le modèle n'en a pas fourni : (mots-clés, réponses)
+TOPIC_REPLIES: list[tuple[tuple[str, ...], list[str]]] = [
+    (("mode de travail", "télétravail", "hybride", "remote", "sur site"), ["Sur site", "Hybride", "Remote"]),
+    (("déplacement",), ["Aucun", "Occasionnels", "Fréquents OK"]),
+    (("stade", "seed", "série"), ["Pré-seed", "Seed", "Série A", "Série B", "Peu importe"]),
+    (("salaire", "rémunération"), ["50 k€", "60 k€", "70 k€", "80 k€ et plus"]),
+    (("cloud", "aws", "azure", "gcp"), ["Azure", "AWS", "GCP", "Peu importe"]),
+    (("secteur",), ["Santé", "Industrie", "Climat", "Robotique", "B2B", "Peu importe"]),
+    (("éviter", "ne veux pas", "rédhibitoire"), ["Trop front / TypeScript", "Trop SQL / data", "Trop IA / ML",
+                                                  "Beaucoup de déplacements"]),
+    (("rôle", "poste visé", "type de poste"), ["Backend", "Platform", "Founding engineer", "MLOps"]),
+    (("lieu", "ville", "où "), ["Paris", "Lyon", "Remote (France)", "Autre"]),
+]
+
+
+def fallback_quick_replies(text: str) -> list[str]:
+    """Réponses rapides pour la dernière question du texte (sujet détecté par mots-clés), sinon []."""
+    if "?" not in text:
+        return []
+    question = text[: text.rindex("?") + 1].rsplit("\n", 1)[-1].lower()
+    for keywords, replies in TOPIC_REPLIES:
+        if any(k in question for k in keywords):
+            return replies
+    return []
+
+
+def _quick_replies(m: ChatMessage) -> list[str]:
+    for call in reversed(m.tool_calls or []):
+        if call.get("name") == "ask_question":
+            return [str(r)[:60] for r in (call.get("args") or {}).get("quick_replies", [])][:6]
+    return []
+
+
 def _message_out(m: ChatMessage) -> MessageOut:
     return MessageOut(id=m.id, role=m.role, content=m.content, created_at=m.created_at,
-                      actions=[_action_out(a) for a in m.actions])
+                      actions=[_action_out(a) for a in m.actions], quick_replies=_quick_replies(m))
 
 
 # --- Conversation ------------------------------------------------------------
@@ -225,7 +288,7 @@ def chat(body: ChatIn, db: DB, user: Me, llm: Gemini) -> ChatOut:
     conv.updated_at = datetime.now(UTC)
     db.commit()  # le message compte pour la limite de débit, même si Gemini échoue ensuite
 
-    system = build_system_instruction(db, user)
+    system = build_system_instruction(db, user, body.mode)
     history = _history_for_model(db, conv)
     runner = chat_tools.ToolRunner(db, user)
     try:
@@ -236,10 +299,16 @@ def chat(body: ChatIn, db: DB, user: Me, llm: Gemini) -> ChatOut:
 
     text = result.text or ("Je vous propose les modifications ci-dessous." if runner.actions else
                            "Je n'ai pas de réponse à proposer. Pouvez-vous reformuler ?")
+    tool_calls = [{"name": c.name, "args": c.args, "ok": "error" not in c.result,
+                   "action_id": c.result.get("action_id")} for c in result.tool_calls]
+    if body.mode == "onboarding" and not any(c["name"] == "ask_question" for c in tool_calls):
+        # Filet : le modèle a posé une question sans réponses rapides -> réponses selon le sujet détecté
+        quick = fallback_quick_replies(text)
+        if quick:
+            tool_calls.append({"name": "ask_question", "args": {"quick_replies": quick}, "ok": True, "auto": True})
     reply = ChatMessage(
         conversation_id=conv.id, role="assistant", content=text, created_at=datetime.now(UTC),
-        tool_calls=[{"name": c.name, "args": c.args, "ok": "error" not in c.result,
-                     "action_id": c.result.get("action_id")} for c in result.tool_calls] or None,
+        tool_calls=tool_calls or None,
     )
     db.add(reply)
     db.flush()

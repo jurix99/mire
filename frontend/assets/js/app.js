@@ -609,6 +609,9 @@ function messageHtml(m) {
   return html`<div class="chat-msg assistant">
     <div class="bubble md">${raw(renderMarkdown(m.content))}</div>
     ${m.actions?.length ? html`<div class="chat-actions">${m.actions.map(actionCard)}</div>` : ""}
+    ${m.quick_replies?.length ? html`<div class="chat-suggestions quick" aria-label="Réponses rapides">
+      ${m.quick_replies.map((r) => html`<button type="button" class="chip" data-suggest="${r}">${r}</button>`)}
+    </div>` : ""}
   </div>`;
 }
 
@@ -621,6 +624,7 @@ function scrollChat() {
 
 function appendMessage(m) {
   $(".chat-empty", chatLog())?.remove();
+  $$(".chat-suggestions.quick", chatLog()).forEach((el) => el.remove()); // seules les dernières restent utiles
   chatLog().insertAdjacentHTML("beforeend", messageHtml(m).s);
   scrollChat();
 }
@@ -735,6 +739,7 @@ export async function openChatPanel({ mode = "normal" } = {}) {
     return;
   }
   chat.mode = mode;
+  $("#chat-panel .chat-mode").hidden = mode !== "onboarding";
   openChat(true);
   if (mode === "onboarding") {
     if (!chat.loaded) await loadHistory();
@@ -760,7 +765,9 @@ async function mountChat() {
   panel.setAttribute("aria-label", "Assistant Mire");
   panel.innerHTML = html`
     <header class="chat-head">
-      <div><strong>Assistant</strong><span class="small muted chat-model"></span></div>
+      <div class="chat-title"><strong>Assistant</strong><span class="small muted chat-model"></span>
+        <span class="pill plain chat-mode" hidden>Entretien <button type="button" class="link-btn" data-end-onboarding
+          title="Revenir au mode normal" aria-label="Terminer l'entretien">×</button></span></div>
       <div class="chat-tools">
         <button type="button" class="icon-btn" data-reset title="Nouvelle conversation" aria-label="Nouvelle conversation">${RESET_ICON}</button>
         <button type="button" class="icon-btn" data-close title="Fermer" aria-label="Fermer l'assistant">${CLOSE_ICON}</button>
@@ -802,6 +809,10 @@ async function mountChat() {
     if (!t) return;
     if (t.matches("[data-close]")) openChat(false);
     else if (t.matches("[data-suggest]")) sendMessage(t.dataset.suggest);
+    else if (t.matches("[data-end-onboarding]")) {
+      chat.mode = "normal";
+      $(".chat-mode", panel).hidden = true;
+    }
     else if (t.matches("[data-confirm]")) handleAction(t.dataset.confirm, "confirm");
     else if (t.matches("[data-cancel]")) handleAction(t.dataset.cancel, "cancel");
     else if (t.matches("[data-reset]") && !chat.busy) {

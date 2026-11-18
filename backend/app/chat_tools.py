@@ -22,6 +22,7 @@ from . import services
 from .llm import ToolSpec, to_json
 from .models import STATUS_LABELS, Application, ChatAction, Company, Job, ProcessStatus, User
 from .profile import ProfileData, get_profile, profile_data, save_fields
+from .proposals import PREF_LABELS
 from .schemas import ApplicationPatch, JobIn
 from .services import ServiceError
 
@@ -88,8 +89,14 @@ TOOLS: list[ToolSpec] = [
             }, "required": ["kind", "text"]}},
             "remove_rules": {**_str_list, "description": "Texte (ou extrait) des règles à retirer"},
             "headline": _str, "location": _str, "summary": _str,
+            "positioning": {"type": "string", "description": "Point fort / positionnement en 1-2 phrases"},
             "years_experience": {"type": "number"},
             "min_salary_keur": {"type": "integer", "description": "Salaire minimum en k€ brut annuel"},
+            "travel": {"type": "string", "enum": ["aucun", "occasionnel", "frequent"],
+                       "description": "Tolérance aux déplacements"},
+            "add_excluded_companies": {"type": "array", "items": {"type": "object", "properties": {
+                "name": _str, "reason": _str}, "required": ["name"]},
+                "description": "Entreprises dont il ne faut plus proposer d'offres"},
             "preferences_add": {"type": "object", "description": "Valeurs à ajouter aux listes de préférences",
                                 "properties": {k: _str_list for k in PREF_LISTS}},
             "preferences_remove": {"type": "object", "description": "Valeurs à retirer des listes de préférences",
@@ -126,10 +133,30 @@ TOOLS: list[ToolSpec] = [
             "score": {"type": "number", "description": "Note d'intérêt de 0 à 10"},
         }, "required": ["company_name", "title"]},
     ),
+    ToolSpec(
+        "rate_job",
+        "PROPOSE de corriger la note d'un poste pour l'utilisateur (note manuelle sur 10, jamais écrasée par la "
+        "notation automatique). Pour EXPLIQUER une note, utilise get_job (détail par critère). Exécuté après "
+        "confirmation.",
+        {"type": "object", "properties": {
+            "job_id": {"type": "integer"},
+            "score": {"type": "number", "description": "Nouvelle note de 0 à 10, ou null pour revenir à la note calculée"},
+            "reason": {"type": "string", "description": "Pourquoi cette correction"},
+        }, "required": ["job_id"]},
+    ),
+    ToolSpec(
+        "ask_question",
+        "Affiche des réponses rapides (boutons) sous ta question. À utiliser en mode entretien, une question à la fois.",
+        {"type": "object", "properties": {
+            "question": _str,
+            "quick_replies": {**_str_list, "description": "3 à 6 réponses courtes (ex. Paris, Remote, Seed)"},
+        }, "required": ["question", "quick_replies"]},
+    ),
 ]
 
 READ_TOOLS = {"get_profile", "list_jobs", "get_job", "list_applications", "get_dashboard"}
-WRITE_TOOLS = {"update_profile", "set_job_status", "update_application", "create_job"}
+WRITE_TOOLS = {"update_profile", "set_job_status", "update_application", "create_job", "rate_job"}
+UI_TOOLS = {"ask_question"}  # n'accède à aucune donnée : sert seulement à l'affichage
 
 
 # --- Lectures ---------------------------------------------------------------
@@ -176,6 +203,14 @@ def _read(db: Session, user: User, name: str, args: dict) -> Any:
             })
             if job.application_id:
                 out["application"] = _app_row(services.load_application(db, job.application_id, user))
+            if job.assessment:
+                a = job.assessment
+                out["evaluation"] = _compact({
+                    "note": a.score, "note_calculee": a.auto_score, "note_manuelle": a.manual_score,
+                    "verdict": a.verdict, "raison_ecart": a.exclusion, "pourquoi": a.why,
+                    "criteres": [f"{c.label} : {c.points:g}/{c.max:g}" for c in a.criteria],
+                    "competences_ok": a.skills_have, "competences_manquantes": a.skills_missing,
+                })
             return out
         case "list_applications":
             status = ProcessStatus(args["status"]) if args.get("status") else None
@@ -244,8 +279,15 @@ def _plan_update_profile(db: Session, user: User, args: dict) -> Plan:
         rules = [x for x in rules if x not in removed]
     data["rules"] = rules
 
+    excluded = data["excluded_companies"]
+    for c in args.get("add_excluded_companies") or []:
+        if c.get("name") and _norm(c["name"]) not in {_norm(x["name"]) for x in excluded}:
+            excluded.append({"name": c["name"], "reason": c.get("reason")})
+            changes.append({"label": "Entreprise exclue", "before": None, "after": c["name"]})
+    data["excluded_companies"] = excluded
+
     for field, label in (("headline", "Titre"), ("location", "Localisation"), ("summary", "Résumé"),
-                         ("years_experience", "Années d'expérience")):
+                         ("positioning", "Positionnement"), ("years_experience", "Années d'expérience")):
         if field in args and args[field] is not None and args[field] != data[field]:
             changes.append({"label": label, "before": _short(str(data[field])) if data[field] is not None else None,
                             "after": _short(str(args[field]))})
@@ -255,15 +297,18 @@ def _plan_update_profile(db: Session, user: User, args: dict) -> Plan:
     if args.get("min_salary_keur") is not None and args["min_salary_keur"] != prefs["min_salary_keur"]:
         changes.append({"label": "Salaire minimum (k€)", "before": prefs["min_salary_keur"], "after": args["min_salary_keur"]})
         prefs["min_salary_keur"] = args["min_salary_keur"]
+    if args.get("travel") and args["travel"] != prefs.get("travel"):
+        changes.append({"label": "Déplacements acceptés", "before": prefs.get("travel"), "after": args["travel"]})
+        prefs["travel"] = args["travel"]
     for key in PREF_LISTS:
         for value in (args.get("preferences_add") or {}).get(key) or []:
             if _norm(value) not in {_norm(v) for v in prefs[key]}:
                 prefs[key] = [*prefs[key], value]
-                changes.append({"label": f"Préférence ajoutée ({key})", "before": None, "after": value})
+                changes.append({"label": f"{PREF_LABELS.get(key, key)} : ajout", "before": None, "after": value})
         for value in (args.get("preferences_remove") or {}).get(key) or []:
             kept = [v for v in prefs[key] if _norm(v) != _norm(value)]
             if len(kept) < len(prefs[key]):
-                changes.append({"label": f"Préférence retirée ({key})", "before": value, "after": None})
+                changes.append({"label": f"{PREF_LABELS.get(key, key)} : retrait", "before": value, "after": None})
             prefs[key] = kept
 
     if not changes:
@@ -397,11 +442,39 @@ def _plan_create_job(db: Session, user: User, args: dict) -> Plan:
                 changes=changes, run=run, refresh=("jobs", "companies", "dashboard"))
 
 
+def _plan_rate_job(db: Session, user: User, args: dict) -> Plan:
+    job = services.get_job(db, user, int(args["job_id"]))
+    score = args.get("score")
+    if score is not None:
+        score = round(float(score) * 2) / 2
+        if not 0 <= score <= 10:
+            raise ToolError("La note doit être entre 0 et 10.")
+    current = job.assessment.manual_score if job.assessment else None
+    if score == current:
+        raise ToolError("La note est déjà à cette valeur.")
+    auto = job.assessment.auto_score if job.assessment else None
+    changes = [{"label": "Ma note", "before": f"{job.score:g}" if job.score is not None else None,
+                "after": f"{score:g}" if score is not None else f"note calculée ({auto:g})" if auto is not None else "note calculée"}]
+    if args.get("reason"):
+        changes.append({"label": "Raison", "before": None, "after": _short(str(args["reason"]), 200)})
+
+    def run() -> dict:
+        from .assessments_api import set_manual_score
+        from .schemas import ManualScoreIn
+
+        out = set_manual_score(job.id, ManualScoreIn(score=score), db, user)
+        return {"job_id": out.id, "score": out.score}
+
+    return Plan(summary=f"Note de {job.title} · {job.company.name}", changes=changes, run=run,
+                refresh=("jobs", "dashboard"))
+
+
 PLANNERS: dict[str, Callable[[Session, User, dict], Plan]] = {
     "update_profile": _plan_update_profile,
     "set_job_status": _plan_set_job_status,
     "update_application": _plan_update_application,
     "create_job": _plan_create_job,
+    "rate_job": _plan_rate_job,
 }
 
 
@@ -422,6 +495,8 @@ class ToolRunner:
                 return {"data": to_json(_read(self.db, self.user, name, args))}
             if name in WRITE_TOOLS:
                 return self._propose(name, args)
+            if name in UI_TOOLS:
+                return {"ok": True, "note": "Les réponses rapides sont affichées ; pose ta question dans ta réponse."}
             return {"error": f"Outil inconnu : {name}"}
         except (ToolError, ServiceError) as exc:
             return {"error": exc.detail if isinstance(exc, ServiceError) else str(exc)}

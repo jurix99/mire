@@ -543,3 +543,9 @@ dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
 .icon-btn.fb-dislike:hover { color: #9d174d; }
 .feedback-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .feedback-buttons .btn svg { width: 14px; height: 14px; }
+
+/* Chat : réponses rapides et mode entretien */
+.chat-suggestions.quick { margin-top: 2px; }
+.chat-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.chat-mode { display: inline-flex; align-items: center; gap: 4px; background: #fef3c7; color: #92400e; }
+.chat-mode .link-btn { font-size: 14px; line-height: 1; }
