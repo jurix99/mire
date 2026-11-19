@@ -1,6 +1,6 @@
 import {
-  $, $$, STATUSES, STATUS_LABEL, api, attempt, boot, confirmDelete, daysUntil, fmtDate, html, logo, openForm, pill, plain, refreshCounts,
-  renderValue, toast,
+  $, $$, STATUSES, STATUS_LABEL, api, attempt, boot, confirmDelete, daysUntil, fmtDate, html, isLocked, logo, openForm, pill, plain,
+  proTag, refreshCounts, renderValue, toast,
 } from "./app.js";
 
 // Colonnes du tableau (le statut « nouveau » reste sur la page Postes)
@@ -16,12 +16,16 @@ function nextStep(a) {
   return html`<span class="next ${soon ? "soon" : ""}">${a.next_step ?? "Étape"}${when}</span>`;
 }
 
-const card = (a) => html`
-  <button type="button" class="p-card" draggable="true" data-id="${a.id}" id="process-${a.id}">
+const card = (a) => {
+  // Offre ou entreprise réservée au Pro : un seul repère sur la carte, les valeurs floutées n'ont pas de badge
+  const locked = isLocked(a.company.name) || isLocked(a.job.title);
+  return html`
+  <button type="button" class="p-card ${locked ? "pro-quiet" : ""}" draggable="true" data-id="${a.id}" id="process-${a.id}">
     <span class="co">${logo(a.company, "sm")}${renderValue(a.company.name)}</span>
-    <span class="small">${renderValue(a.job.title)}</span>
+    <span class="small">${renderValue(a.job.title)}${locked ? html` <span data-pro style="cursor:pointer">${proTag}</span>` : ""}</span>
     ${nextStep(a)}
   </button>`;
+};
 
 function draw() {
   $("#board").innerHTML = html`${LANES.map(([k, label]) => {

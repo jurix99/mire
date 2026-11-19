@@ -69,7 +69,7 @@ function subline(j) {
 }
 
 const row = (j) => html`
-  <div class="job-row clickable ${j.display_status === "ecartee" ? "is-excluded" : ""} ${j.locked ? "is-locked" : ""}" data-id="${j.id}">
+  <div class="job-row clickable ${j.display_status === "ecartee" ? "is-excluded" : ""} ${j.locked ? "is-locked pro-quiet" : ""}" data-id="${j.id}">
     ${logo(j.company)}
     <div style="min-width:0;display:grid;gap:2px">
       ${isLocked(j.title) ? renderValue(j.title)

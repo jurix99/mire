@@ -68,8 +68,11 @@ async function editCompany(company) {
 
 const atsLabel = (c) => `${Object.fromEntries(ATS_OPTIONS)[c.ats] ?? c.ats}${c.ats_slug && !isLocked(c.ats_slug) ? ` (${c.ats_slug})` : ""}`;
 
-const card = (c) => html`
-  <article class="card" style="display:grid;gap:14px;align-content:start" data-id="${c.id}">
+const card = (c) => {
+  // Repère « Pro » unique par carte : valeurs floutées à l'intérieur sans badge propre
+  const hasPro = c.locked || [c.funding_stage, c.funding_amount_meur, c.investors, c.description, c.ats].some(isLocked);
+  return html`
+  <article class="card ${hasPro ? "pro-quiet" : ""}" style="display:grid;gap:14px;align-content:start" data-id="${c.id}">
     <div style="display:flex;align-items:center;gap:14px">
       ${logo(c, "lg")}
       <div style="flex:1;min-width:0">
@@ -80,7 +83,7 @@ const card = (c) => html`
     </div>
     <p class="small">${renderValue(c.description, { block: true })}</p>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      ${[c.funding_stage, c.funding_amount_meur, c.investors].some(isLocked) ? html`<span data-pro title="Levée réservée à l'offre Pro" style="cursor:pointer">${proTag}</span>` : ""}
+      ${hasPro ? html`<span data-pro title="Levée réservée à l'offre Pro" style="cursor:pointer">${proTag}</span>` : ""}
       ${c.funding_stage ? html`<span class="pill plain">${renderValue(c.funding_stage)}</span>` : ""}
       ${c.funding_amount_meur != null ? html`<strong>${renderValue(c.funding_amount_meur, { fmt: fmtMoney })}</strong>` : ""}
       ${c.funding_announced_on ? html`<span class="small muted">· ${renderValue(c.funding_announced_on, { fmt: fmtDate })}</span>` : ""}
@@ -101,6 +104,7 @@ const card = (c) => html`
       </span>
     </div>
   </article>`;
+};
 
 /** Vérifie les offres dans la liste actuelle de l'ATS, puis propose d'ajouter les nouvelles. */
 async function checkCompany(company, btn) {

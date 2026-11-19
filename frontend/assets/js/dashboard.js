@@ -1,11 +1,14 @@
 import {
-  $, api, attempt, boot, daysUntil, fmtDate, fmtMoney, fmtToday, html, isLocked, loadMe, logo, openJobDialog, pill, refreshCounts,
+  $, api, attempt, boot, daysUntil, fmtDate, fmtMoney, fmtToday, html, isLocked, loadMe, logo, openJobDialog, pill, proTag, refreshCounts,
   renderValue, score, statusSelect,
 } from "./app.js";
 
+/** Réservé au Pro : entreprise ou champ verrouillé. La carte porte alors un seul repère « Pro ». */
+const anyLocked = (values) => values.some(isLocked);
+
 const companyCard = (c) => html`
-  <article class="card" style="display:grid;gap:14px;align-content:start">
-    <p class="label">${c.sector ?? "Secteur à préciser"}</p>
+  <article class="card ${anyLocked([c.locked, c.name, c.funding_stage, c.funding_amount_meur, c.description, c.city]) ? "pro-quiet" : ""}" style="display:grid;gap:14px;align-content:start">
+    <p class="label">${c.sector ?? "Secteur à préciser"}${anyLocked([c.locked, c.name, c.funding_stage, c.funding_amount_meur, c.description]) ? html` · <span data-pro style="cursor:pointer">${proTag}</span>` : ""}</p>
     <div style="display:flex;align-items:center;gap:12px">${logo(c, "lg")}<h2>${renderValue(c.name)}</h2></div>
     <p class="muted small">${renderValue(c.description, { block: true })}</p>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto">
@@ -48,10 +51,11 @@ async function render() {
 
   $("#priority").innerHTML = data.priority_jobs.length
     ? html`${data.priority_jobs.map((j) => html`
-        <div class="row-item clickable" data-job-id="${j.id}">
+        <div class="row-item clickable ${anyLocked([j.title, j.company.name]) ? "pro-quiet" : ""}" data-job-id="${j.id}">
           ${logo(j.company)}
           <div class="grow">
-            ${isLocked(j.title) ? renderValue(j.title) : html`<button type="button" class="link-btn title" title="Voir l'offre">${j.title}</button>`}
+            ${isLocked(j.title) ? html`${renderValue(j.title)} <span data-pro style="cursor:pointer">${proTag}</span>`
+              : html`<button type="button" class="link-btn title" title="Voir l'offre">${j.title}</button>`}
             <span class="muted small">${renderValue(j.company.name)}${j.location ? ` · ${j.location}` : ""}</span>
             ${j.assessment?.why && !isLocked(j.assessment.why) ? html`<span class="small why-line">${j.assessment.why}</span>` : ""}
           </div>
@@ -62,7 +66,7 @@ async function render() {
 
   $("#processes").innerHTML = data.processes.length
     ? html`${data.processes.map((a) => html`
-        <a class="row-item" href="/mes-process#process-${a.id}" style="text-decoration:none">
+        <a class="row-item ${anyLocked([a.company.name, a.job.title]) ? "pro-quiet" : ""}" href="/mes-process#process-${a.id}" style="text-decoration:none">
           ${logo(a.company)}
           <div class="grow">
             <div class="meta"><span class="title">${renderValue(a.company.name)}</span>${pill(a.status)}</div>

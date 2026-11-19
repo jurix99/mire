@@ -452,8 +452,9 @@ dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
 .locked.block .pro-badge { top: 50%; }
 /* Ligne de tableau entièrement verrouillée (offre récente) */
 .job-row.is-locked .title, .job-row.is-locked .col-company { color: var(--muted); }
-/* La ligne porte déjà son repère « Pro » (sous le titre) : pas de second badge au survol */
-.job-row.is-locked .locked .pro-badge { display: none; }
+/* Un conteneur qui porte déjà son repère « Pro » (ligne d'offre, carte d'entreprise, process) : les valeurs
+   floutées à l'intérieur n'affichent pas leur propre badge, ni au repos ni au survol */
+.pro-quiet .locked .pro-badge { display: none; }
 .logo.is-locked { background: var(--bg); color: var(--faint); }
 
 #plan-box { margin-top: 10px; justify-items: start; }
