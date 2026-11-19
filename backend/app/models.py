@@ -115,9 +115,9 @@ class Company(TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(200))
     slug: Mapped[str] = mapped_column(String(200), unique=True)
     website: Mapped[str | None] = mapped_column(String(1000))
-    sector: Mapped[str | None] = mapped_column(String(120))
-    city: Mapped[str | None] = mapped_column(String(120))
-    funding_stage: Mapped[str | None] = mapped_column(String(60))
+    sector: Mapped[str | None] = mapped_column(String(200))
+    city: Mapped[str | None] = mapped_column(String(200))
+    funding_stage: Mapped[str | None] = mapped_column(String(200))
     funding_amount_meur: Mapped[Decimal | None] = mapped_column(Numeric(10, 1))
     funding_announced_on: Mapped[date | None] = mapped_column(Date)
     investors: Mapped[str | None] = mapped_column(Text)
@@ -156,11 +156,11 @@ class Job(TimestampMixin, Base):
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), index=True)
     title: Mapped[str] = mapped_column(String(200))
     url: Mapped[str | None] = mapped_column(String(1000))
-    category: Mapped[str | None] = mapped_column(String(120))
+    category: Mapped[str | None] = mapped_column(String(200))
     location: Mapped[str | None] = mapped_column(String(200))
-    seniority: Mapped[str | None] = mapped_column(String(60))
+    seniority: Mapped[str | None] = mapped_column(String(200))
     stack: Mapped[str | None] = mapped_column(Text)
-    source: Mapped[str | None] = mapped_column(String(120))
+    source: Mapped[str | None] = mapped_column(String(200))
     summary: Mapped[str | None] = mapped_column(Text)
     score: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))  # ancienne note partagée (remplacée par job_assessments)
 
@@ -171,10 +171,10 @@ class Job(TimestampMixin, Base):
     # Collecte (docs §4)
     source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"), index=True)
     ats_job_id: Mapped[str | None] = mapped_column(String(200))  # identifiant de l'offre dans l'ATS
-    role_type: Mapped[str | None] = mapped_column(String(60))  # backend, platform, MLOps, founding, FDE…
+    role_type: Mapped[str | None] = mapped_column(String(200))  # backend, platform, MLOps, founding, FDE…
     work_mode: Mapped[str | None] = mapped_column(String(20))  # sur_site | hybride | remote
-    travel: Mapped[str | None] = mapped_column(String(60))  # niveau de déplacements
-    salary: Mapped[str | None] = mapped_column(String(120))  # fourchette affichée
+    travel: Mapped[str | None] = mapped_column(String(200))  # niveau de déplacements
+    salary: Mapped[str | None] = mapped_column(String(200))  # fourchette affichée
     published_on: Mapped[date | None] = mapped_column(Date)
     # Ouverture : vérifiée dans la liste actuelle de l'entreprise (date), ou fermée (donnée partagée)
     verified_open_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

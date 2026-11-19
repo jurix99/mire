@@ -46,13 +46,26 @@ if (-not (Test-Mire)) {
 # 2. Passage de recherche
 $prompt = Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot "prompt.md")
 $prompt += "`n`nType de ce passage : $Kind. Date : $(Get-Date -Format 'dddd d MMMM yyyy')."
-$allowed = "WebSearch,WebFetch,Write(agent/tmp/**),Bash(uv run --no-project python agent/mire_api.py:*)"
+# Sous Windows, Claude Code exécute les commandes via son outil PowerShell (ou Bash) : même règle pour les deux.
+# La lecture de pages peut passer par un sous-agent (outil Agent), soumis aux mêmes règles.
+$api = "uv run --no-project python agent/mire_api.py:*"
+$allowed = "WebSearch,WebFetch,Agent,Edit(agent/tmp/**),Bash($api),PowerShell($api)"
 $env:MSYS_NO_PATHCONV = "1"  # Git Bash : ne pas convertir les arguments en chemins Windows
 New-Item -ItemType Directory -Force (Join-Path $PSScriptRoot "tmp") | Out-Null
 $claudeArgs = @("-p", $prompt, "--allowedTools", $allowed, "--no-session-persistence", "--output-format", "text")
 if ($Model) { $claudeArgs += @("--model", $Model) }
 
 Write-Log "Début du passage ($Kind)"
-& claude @claudeArgs 2>&1 | Tee-Object -FilePath $Log -Append
-Write-Log ("Fin du passage (code {0})" -f $LASTEXITCODE)
-exit $LASTEXITCODE
+# Les messages de claude sur stderr ne doivent pas interrompre le script (PowerShell 5.1 + 2>&1)
+$ErrorActionPreference = "Continue"
+# claude écrit en UTF-8 : sans cela, PowerShell lit sa sortie dans la page de code de la console (accents abîmés)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$OutputEncoding = [System.Text.Encoding]::UTF8
+& claude @claudeArgs 2>&1 | ForEach-Object {
+    $line = "$_"
+    Add-Content -Path $Log -Value $line -Encoding utf8  # Tee-Object écrirait en UTF-16 sous PowerShell 5.1
+    $line
+}
+$code = $LASTEXITCODE
+Write-Log ("Fin du passage (code {0})" -f $code)
+exit $code

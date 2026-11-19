@@ -241,3 +241,18 @@ def test_import_refuses_postings_older_than_two_months(db, catalog):
                             ats.Posting("n1", "Offre récente", None, None, date.today())]
     out = radar_api.import_postings(db, acme, ["o1", "n1"], fetch)
     assert out.too_old == ["o1"] and len(out.created) == 1
+
+
+def test_api_text_limits_fit_database_columns():
+    """SQLite ne vérifie pas la longueur des VARCHAR : on compare les limites de l'API aux colonnes (PostgreSQL)."""
+    from sqlalchemy import String
+
+    from app.models import Company, Job
+    from app.schemas import CompanyPatch, JobPatch
+
+    for schema, model in ((JobPatch, Job), (CompanyPatch, Company)):
+        for name, field in schema.model_fields.items():
+            column = model.__table__.columns.get(name)
+            max_len = next((m.max_length for m in field.metadata if getattr(m, "max_length", None)), None)
+            if column is not None and isinstance(column.type, String) and column.type.length and max_len:
+                assert max_len <= column.type.length, f"{model.__name__}.{name} : API {max_len} > colonne {column.type.length}"
