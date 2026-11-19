@@ -13,6 +13,9 @@ users ──< applications >── jobs >── companies
 sources ──< jobs (source_id)   où chercher (ATS, job boards, radars de levées, requêtes…), partagées
 search_runs                    historique des passages de recherche (agent planifié, manuel, approfondi)
 
+users ──< subscriptions        offre Pro achetée via Stripe (abonnement mensuel ou Pass 3 mois), voir entitlements.py
+stripe_events                  événements du webhook Stripe déjà traités (idempotence)
+
 Règle d'or : l'automatisation (évaluation) n'écrit jamais dans applications (statuts posés par
 l'utilisateur) ni dans job_assessments.manual_score (note corrigée par l'utilisateur).
 
@@ -103,6 +106,8 @@ class User(TimestampMixin, Base):
     picture: Mapped[str | None] = mapped_column(Text)
     locale: Mapped[str | None] = mapped_column(String(20))
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Client Stripe (créé au premier paiement, voir billing.py)
+    stripe_customer_id: Mapped[str | None] = mapped_column(String(255), unique=True)
 
     applications: Mapped[list["Application"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     profile: Mapped["UserProfile | None"] = relationship(back_populates="user", cascade="all, delete-orphan")
@@ -416,6 +421,42 @@ class Source(TimestampMixin, Base):
     auto_readable: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     notes: Mapped[str | None] = mapped_column(Text)  # mémoire : entreprises vues sans offre pertinente, pistes…
     last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Subscription(TimestampMixin, Base):
+    """Droit au Pro acheté via Stripe : abonnement mensuel, ou Pass 3 mois (paiement unique).
+
+    Lignes écrites uniquement par le webhook Stripe (billing.py) ; le plan se calcule dans entitlements.py.
+    Pass : current_period_end = fin du Pass (un Pass acheté pendant un autre prolonge à partir de sa fin).
+    """
+
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # subscription | pass
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # Session Checkout d'origine (absente si l'abonnement a été vu avant la fin du Checkout)
+    stripe_checkout_session_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    stripe_payment_intent_id: Mapped[str | None] = mapped_column(String(255), index=True)  # Pass (remboursement)
+    price_id: Mapped[str | None] = mapped_column(String(255))
+    # Statut Stripe (active, past_due, canceled…) pour un abonnement ; paid | refunded pour un Pass
+    status: Mapped[str] = mapped_column(String(30))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    past_due_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # délai de grâce (3 jours)
+    # Renonciation au droit de rétractation (case cochée avant le paiement), horodatée
+    withdrawal_waived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class StripeEvent(Base):
+    """Événements Stripe déjà traités : rend le webhook idempotent (un événement rejoué est ignoré)."""
+
+    __tablename__ = "stripe_events"
+
+    id: Mapped[str] = mapped_column(String(255), primary_key=True)  # identifiant Stripe (evt_…)
+    type: Mapped[str] = mapped_column(String(100))
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SearchRun(Base):
