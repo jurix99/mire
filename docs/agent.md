@@ -37,8 +37,9 @@ et `agent/mire_api.py`. Aucune autre commande n'est autorisée.
 | GET | `context` | Sources actives, entreprises (ATS, vérification), offres déjà vues, profils anonymisés, derniers passages |
 | POST | `runs` `{kind: decouverte\|approfondi\|manuel}` | Début d'un passage -> `run_id` |
 | POST | `runs/{id}/finish` `{status, jobs_seen, companies_checked, summary, errors}` | Fin : Mire évalue les offres ajoutées pour chaque utilisateur et renvoie le résumé (top 5 par utilisateur) |
+| POST | `companies/bulk` `{companies: [...], run_id}` | Jusqu'à 100 entreprises en un appel (même règle que `companies`) |
 | POST | `companies` | Crée l'entreprise, ou complète les champs vides d'une existante (même nom ou même site) |
-| POST | `companies/{id}/check?run_id=` | Mire lit la liste des offres de l'ATS (Ashby, Lever, Greenhouse, Recruitee) : ouvertes, fermées, nouvelles |
+| POST | `companies/{id}/check?run_id=` | Mire lit la liste des offres de l'ATS (Ashby, Lever, Greenhouse, Recruitee, Teamtailor) : ouvertes, fermées, nouvelles |
 | POST | `companies/{id}/ats` `{ats, slug}` | Mire teste l'identifiant ; enregistré seulement s'il fonctionne et contient les offres de cette entreprise (une valeur cassée peut être remplacée) |
 | POST | `companies/{id}/checked` `{no_relevant_jobs}` | Vérifiée (sans offre pertinente : pas revérifiée au prochain passage) |
 | POST | `jobs` | Ajoute une offre (dédoublonnée : 409 avec `existing_id` ; publiée il y a plus de 2 mois : 422) |

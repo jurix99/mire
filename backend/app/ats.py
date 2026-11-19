@@ -12,6 +12,8 @@ jamais rien (identifiant probablement faux).
 
 import html
 import logging
+import xml.etree.ElementTree as ET
+from email.utils import parsedate_to_datetime
 import re
 import unicodedata
 from dataclasses import dataclass, field
@@ -29,7 +31,7 @@ from .net import TLS_CONTEXT
 
 log = logging.getLogger("mire.ats")
 
-SUPPORTED = ("ashby", "lever", "greenhouse", "recruitee")
+SUPPORTED = ("ashby", "lever", "greenhouse", "recruitee", "teamtailor")
 SLUG = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 TIMEOUT = 15
 DESCRIPTION_CHARS = 20_000
@@ -141,11 +143,45 @@ def board_url(ats: str, slug: str) -> str:
         "lever": f"https://api.lever.co/v0/postings/{slug}?mode=json",
         "greenhouse": f"https://boards-api.greenhouse.io/v1/boards/{slug}/jobs?content=true",
         "recruitee": f"https://{slug}.recruitee.com/api/offers/",
+        "teamtailor": f"https://{slug}.teamtailor.com/jobs.rss",
     }[ats]
 
 
+TT = "{https://teamtailor.com/locations}"
+TT_MODES = {"fully": "remote", "full": "remote", "hybrid": "hybride", "temporary": "remote", "none": "sur_site",
+            "no": "sur_site", "onsite": "sur_site"}
+
+
+def parse_teamtailor(xml_text: str) -> list[Posting]:
+    """Flux RSS Teamtailor -> offres (la description complète est dans le flux)."""
+    try:
+        root = ET.fromstring(xml_text)
+    except ET.ParseError:
+        raise ATSError("Flux Teamtailor illisible") from None
+    out = []
+    for item in root.iter("item"):
+        link = (item.findtext("link") or "").strip()
+        pub = item.findtext("pubDate")
+        try:
+            published = parsedate_to_datetime(pub).date() if pub else None
+        except (TypeError, ValueError):
+            published = None
+        places = [", ".join(filter(None, [loc.findtext(f"{TT}city"), loc.findtext(f"{TT}country")]))
+                  for loc in item.iter(f"{TT}location")]
+        status = (item.findtext("remoteStatus") or "").strip().lower()
+        out.append(Posting(
+            (item.findtext("guid") or link).strip(), (item.findtext("title") or "").strip(), link or None,
+            " | ".join(dict.fromkeys(p for p in places if p)) or None, published,
+            description=html_to_text(item.findtext("description")), work_mode=TT_MODES.get(status),
+            department=(item.findtext(f"{TT}department") or "").strip() or None,
+        ))
+    return [p for p in out if p.title]
+
+
 def parse_postings(ats: str, data) -> list[Posting]:
-    """Réponse JSON de l'ATS -> offres ouvertes."""
+    """Réponse de l'ATS (JSON, ou texte XML pour Teamtailor) -> offres ouvertes."""
+    if ats == "teamtailor":
+        return parse_teamtailor(data)
     out: list[Posting] = []
     if ats == "ashby":
         for j in (data or {}).get("jobs", []):
@@ -206,7 +242,7 @@ def fetch_postings(ats: str, slug: str, client: httpx.Client | None = None) -> l
         if resp.status_code == 404:
             raise ATSError("Tableau d'offres introuvable : identifiant ATS à vérifier")
         resp.raise_for_status()
-        return parse_postings(ats, resp.json())
+        return parse_postings(ats, resp.text if ats == "teamtailor" else resp.json())
     except httpx.HTTPError as exc:
         raise ATSError(f"ATS injoignable ({type(exc).__name__})") from None
     except ValueError:
@@ -223,6 +259,7 @@ URL_PATTERNS = [
     ("lever", re.compile(r"jobs\.(?:eu\.)?lever\.co/([A-Za-z0-9._-]+)", re.I)),
     ("greenhouse", re.compile(r"(?:job-)?boards\.greenhouse\.io/(?:embed/job_board\?for=)?([A-Za-z0-9._-]+)", re.I)),
     ("recruitee", re.compile(r"//([A-Za-z0-9-]+)\.recruitee\.com", re.I)),
+    ("teamtailor", re.compile(r"//([A-Za-z0-9-]+)\.teamtailor\.com", re.I)),
 ]
 
 

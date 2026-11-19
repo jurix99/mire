@@ -53,7 +53,7 @@ def test_full_run(db, alice, catalog, as_user, agent, fake_llm):
     as_user(alice).patch(f"/api/companies/{c['id']}", json={"funding_stage": "Pré-seed (saisi par Alice)"})
     again = agent.post("/api/agent/companies", json={"name": "remanence", "funding_stage": "Série A",
                                                      "headcount": "11-50"}).json()
-    assert again == {"id": c["id"], "created": False, "completed": ["headcount"]}
+    assert again == {"id": c["id"], "name": "Remanence", "created": False, "completed": ["headcount"]}
     assert db.get(Company, c["id"]).funding_stage == "Pré-seed (saisi par Alice)"
 
     # Source ajoutée par l'agent

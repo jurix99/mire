@@ -259,3 +259,59 @@ def test_agent_ats_refuses_empty_board(db, catalog, monkeypatch):
     assert out["ok"] is False and "vide" in out["error"]
     db.refresh(catalog["acme"])
     assert catalog["acme"].ats is None
+
+
+TEAMTAILOR_RSS = """<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0" xmlns:tt="https://teamtailor.com/locations"><channel><title>Spiko</title>
+<item><title>Platform Engineer</title>
+<description>&lt;h4&gt;Mission&lt;/h4&gt;&lt;ul&gt;&lt;li&gt;Kubernetes&lt;/li&gt;&lt;/ul&gt;</description>
+<pubDate>Tue, 03 Nov 2026 18:16:56 +0100</pubDate><link>https://spiko.teamtailor.com/jobs/1-platform-engineer</link>
+<remoteStatus>hybrid</remoteStatus><guid>g-1</guid>
+<tt:locations><tt:location><tt:name>Paris</tt:name><tt:city>Paris</tt:city><tt:country>France</tt:country></tt:location></tt:locations>
+<tt:department>Engineering</tt:department></item>
+<item><title>Sales Lead</title><link>https://spiko.teamtailor.com/jobs/2</link><remoteStatus>none</remoteStatus><guid>g-2</guid></item>
+</channel></rss>"""
+
+
+def test_teamtailor_rss_parsing_and_fetch():
+    import httpx
+    import pytest
+
+    posts = ats.parse_postings("teamtailor", TEAMTAILOR_RSS)
+    first = posts[0]
+    assert (first.ats_job_id, first.title, first.location, first.work_mode, first.department) == (
+        "g-1", "Platform Engineer", "Paris, France", "hybride", "Engineering")
+    assert str(first.published_on) == "2026-11-03" and "Kubernetes" in first.description
+    assert posts[1].work_mode == "sur_site" and posts[1].location is None
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, text=TEAMTAILOR_RSS)))
+    assert len(ats.fetch_postings("teamtailor", "spiko", client=client)) == 2
+    with pytest.raises(ats.ATSError):
+        ats.parse_postings("teamtailor", "<html>pas du xml")
+
+
+def test_detect_teamtailor_from_careers_url():
+    company = Company(name="Spiko", slug="spiko", careers_url="https://spiko.teamtailor.com/jobs")
+    fetch = boards({("teamtailor", "spiko"): [posting("g-1", "Platform Engineer", desc="Spiko builds money market funds")]})
+    assert ats.detect_ats(company, fetch) == ("teamtailor", "spiko")
+
+
+def test_bulk_companies(db, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setenv("AGENT_TOKEN", "t")
+    client = TestClient(app, headers={"Authorization": "Bearer t"})
+    run_id = client.post("/api/agent/runs", json={"kind": "decouverte"}).json()["run_id"]
+    payload = {"run_id": run_id, "companies": [
+        {"name": "Alpha", "website": "alpha.io", "funding_stage": "Seed", "funding_amount_meur": 4},
+        {"name": "Beta", "website": "beta.ai", "funding_stage": "Série A"},
+    ]}
+    first = client.post("/api/agent/companies/bulk", json=payload).json()
+    assert (first["created"], first["existing"]) == (2, 0)
+    again = client.post("/api/agent/companies/bulk", json={"companies": [
+        {"name": "alpha", "website": "alpha.io", "city": "Paris"}, {"name": "Gamma", "website": "gamma.fr"}]}).json()
+    assert (again["created"], again["existing"]) == (1, 1)
+    assert again["companies"][0]["completed"] == ["city"]
+    assert db.scalar(select(Company).where(Company.name == "Alpha")).funding_stage == "Seed"
+    assert client.post("/api/agent/companies/bulk", json={"companies": []}).status_code == 422

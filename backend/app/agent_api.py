@@ -201,22 +201,44 @@ def _find_company(db: Session, name: str, website: str | None) -> Company | None
     return None
 
 
-@router.post("/companies")
-def upsert_company(body: AgentCompanyIn, db: DB) -> dict:
-    """Crée l'entreprise, ou complète les champs VIDES d'une entreprise existante (même nom ou même site)."""
+def _upsert(db: Session, body: AgentCompanyIn) -> dict:
     existing = _find_company(db, body.name, body.website)
     if existing is None:
         company = Company(**body.model_dump(), slug=services.slugify(db, body.name))
         db.add(company)
-        db.commit()
-        return {"id": company.id, "created": True, "completed": []}
+        db.flush()
+        return {"id": company.id, "name": body.name, "created": True, "completed": []}
     completed = []
     for field, value in body.model_dump(exclude={"name"}).items():
         if value not in (None, "") and getattr(existing, field) in (None, ""):
             setattr(existing, field, value)
             completed.append(field)
+    return {"id": existing.id, "name": existing.name, "created": False, "completed": completed}
+
+
+@router.post("/companies")
+def upsert_company(body: AgentCompanyIn, db: DB) -> dict:
+    """Crée l'entreprise, ou complète les champs VIDES d'une entreprise existante (même nom ou même site)."""
+    out = _upsert(db, body)
     db.commit()
-    return {"id": existing.id, "created": False, "completed": completed}
+    return out
+
+
+class BulkCompaniesIn(BaseModel):
+    companies: Annotated[list[AgentCompanyIn], Field(min_length=1, max_length=100)]
+    run_id: int | None = None
+
+
+@router.post("/companies/bulk")
+def upsert_companies(body: BulkCompaniesIn, db: DB) -> dict:
+    """Jusqu'à 100 entreprises en un appel (même règle : création, ou complément des champs vides)."""
+    run = _run(db, body.run_id)
+    results = [_upsert(db, c) for c in body.companies]
+    if run is not None:
+        run.companies_checked += len(results)
+    db.commit()
+    return {"created": sum(r["created"] for r in results), "existing": sum(not r["created"] for r in results),
+            "companies": results}
 
 
 @router.post("/companies/{company_id}/check")
@@ -232,7 +254,7 @@ def agent_check_company(company_id: int, db: DB, run_id: int | None = None) -> C
 
 
 class AtsIn(BaseModel):
-    ats: Literal[ats.SUPPORTED]  # type: ignore[valid-type]
+    ats: Literal[ats.SUPPORTED]  # type: ignore[valid-type]  (ashby, lever, greenhouse, recruitee, teamtailor)
     slug: Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
 
 

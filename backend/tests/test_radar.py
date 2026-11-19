@@ -91,7 +91,7 @@ def test_fetch_errors_and_slug_validation():
     with pytest.raises(ats.ATSError):
         ats.board_url("ashby", "../../etc/passwd")
     with pytest.raises(ats.ATSError):
-        ats.board_url("teamtailor", "acme")  # pas de lecture automatique
+        ats.board_url("yc", "acme")  # pas de lecture automatique
     client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(404)))
     with pytest.raises(ats.ATSError, match="introuvable"):
         ats.fetch_postings("lever", "inconnue", client=client)
