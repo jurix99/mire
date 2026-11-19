@@ -442,7 +442,9 @@ dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
   white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, .15);
 }
 .locked .pro-badge svg { width: 11px; height: 11px; }
-.locked:hover .pro-badge, .locked:focus-visible .pro-badge { background: var(--accent); }
+/* Valeur courte (note, date, montant…) : seulement floutée, le badge apparaît au survol (sinon un badge par champ) */
+.locked:not(.block) .pro-badge { opacity: 0; transition: opacity .12s; }
+.locked:hover .pro-badge, .locked:focus-visible .pro-badge { opacity: 1; background: var(--accent); }
 .locked:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* En bloc (description, « pourquoi », barème) : le texte factice garde ses retours à la ligne */
 .locked.block { display: block; padding: 4px 0; }
