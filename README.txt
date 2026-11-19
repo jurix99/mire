@@ -16,19 +16,26 @@ Architecture
               - app/profile_api.py  /api/profile, imports (linkedin_export.py, pdf_import.py), analyse (analysis.py)
               - app/assessments.py  évaluation automatique des offres par utilisateur (+ tâche de fond)
               - app/feedback.py     retours J'aime / Pas intéressé ; rules_synthesis.py : synthèse des règles
+              - app/radar_api.py    sources, passages, vérification des offres via les ATS (ats.py), dedup.py
+              - app/agent_api.py    API de l'agent de recherche (/api/agent, jeton AGENT_TOKEN)
               - app/llm.py          client Gemini (SDK google-genai)
               - app/chat.py         /api/chat ; app/chat_tools.py : outils de l'assistant
               - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau)
               - scripts/eval_reference.py  évaluation de référence avec le vrai Gemini (voir plus bas)
-  docs/       processus de recherche d'offres (processus-recherche.md) et exemple de profil complet
+  agent/      agent de recherche local : prompt.md, run-agent.ps1, install-task.ps1, mire_api.py
+  docs/       processus de recherche (processus-recherche.md), API de l'agent (agent.md), exemple de profil
               - migrations/         migrations Alembic (appliquées automatiquement au démarrage)
               - app/seed.py         données de démonstration
   db          PostgreSQL 17 (volume Docker postgres-data)
 
 Tables :
   users                 un compte par identifiant LinkedIn (créé à la première connexion)
-  companies             entreprises (site web, levée, logo mis en cache)
-  jobs                  postes, rattachés à une entreprise
+  companies             entreprises (site web, levée, logo mis en cache, ATS + identifiant, page carrières,
+                        dernière vérification, « vérifiée sans offre pertinente », effectif)
+  jobs                  postes, rattachés à une entreprise ; URL normalisée unique (dédoublonnage), source,
+                        mode, déplacements, salaire, publication, ouverture vérifiée, fermeture
+  sources               où chercher (ATS, job boards, fonds VC, radars de levées, requêtes Google…), partagées
+  search_runs           passages de recherche de l'agent (compteurs, résumé, top par utilisateur)
   applications          process de candidature : un utilisateur x un poste, avec statut
   application_events    historique des changements de statut
   user_profiles         profil riche (1-1 avec users, créé à la volée) : identité pro, positionnement,
@@ -46,8 +53,8 @@ Tables :
                         sert aussi de journal (statut, résultat, date d'exécution)
 
 Statuts posés par l'utilisateur : nouveau, à regarder, postulé, relance, entretien, offre, refusé,
-pas intéressé, abandonné. Statut affiché : celui posé par l'utilisateur, sinon le verdict de l'évaluation
-(« Nouveau » ou « Écartée (auto) »). Couleurs : variables --st-* dans frontend/assets/app.css.
+pas intéressé, abandonné. Statut affiché : celui posé par l'utilisateur, sinon « Offre fermée » si l'offre n'est plus ouverte, sinon le
+verdict de l'évaluation (« Nouveau » ou « Écartée (auto) »). Couleurs : variables --st-* dans frontend/assets/app.css.
 
 Logos : récupérés par le backend depuis "URL du logo" si renseignée, sinon depuis le favicon du site web
 (services Google puis DuckDuckGo : seul le domaine de l'entreprise leur est envoyé), puis mis en cache en base.
@@ -64,6 +71,8 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
            gemini-3.5-flash-lite,gemini-3.1-flash-lite : utilisés si le précédent est saturé ou hors quota),
            GEMINI_EVAL_MODEL (liste, notation des offres, modèles les moins chers d'abord),
            ASSESSMENT_WORKER (true/false, tâche de fond d'évaluation), ASSESSMENT_INTERVAL_S (défaut 120).
+         Agent de recherche (facultatif) : AGENT_TOKEN (jeton de /api/agent ; vide = API désactivée),
+           AGENT_SCHEDULE (texte affiché, défaut « lundi et jeudi à 7h43 »). Voir docs/agent.md.
            Sans clé : chat grisé, import PDF / texte, analyse et évaluation automatique désactivés ;
            le reste fonctionne.
          Après modification de .env : docker compose up -d backend   (un simple restart ne relit pas .env)
@@ -103,6 +112,11 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/feedback, /api/feedback/reasons         GET, retours récents (nombre de nouveaux), raisons
          /api/jobs/{id}/assessment/manual             PUT {score|null}, correction manuelle de la note
          /api/assessments/status, /api/assessments/run   GET état, POST évaluer tout de suite (10 offres)
+         /api/companies/{id}/check                    POST, vérifie les offres dans la liste de l'ATS
+         /api/companies/{id}/postings/import          POST {ats_job_ids}, ajoute des offres listées par l'ATS
+         /api/sources[/{id}]                          GET, POST, PATCH (activer / désactiver)
+         /api/runs                                    GET, passages de recherche (+ résumé personnel)
+         /api/agent/...                               API de l'agent, par jeton (docs/agent.md)
          /api/chat/status, /api/chat/history          GET
          /api/chat                                    POST {message, mode: normal|onboarding}
          /api/chat/reset                              POST, nouvelle conversation
@@ -174,6 +188,22 @@ Profil appris et évaluation des offres (voir docs/processus-recherche.md)
 4. Retours : « J'aime » (offre de référence, direct) / « Pas intéressé » (statut + raisons). Après 3 nouveaux
    retours, « Mettre à jour mes règles » : règles proposées citant les offres d'origine, validées une par une.
    « Déjà passé en entretien » propose d'exclure l'entreprise.
+
+------------------------------------------------------------------
+Radar et agent de recherche (voir docs/processus-recherche.md et docs/agent.md)
+------------------------------------------------------------------
+- Dédoublonnage : même URL normalisée (sans utm_*, ref…, « / » final) ou même entreprise + même titre
+  -> refusé (409). Une offre déjà vue n'est jamais reproposée.
+- Vérification par les ATS (Ashby, Lever, Greenhouse, Recruitee) : bouton « Vérifier les offres » d'une
+  entreprise (ATS + identifiant renseignés). Offre absente de la liste -> « Offre fermée » chez ceux qui ne
+  l'ont pas traitée (plus évaluée). Une liste vide ou une erreur ne ferme rien. Les nouvelles offres listées
+  peuvent être ajoutées (publiées il y a plus de 2 mois : refusées).
+- Agent local (Claude Code) : lundi et jeudi à 7h43 via le Planificateur de tâches Windows.
+    powershell -ExecutionPolicy Bypass -File agent\install-task.ps1          installer la tâche
+    powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind manuel   passage à la demande
+  Il démarre Mire si besoin ; ses outils sont limités à la recherche web, la lecture de pages et l'API
+  /api/agent. Journal : agent\logs\. À la fin d'un passage, Mire évalue les offres ajoutées pour chaque
+  utilisateur ; le résumé apparaît dans Sources > Passages et dans le bloc « Veille ».
 
 ------------------------------------------------------------------
 Ancien export Framer
