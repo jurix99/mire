@@ -20,6 +20,7 @@ from . import assessments
 from .api import router as api_router
 from .assessments_api import router as assessments_router
 from .feedback import router as feedback_router
+from .radar_api import router as radar_router
 from .llm import get_llm
 from .chat import router as chat_router
 from .profile_api import router as profile_router
@@ -70,6 +71,7 @@ app.include_router(profile_router)
 app.include_router(chat_router)
 app.include_router(assessments_router)
 app.include_router(feedback_router)
+app.include_router(radar_router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,

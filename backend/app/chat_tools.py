@@ -20,7 +20,7 @@ from sqlalchemy.orm import Session
 
 from . import services
 from .llm import ToolSpec, to_json
-from .models import STATUS_LABELS, Application, ChatAction, Company, Job, ProcessStatus, User
+from .models import STATUS_LABELS, Application, ChatAction, Company, ProcessStatus, User
 from .profile import ProfileData, get_profile, profile_data, save_fields
 from .proposals import PREF_LABELS
 from .schemas import ApplicationPatch, JobIn
@@ -414,10 +414,10 @@ def _plan_create_job(db: Session, user: User, args: dict) -> Plan:
     except ValidationError as exc:
         err = exc.errors()[0]
         raise ToolError(f"Champ {err['loc'][-1]} invalide : {err['msg']}") from None
-    if company:
-        dup = db.scalar(select(Job).where(Job.company_id == company.id, func.lower(Job.title) == body.title.lower()))
-        if dup:
-            raise ToolError(f"Ce poste existe déjà (job_id {dup.id}).")
+    # Dédoublonnage : même URL normalisée, ou même entreprise + même titre (une offre vue n'est jamais reproposée)
+    dup = services.find_duplicate(db, company.id if company else -1, body.title, body.url)
+    if dup:
+        raise ToolError(f"Ce poste existe déjà (job_id {dup.id}).")
     changes = [{"label": "Entreprise", "before": None,
                 "after": company.name if company else f"{company_name} (nouvelle entreprise)"}]
     labels = {"title": "Intitulé", "url": "Lien", "location": "Lieu", "seniority": "Séniorité", "category": "Catégorie",

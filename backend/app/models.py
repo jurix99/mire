@@ -10,6 +10,9 @@ users ──< applications >── jobs >── companies
   ├──< job_feedback      retours sur les offres (j'aime / pas intéressé + raisons) -> synthèse de règles
   └──< job_assessments   évaluation CALCULÉE d'une offre pour l'utilisateur (note, verdict, raisons)
 
+sources ──< jobs (source_id)   où chercher (ATS, job boards, radars de levées, requêtes…), partagées
+search_runs                    historique des passages de recherche (agent planifié, manuel, approfondi)
+
 Règle d'or : l'automatisation (évaluation) n'écrit jamais dans applications (statuts posés par
 l'utilisateur) ni dans job_assessments.manual_score (note corrigée par l'utilisateur).
 
@@ -24,6 +27,7 @@ from urllib.parse import urlparse
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     Date,
     DateTime,
     Enum,
@@ -37,7 +41,7 @@ from sqlalchemy import (
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship
+from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship, validates
 
 from .db import Base
 
@@ -125,6 +129,15 @@ class Company(TimestampMixin, Base):
     logo_content_type: Mapped[str | None] = mapped_column(String(100))
     logo_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Découverte « entreprise d'abord » : ATS + identifiant, page carrières, dernière vérification
+    ats: Mapped[str | None] = mapped_column(String(30))  # ashby | lever | greenhouse | teamtailor | recruitee | yc | autre
+    ats_slug: Mapped[str | None] = mapped_column(String(120))
+    careers_url: Mapped[str | None] = mapped_column(String(1000))
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Dernière vérification sans offre pertinente (pour ne pas la revérifier à chaque passage)
+    no_relevant_jobs_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    headcount: Mapped[str | None] = mapped_column(String(40))  # effectif approximatif, ex. « 11-50 »
+
     jobs: Mapped[list["Job"]] = relationship(back_populates="company", cascade="all, delete-orphan")
 
     @property
@@ -149,10 +162,41 @@ class Job(TimestampMixin, Base):
     stack: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str | None] = mapped_column(String(120))
     summary: Mapped[str | None] = mapped_column(Text)
-    score: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))
+    score: Mapped[Decimal | None] = mapped_column(Numeric(3, 1))  # ancienne note partagée (remplacée par job_assessments)
+
+    # Dédoublonnage (voir dedup.py) : calculés automatiquement à partir de url et title
+    url_key: Mapped[str | None] = mapped_column(String(1000), unique=True)
+    title_key: Mapped[str | None] = mapped_column(String(300), index=True)
+
+    # Collecte (docs §4)
+    source_id: Mapped[int | None] = mapped_column(ForeignKey("sources.id", ondelete="SET NULL"), index=True)
+    ats_job_id: Mapped[str | None] = mapped_column(String(200))  # identifiant de l'offre dans l'ATS
+    role_type: Mapped[str | None] = mapped_column(String(60))  # backend, platform, MLOps, founding, FDE…
+    work_mode: Mapped[str | None] = mapped_column(String(20))  # sur_site | hybride | remote
+    travel: Mapped[str | None] = mapped_column(String(60))  # niveau de déplacements
+    salary: Mapped[str | None] = mapped_column(String(120))  # fourchette affichée
+    published_on: Mapped[date | None] = mapped_column(Date)
+    # Ouverture : vérifiée dans la liste actuelle de l'entreprise (date), ou fermée (donnée partagée)
+    verified_open_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     company: Mapped[Company] = relationship(back_populates="jobs")
     applications: Mapped[list["Application"]] = relationship(back_populates="job", cascade="all, delete-orphan")
+    source_ref: Mapped["Source | None"] = relationship()
+
+    @validates("url")
+    def _set_url_key(self, _key, value):
+        from .dedup import normalize_url
+
+        self.url_key = normalize_url(value)
+        return value
+
+    @validates("title")
+    def _set_title_key(self, _key, value):
+        from .dedup import title_key
+
+        self.title_key = title_key(value)
+        return value
 
 
 class Application(TimestampMixin, Base):
@@ -349,3 +393,45 @@ class JobAssessment(TimestampMixin, Base):
     assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
 
     job: Mapped["Job"] = relationship()
+
+
+class Source(TimestampMixin, Base):
+    """Un endroit où chercher des offres (ou des entreprises), partagé entre utilisateurs.
+
+    L'agent peut AJOUTER des sources et compléter leur URL, jamais les désactiver ni les supprimer.
+    """
+
+    __tablename__ = "sources"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), unique=True)
+    # ats | job_board | vc_board | funding_radar | recruiter | google_query | autre
+    kind: Mapped[str] = mapped_column(String(30))
+    query: Mapped[str | None] = mapped_column(Text)  # URL ou requête
+    active: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    added_by: Mapped[str] = mapped_column(String(20), default="user")  # user | agent
+    added_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    jobs_found: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    auto_readable: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    notes: Mapped[str | None] = mapped_column(Text)  # mémoire : entreprises vues sans offre pertinente, pistes…
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class SearchRun(Base):
+    """Passage de recherche (agent) : compteurs et résumé."""
+
+    __tablename__ = "search_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(20))  # planifie | manuel | approfondi
+    status: Mapped[str] = mapped_column(String(20), default="en_cours")  # en_cours | termine | echec
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    jobs_seen: Mapped[int] = mapped_column(Integer, default=0)
+    jobs_added: Mapped[int] = mapped_column(Integer, default=0)
+    jobs_duplicates: Mapped[int] = mapped_column(Integer, default=0)
+    jobs_closed: Mapped[int] = mapped_column(Integer, default=0)
+    companies_checked: Mapped[int] = mapped_column(Integer, default=0)
+    sources_added: Mapped[int] = mapped_column(Integer, default=0)
+    summary: Mapped[str | None] = mapped_column(Text)
+    details: Mapped[dict] = mapped_column(JSONType, default=dict)  # ex. ids des offres ajoutées, erreurs

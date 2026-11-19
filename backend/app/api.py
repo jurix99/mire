@@ -210,6 +210,11 @@ def update_job(job_id: int, body: JobPatch, db: DB, user: Me) -> JobOut:
         raise HTTPException(422, "Entreprise et intitulé obligatoires")
     if "company_id" in changes:
         _get_or_404(db, Company, changes["company_id"])
+    if {"company_id", "title", "url"} & changes.keys():
+        dup = services.find_duplicate(db, changes.get("company_id", job.company_id), changes.get("title", job.title),
+                                      changes.get("url", job.url), exclude_id=job.id)
+        if dup:
+            raise services.DuplicateJob(dup)
     for field, value in changes.items():
         setattr(job, field, value)
     invalidate_job(db, job.id)  # contenu modifié : réévaluer chez ceux qui ne l'ont pas traitée

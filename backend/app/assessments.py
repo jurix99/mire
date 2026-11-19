@@ -194,7 +194,9 @@ def jobs_to_assess(db: Session, user: User, profile: UserProfile, limit: int | N
     assessments = {a.job_id: a for a in db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id))}
     treated = set(db.scalars(select(Application.job_id).where(Application.user_id == user.id)))
     out = []
-    for job in db.scalars(select(Job).options(selectinload(Job.company)).order_by(Job.id.desc())):
+    # Les offres fermées ne sont plus évaluées
+    query = select(Job).where(Job.closed_at.is_(None)).options(selectinload(Job.company)).order_by(Job.id.desc())
+    for job in db.scalars(query):
         a = assessments.get(job.id)
         if a is None:
             out.append(job)

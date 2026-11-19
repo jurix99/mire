@@ -96,6 +96,12 @@ class CompanyOut(CompanyMini):
     investors: str | None
     description: str | None
     logo_url: str | None
+    ats: str | None = None
+    ats_slug: str | None = None
+    careers_url: str | None = None
+    headcount: str | None = None
+    last_checked_at: datetime | None = None
+    no_relevant_jobs_at: datetime | None = None
     jobs_count: int = 0
 
 
@@ -110,6 +116,10 @@ class CompanyPatch(BaseModel):
     investors: Text
     description: Text
     logo_url: HttpUrl
+    ats: Annotated[str | None, Field(default=None, pattern="^(ashby|lever|greenhouse|teamtailor|recruitee|yc|autre)$")] = None
+    ats_slug: Annotated[str | None, Field(default=None, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")] = None
+    careers_url: HttpUrl
+    headcount: Annotated[str | None, Field(default=None, max_length=40)] = None
 
 
 class CompanyIn(CompanyPatch):
@@ -130,6 +140,11 @@ class JobPatch(BaseModel):
     source: ShortText
     summary: JobDescription  # texte de l'annonce, affiché dans la fiche du poste
     score: Annotated[float | None, Field(default=None, ge=0, le=10)]
+    role_type: ShortText  # backend, platform, MLOps, founding, FDE…
+    work_mode: Annotated[str | None, Field(default=None, pattern="^(sur_site|hybride|remote)$")] = None
+    travel: ShortText  # niveau de déplacements
+    salary: ShortText  # fourchette affichée
+    published_on: date | None = None
 
 
 class JobIn(JobPatch):
@@ -173,6 +188,13 @@ class JobOut(JobMini):
     stack: str | None
     source: str | None
     summary: str | None
+    role_type: str | None = None
+    work_mode: str | None = None
+    travel: str | None = None
+    salary: str | None = None
+    published_on: date | None = None
+    verified_open_at: datetime | None = None  # ouverture vérifiée dans la liste de l'entreprise
+    closed_at: datetime | None = None  # offre fermée (donnée partagée)
     # Note de l'utilisateur connecté : correction manuelle, sinon évaluation automatique,
     # sinon ancienne note partagée (saisie à la main avant l'évaluation par utilisateur)
     score: float | None

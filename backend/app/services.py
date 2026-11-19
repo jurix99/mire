@@ -12,7 +12,7 @@ from dataclasses import field as dc_field
 from datetime import date
 
 from fastapi import HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import (
@@ -118,7 +118,12 @@ def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = N
         out.assessment = assessment_out(a, ctx, treated=app is not None)
         out.score = out.assessment.score
     # Statut affiché : l'utilisateur a toujours le dernier mot (règle d'or)
-    out.display_status = app.status.value if app is not None else (a.verdict if a is not None else "nouveau")
+    if app is not None:
+        out.display_status = app.status.value
+    elif job.closed_at is not None:
+        out.display_status = "fermee"  # offre fermée, pas encore traitée par l'utilisateur
+    else:
+        out.display_status = a.verdict if a is not None else "nouveau"
     return out
 
 
@@ -197,9 +202,35 @@ def get_job(db: Session, user: User, job_id: int) -> JobOut:
     return job_out(job, user_apps(db, user).get(job_id), assessment_context(db, user))
 
 
-def create_job(db: Session, body: JobIn) -> JobOut:
+def find_duplicate(db: Session, company_id: int, title: str, url: str | None,
+                   exclude_id: int | None = None) -> Job | None:
+    """Offre déjà connue : même URL normalisée, ou même entreprise + même titre normalisé."""
+    from .dedup import normalize_url, title_key
+
+    conditions = []
+    if (key := normalize_url(url)) is not None:
+        conditions.append(Job.url_key == key)
+    if (tkey := title_key(title)) is not None:
+        conditions.append((Job.company_id == company_id) & (Job.title_key == tkey))
+    if not conditions:
+        return None
+    query = select(Job).where(or_(*conditions))
+    if exclude_id is not None:
+        query = query.where(Job.id != exclude_id)
+    return db.scalars(query.limit(1)).first()
+
+
+class DuplicateJob(ServiceError):
+    def __init__(self, job: Job):
+        super().__init__(409, f"Ce poste existe déjà (#{job.id} : {job.title}).")
+        self.job = job
+
+
+def create_job(db: Session, body: JobIn, **extra) -> JobOut:
     get_or_404(db, Company, body.company_id)
-    job = Job(**body.model_dump())
+    if dup := find_duplicate(db, body.company_id, body.title, body.url):
+        raise DuplicateJob(dup)
+    job = Job(**body.model_dump(), **extra)
     db.add(job)
     db.commit()
     db.refresh(job, ["company"])
