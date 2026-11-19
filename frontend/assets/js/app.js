@@ -903,7 +903,14 @@ async function navigate(href, { push = true } = {}) {
   window.scrollTo(0, 0);
   // Paramètre unique : le navigateur ré-exécute le module de la page (app.js, lui, reste partagé)
   const src = new URL(script.getAttribute("src"), location.origin).pathname;
-  await import(`${src}?nav=${++navCount}`);
+  try {
+    await import(`${src}?nav=${++navCount}`);
+  } catch (err) {
+    // Le script de la page n'a pas pu se charger (ex. app.js en mémoire plus ancien que la page, après une mise à
+    // jour de Mire) : rechargement complet, qui charge les versions à jour.
+    console.warn("Navigation : rechargement complet", err);
+    location.reload();
+  }
 }
 
 document.addEventListener("click", (e) => {
