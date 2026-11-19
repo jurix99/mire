@@ -1,7 +1,9 @@
-# Agent de recherche : API et lancement
+# Agent de découverte : API et lancement
 
-L'agent de recherche (Claude Code, lancé en local) cherche des offres et les écrit dans Mire via une API
-protégée par jeton. Le processus est décrit dans [processus-recherche.md](processus-recherche.md) ; les consignes
+Mire fonctionne en trois processus : **découverte** des entreprises (cet agent, chaque lundi), **collecte**
+quotidienne des offres (Mire, sans LLM) et **pertinence** par utilisateur (Mire). L'agent (Claude Code, lancé
+en local) trouve les entreprises françaises qui ont levé des fonds et l'identifiant de leur ATS, et les écrit
+dans Mire via une API protégée par jeton. Le processus est décrit dans [processus-recherche.md](processus-recherche.md) ; les consignes
 données à l'agent sont dans [`agent/prompt.md`](../agent/prompt.md).
 
 ## Mise en place
@@ -9,9 +11,9 @@ données à l'agent sont dans [`agent/prompt.md`](../agent/prompt.md).
 1. Dans `.env` : `AGENT_TOKEN=<jeton aléatoire>` (par exemple `openssl rand -base64 32`), puis
    `docker compose up -d backend`. Sans jeton, l'API de l'agent répond 503.
 2. Tester : `uv run --no-project python agent/mire_api.py GET context` (depuis la racine du dépôt).
-3. Planifier (lundi et jeudi à 7h43, rattrapé au réveil si le PC était éteint) :
+3. Planifier (chaque lundi à 7h43, rattrapé au réveil si le PC était éteint) :
    `powershell -ExecutionPolicy Bypass -File agent\install-task.ps1`
-4. Passage à la demande : `powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind manuel`
+4. Passage à la demande : `powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1`
    (ou `-Kind approfondi`). Journal : `agent\logs\`.
 
 `run-agent.ps1` démarre Mire (docker compose dans WSL) s'il ne répond pas, puis lance
@@ -33,10 +35,11 @@ et `agent/mire_api.py`. Aucune autre commande n'est autorisée.
 | Méthode | Chemin | Rôle |
 |---|---|---|
 | GET | `context` | Sources actives, entreprises (ATS, vérification), offres déjà vues, profils anonymisés, derniers passages |
-| POST | `runs` `{kind: planifie\|manuel\|approfondi}` | Début d'un passage -> `run_id` |
+| POST | `runs` `{kind: decouverte\|approfondi\|manuel}` | Début d'un passage -> `run_id` |
 | POST | `runs/{id}/finish` `{status, jobs_seen, companies_checked, summary, errors}` | Fin : Mire évalue les offres ajoutées pour chaque utilisateur et renvoie le résumé (top 5 par utilisateur) |
 | POST | `companies` | Crée l'entreprise, ou complète les champs vides d'une existante (même nom ou même site) |
 | POST | `companies/{id}/check?run_id=` | Mire lit la liste des offres de l'ATS (Ashby, Lever, Greenhouse, Recruitee) : ouvertes, fermées, nouvelles |
+| POST | `companies/{id}/ats` `{ats, slug}` | Mire teste l'identifiant ; enregistré seulement s'il fonctionne et contient les offres de cette entreprise (une valeur cassée peut être remplacée) |
 | POST | `companies/{id}/checked` `{no_relevant_jobs}` | Vérifiée (sans offre pertinente : pas revérifiée au prochain passage) |
 | POST | `jobs` | Ajoute une offre (dédoublonnée : 409 avec `existing_id` ; publiée il y a plus de 2 mois : 422) |
 | POST | `jobs/{id}/close?run_id=` | Offre disparue de la liste de l'entreprise : fermée |

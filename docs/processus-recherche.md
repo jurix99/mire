@@ -172,3 +172,16 @@ Fonctionnement attendu :
 1. **Notation** : automatique et par utilisateur, à chaque nouvelle offre (§5), sans confirmation, car c'est une donnée calculée qui ne modifie rien de ce que l'utilisateur a saisi. L'outil `rate_job` du chat sert à expliquer ou recalculer une note (et à proposer une correction manuelle, celle-là avec confirmation). La notation en masse est nécessaire dès le départ pour la réévaluation après un changement de règles.
 2. **« J'aime »** : ajout direct aux offres de référence. « Pas intéressé » enregistre la raison sans rien modifier d'autre ; seules les règles déduites passent par la validation.
 3. **Exemple de profil** : `docs/exemple-profil.txt`.
+
+---
+
+## 10. Architecture retenue : trois processus
+
+| Processus | Fréquence | Qui | Rôle |
+|---|---|---|---|
+| 1. Découverte | chaque lundi à 7h43 | agent Claude Code local | entreprises françaises ayant levé des fonds ; ATS + identifiant (testé par Mire) |
+| 2. Collecte | chaque jour (6h30) | Mire, sans LLM | toutes les offres des ATS lisibles (Ashby, Lever, Greenhouse, Recruitee), description complète ; fermeture des offres disparues ; détection automatique des ATS inconnus |
+| 3. Pertinence | en continu | Mire | pré-filtre gratuit (exclusions, métier hors cible, lieu à l'étranger) puis Gemini, pour chaque utilisateur |
+
+Les entreprises dont l'ATS n'est pas lisible automatiquement (Welcome to the Jungle, Teamtailor, Gem, YC…)
+restent du ressort de l'agent, qui peut y ajouter les offres pertinentes.

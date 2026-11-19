@@ -72,7 +72,8 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
            GEMINI_EVAL_MODEL (liste, notation des offres, modèles les moins chers d'abord),
            ASSESSMENT_WORKER (true/false, tâche de fond d'évaluation), ASSESSMENT_INTERVAL_S (défaut 120).
          Agent de recherche (facultatif) : AGENT_TOKEN (jeton de /api/agent ; vide = API désactivée),
-           AGENT_SCHEDULE (texte affiché, défaut « lundi et jeudi à 7h43 »). Voir docs/agent.md.
+           AGENT_SCHEDULE (texte affiché, défaut « le lundi à 7h43 »). Voir docs/agent.md.
+         Collecte : COLLECTOR (true/false), COLLECT_TIME (HH:MM, heure de Paris, défaut 06:30).
            Sans clé : chat grisé, import PDF / texte, analyse et évaluation automatique désactivés ;
            le reste fonctionne.
          Après modification de .env : docker compose up -d backend   (un simple restart ne relit pas .env)
@@ -115,7 +116,8 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/companies/{id}/check                    POST, vérifie les offres dans la liste de l'ATS
          /api/companies/{id}/postings/import          POST {ats_job_ids}, ajoute des offres listées par l'ATS
          /api/sources[/{id}]                          GET, POST, PATCH (activer / désactiver)
-         /api/runs                                    GET, passages de recherche (+ résumé personnel)
+         /api/runs                                    GET, passages (découverte, collecte) + résumé personnel
+         /api/collect/status, /api/collect/run        GET état, POST collecte immédiate
          /api/agent/...                               API de l'agent, par jeton (docs/agent.md)
          /api/chat/status, /api/chat/history          GET
          /api/chat                                    POST {message, mode: normal|onboarding}
@@ -198,12 +200,19 @@ Radar et agent de recherche (voir docs/processus-recherche.md et docs/agent.md)
   entreprise (ATS + identifiant renseignés). Offre absente de la liste -> « Offre fermée » chez ceux qui ne
   l'ont pas traitée (plus évaluée). Une liste vide ou une erreur ne ferme rien. Les nouvelles offres listées
   peuvent être ajoutées (publiées il y a plus de 2 mois : refusées).
-- Agent local (Claude Code) : lundi et jeudi à 7h43 via le Planificateur de tâches Windows.
-    powershell -ExecutionPolicy Bypass -File agent\install-task.ps1          installer la tâche
-    powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind manuel   passage à la demande
-  Il démarre Mire si besoin ; ses outils sont limités à la recherche web, la lecture de pages et l'API
-  /api/agent. Journal : agent\logs\. À la fin d'un passage, Mire évalue les offres ajoutées pour chaque
-  utilisateur ; le résumé apparaît dans Sources > Passages et dans le bloc « Veille ».
+Trois processus :
+  1. Découverte (chaque lundi à 7h43, agent Claude Code local) : entreprises françaises qui ont levé des fonds
+     + identifiant de leur ATS, testé par Mire avant d'être enregistré.
+       powershell -ExecutionPolicy Bypass -File agent\install-task.ps1             installer la tâche
+       powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1                découverte à la demande
+     Outils limités à la recherche web, la lecture de pages et l'API /api/agent. Journal : agent\logs\.
+  2. Collecte (chaque jour à COLLECT_TIME, défaut 6h30, par Mire, sans LLM) : toutes les offres des ATS
+     lisibles, description complète comprise ; offres disparues fermées ; ATS inconnu détecté automatiquement
+     (au plus une fois par semaine). Rattrapée au démarrage si la dernière date de plus de 20 h.
+     Bouton « Collecter maintenant » dans Sources > Passages.
+  3. Pertinence (en continu, par Mire) : pour chaque utilisateur, pré-filtre gratuit (entreprise exclue,
+     stage, expérience, métier hors cible, lieu explicitement à l'étranger), puis Gemini note le reste avec
+     son barème. Les passages et leur résumé apparaissent dans Sources > Passages et le bloc « Veille ».
 
 ------------------------------------------------------------------
 Ancien export Framer
