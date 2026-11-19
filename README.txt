@@ -51,6 +51,11 @@ Tables :
   chat_messages         messages (utilisateur / assistant) et outils appelés
   chat_actions          écritures proposées par l'assistant, exécutées seulement après confirmation :
                         sert aussi de journal (statut, résultat, date d'exécution)
+  subscriptions         droits au Pro achetés via Stripe, écrits uniquement par le webhook : abonnement
+                        mensuel (statut Stripe, fin de période, résiliation à la fin de la période, impayé
+                        depuis) ou Pass 3 mois (paid / refunded, fin du Pass) ; renonciation au droit de
+                        rétractation horodatée. users.stripe_customer_id relie le compte au client Stripe.
+  stripe_events         identifiants des événements Stripe déjà traités (webhook idempotent)
 
 Statuts posés par l'utilisateur : nouveau, à regarder, postulé, relance, entretien, offre, refusé,
 pas intéressé, abandonné. Statut affiché : celui posé par l'utilisateur, sinon « Offre fermée » si l'offre n'est plus ouverte, sinon le
@@ -74,6 +79,9 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
          Agent de recherche (facultatif) : AGENT_TOKEN (jeton de /api/agent ; vide = API désactivée),
            AGENT_SCHEDULE (texte affiché, défaut « le lundi à 7h43 »). Voir docs/agent.md.
          Collecte : COLLECTOR (true/false), COLLECT_TIME (HH:MM, heure de Paris, défaut 06:30).
+         Offre Pro (facultatif, voir « Offres Free / Pro et paiement Stripe ») : BILLING_ENABLED (défaut false :
+           tout le monde est Pro), PRO_USER_EMAILS, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+           STRIPE_PRICE_MONTHLY, STRIPE_PRICE_PASS_3M, PUBLIC_URL (URLs de retour de Checkout).
            Sans clé : chat grisé, import PDF / texte, analyse et évaluation automatique désactivés ;
            le reste fonctionne.
          Après modification de .env : docker compose up -d backend   (un simple restart ne relit pas .env)
@@ -123,6 +131,9 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/chat                                    POST {message, mode: normal|onboarding}
          /api/chat/reset                              POST, nouvelle conversation
          /api/chat/actions/{id}/confirm | /cancel     POST, exécute ou abandonne une proposition
+         /api/billing/checkout                        POST {plan: monthly|pass_3m, waive_withdrawal} -> {url}
+         /api/billing/portal                          POST -> {url} du Customer Portal Stripe
+         /api/billing/webhook                         POST, Stripe uniquement (signature, sans session)
 
 Tests (depuis backend/, sans Docker) : uv run pytest
   (sur le réseau de l'entreprise : UV_SYSTEM_CERTS=1 pour que uv accepte le proxy HTTPS)
@@ -213,6 +224,69 @@ Trois processus :
   3. Pertinence (en continu, par Mire) : pour chaque utilisateur, pré-filtre gratuit (entreprise exclue,
      stage, expérience, métier hors cible, lieu explicitement à l'étranger), puis Gemini note le reste avec
      son barème. Les passages et leur résumé apparaissent dans Sources > Passages et le bloc « Veille ».
+
+------------------------------------------------------------------
+Offres Free / Pro et paiement Stripe
+------------------------------------------------------------------
+Prix (TTC, TVA française via Stripe Tax) : Pro mensuel 15 €/mois sans engagement (abonnement Stripe), Pass
+3 mois 39 € en paiement unique (90 jours, sans renouvellement ; un Pass acheté pendant un autre le prolonge
+de 90 jours à partir de sa fin). Pas d'essai gratuit. Toutes les limites sont dans PLAN_LIMITS
+(backend/app/entitlements.py), nulle part ailleurs.
+
+Free : offres de moins de 7 jours listées mais verrouillées (seuls la ligne et la date relative restent
+visibles) ; levées, investisseurs, effectif, ATS, page carrières verrouillés (entreprise dont toutes les
+offres sont récentes : tout sauf le secteur) ; note visible sur les 10 offres les mieux notées de la
+semaine, « pourquoi » et compétences toujours verrouillés ; 20 évaluations Gemini par semaine, après les
+utilisateurs Pro ; 10 process actifs ; 1 import de profil ; ni analyse du profil ni synthèse des règles ;
+10 messages à l'assistant par mois (Pro : 300).
+
+Masquage côté serveur : pour un utilisateur Free, l'API remplace chaque valeur réservée par
+{locked: true, placeholder} où placeholder est un texte FACTICE de longueur voisine (services.job_out,
+services.company_out, outils du chat). La vraie valeur ne quitte jamais le serveur ; le front floute le
+texte factice (classe .locked, helper renderValue de app.js) et un clic ouvre la fenêtre « Passer Pro ».
+Quota atteint ou fonction réservée : HTTP 402 {code: "quota", kind, limit, used} ou {code: "pro_required"}.
+
+Plan (entitlements.plan_of) : Pro si abonnement actif, impayé (past_due) depuis moins de 3 jours, résilié
+avec une fin de période future, ou Pass en cours ; sinon Free. BILLING_ENABLED=false (défaut) : tout le monde
+est Pro, rien n'est masqué. PRO_USER_EMAILS (liste séparée par des virgules) : comptes toujours Pro.
+
+Configuration du tableau de bord Stripe (mode test, puis à refaire en mode live) :
+  1. Produits : créer le produit « Mire Pro » avec deux prix, TTC (« Inclure la taxe dans le prix ») :
+       - 15,00 € récurrent mensuel           -> son identifiant price_… dans STRIPE_PRICE_MONTHLY
+       - 39,00 € paiement unique             -> STRIPE_PRICE_PASS_3M
+     Catégorie fiscale : « Logiciel en tant que service (SaaS) - usage personnel ».
+  2. Stripe Tax : activer, renseigner l'adresse de l'entreprise et l'immatriculation TVA France.
+  3. Customer Portal (Paramètres > Billing > Portail client) : autoriser la mise à jour du moyen de paiement,
+     l'historique des factures, la résiliation « à la fin de la période de facturation » (pas immédiate) ;
+     désactiver le changement de formule.
+  4. Webhook (Développeurs > Webhooks) : URL https://<domaine>/api/billing/webhook, événements :
+       checkout.session.completed, customer.subscription.created, customer.subscription.updated,
+       customer.subscription.deleted, invoice.payment_failed, charge.refunded
+     Son secret de signature (whsec_…) -> STRIPE_WEBHOOK_SECRET.
+  5. Clé secrète (sk_test_… / sk_live_…, de préférence une clé restreinte) -> STRIPE_SECRET_KEY.
+     Aucune clé publique n'est nécessaire (redirection vers Checkout) ; aucune clé n'est envoyée au front
+     ni écrite dans les journaux.
+  6. Paramètres > Checkout : coordonnées de l'entreprise, conditions générales, politique de remboursement.
+nginx laisse /api/billing/webhook passer sans auth_request (sur 8080 et 8081) : seule la signature compte.
+
+Droit de rétractation : la fenêtre « Passer Pro » impose de cocher la renonciation (accès immédiat à un
+service numérique) avant la redirection ; elle est horodatée sur la ligne subscriptions et rappelée sous
+le bouton de paiement de Checkout.
+
+Tester en local (Stripe CLI, mode test) :
+  stripe login
+  stripe listen --forward-to localhost:8080/api/billing/webhook
+  -> copier le secret whsec_… affiché dans STRIPE_WEBHOOK_SECRET, puis docker compose up -d backend
+  Payer avec la carte 4242 4242 4242 4242 (date future, CVC quelconque) ; 4000 0000 0000 0341 : paiement
+  refusé au renouvellement. Rejouer un événement : stripe events resend evt_…
+  Déclencher sans passer par Checkout : stripe trigger customer.subscription.updated (le webhook relit
+  toujours l'abonnement depuis l'API : l'utilisateur doit exister, metadata.user_id ou client connu).
+Renouvellement et fin de période avec les test clocks (Billing > Test clocks) :
+  1. Créer une horloge, un client rattaché à cette horloge, puis un abonnement au prix mensuel avec
+     metadata user_id=<id de l'utilisateur Mire> (ou renseigner users.stripe_customer_id avec ce client).
+  2. Avancer l'horloge d'un mois : invoice.paid puis customer.subscription.updated (nouvelle fin de période).
+  3. Résilier dans le portal, avancer au-delà de la fin : customer.subscription.deleted -> plan Free.
+  4. Carte 4000 0000 0000 0341 puis avancer : invoice.payment_failed, statut past_due (Pro encore 3 jours).
 
 ------------------------------------------------------------------
 Ancien export Framer

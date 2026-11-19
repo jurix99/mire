@@ -80,6 +80,7 @@ class UrlOut(BaseModel):
 
 
 def _ensure_customer(db: Session, client: stripe.StripeClient, user: User) -> str:
+    user = db.get(User, user.id)  # l'utilisateur de cette session (l'enregistrement de l'id doit persister)
     if user.stripe_customer_id:
         return user.stripe_customer_id
     params: dict[str, Any] = {"metadata": {"user_id": str(user.id)}}
@@ -107,6 +108,7 @@ def checkout(body: CheckoutIn, db: DB, user: Me) -> UrlOut:
     if not price:
         raise HTTPException(503, f"Paiement indisponible : {PRICE_ENV[body.plan]} n'est pas configuré sur le serveur")
     client = stripe_client()
+    user = db.get(User, user.id)
 
     if body.plan == "monthly" and user.stripe_customer_id and db.scalar(select(Subscription.id).where(
             Subscription.user_id == user.id, Subscription.kind == "subscription",
@@ -146,6 +148,7 @@ def checkout(body: CheckoutIn, db: DB, user: Me) -> UrlOut:
 
 @router.post("/portal")
 def portal(db: DB, user: Me) -> UrlOut:
+    user = db.get(User, user.id)
     if not user.stripe_customer_id:
         raise HTTPException(409, "Aucun abonnement Stripe pour ce compte")
     return UrlOut(url=_portal_url(stripe_client(), user.stripe_customer_id))
