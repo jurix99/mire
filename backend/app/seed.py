@@ -101,3 +101,52 @@ def seed_demo_applications(db: Session, user) -> None:
             app.events.append(ApplicationEvent(from_status=ProcessStatus.postule, to_status=status))
         db.add(app)
     db.commit()
+
+
+# Sources de départ (docs/processus-recherche.md, §2). URL renseignée seulement quand elle est sûre :
+# l'agent complète les autres. (nom, type, requête / URL, lecture automatique, active, notes)
+SOURCES = [
+    ("Ashby (API publique)", "ats", "https://api.ashbyhq.com/posting-api/job-board/<slug>", True, True, None),
+    ("Lever (API publique)", "ats", "https://api.lever.co/v0/postings/<slug>", True, True, None),
+    ("Greenhouse (API publique)", "ats", "https://boards-api.greenhouse.io/v1/boards/<slug>/jobs", True, True, None),
+    ("Teamtailor", "ats", "https://<entreprise>.teamtailor.com/jobs", True, True, None),
+    ("Recruitee", "ats", None, True, True, None),
+    ("Welcome to the Jungle", "job_board", "https://www.welcometothejungle.com/fr/jobs", True, True, None),
+    ("YC Work at a Startup", "job_board", "https://www.workatastartup.com/jobs", True, True, None),
+    ("Station F (HAL)", "job_board", None, True, True, None),
+    ("Licorne Society", "job_board", None, True, True, None),
+    ("Bluecoders (sur WTTJ)", "job_board", None, True, True, None),
+    ("Index Ventures (job board)", "vc_board", None, True, True, None),
+    ("Seedcamp (job board)", "vc_board", None, True, True, None),
+    ("Frst (job board)", "vc_board", None, True, True, None),
+    ("Kima Ventures (job board)", "vc_board", None, True, True, None),
+    ("Partech (job board)", "vc_board", None, True, True, None),
+    ("Elaia (job board)", "vc_board", None, True, True, None),
+    ("Serena (job board)", "vc_board", None, True, True, None),
+    ("Entrepreneurs First (job board)", "vc_board", None, True, True, None),
+    ("Northzone (job board)", "vc_board", None, True, True, None),
+    ("SV Angel (job board)", "vc_board", None, True, True, None),
+    ("Breega (job board)", "vc_board", None, True, False, "Désactivé par l'utilisateur."),
+    ("Les Pépites Tech (récap hebdo)", "funding_radar", "https://lespepitestech.com", True, True,
+     "Sert à découvrir des ENTREPRISES, pas des offres."),
+    ("Screeningpass", "funding_radar", None, True, True, "Découverte d'entreprises."),
+    ("Multeam", "funding_radar", None, True, True, "Découverte d'entreprises."),
+    ("Maddyness", "funding_radar", "https://www.maddyness.com", True, True, "Découverte d'entreprises."),
+    ("Sifted", "funding_radar", "https://sifted.eu", True, True, "Découverte d'entreprises."),
+    ("Flaire (pages Notion)", "recruiter", None, False, True,
+     "Pages Notion publiques : lecture automatique impossible (JavaScript), à faire à la main."),
+    ("Google : Ashby platform / founding Paris", "google_query",
+     'site:jobs.ashbyhq.com ("platform engineer" OR "founding engineer") Paris', True, True, None),
+    ("Google : member of technical staff Paris", "google_query", '"member of technical staff" Paris', True, True, None),
+]
+
+
+def seed_sources(db: Session) -> None:
+    from .models import Source
+
+    if db.scalar(select(func.count(Source.id))):
+        return
+    for name, kind, query, auto, active, notes in SOURCES:
+        db.add(Source(name=name, kind=kind, query=query, auto_readable=auto, active=active, notes=notes,
+                      added_by="user", jobs_found=0))
+    db.commit()

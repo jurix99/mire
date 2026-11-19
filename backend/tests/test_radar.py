@@ -191,3 +191,53 @@ def test_closed_jobs_hidden_from_dashboard(db, alice, catalog, as_user, fake_llm
     radar_api.check_and_commit(db, acme, listing(("a1", "Backend Engineer", None)))
     todo = [j["title"] for j in client.get("/api/dashboard").json()["priority_jobs"]]
     assert "Frontend Engineer" not in todo
+
+
+# --- Sources et passages (côté utilisateur) ----------------------------------------------------
+
+
+def test_seed_sources_once(db):
+    from app.models import Source
+    from app.seed import seed_sources
+
+    seed_sources(db)
+    seed_sources(db)
+    sources = db.scalars(select(Source)).all()
+    assert len(sources) >= 20
+    breega = next(s for s in sources if s.name.startswith("Breega"))
+    assert breega.active is False
+    assert next(s for s in sources if s.name.startswith("Flaire")).auto_readable is False
+
+
+def test_user_manages_sources(alice, as_user):
+    client = as_user(alice)
+    s = client.post("/api/sources", json={"name": "Otta", "kind": "job_board", "query": "https://otta.com"}).json()
+    assert s["added_by"] == "user" and s["active"] is True
+    assert client.post("/api/sources", json={"name": "otta", "kind": "job_board"}).status_code == 409
+    off = client.patch(f"/api/sources/{s['id']}", json={"active": False, "notes": "Peu de postes à Paris"}).json()
+    assert off["active"] is False and off["notes"] == "Peu de postes à Paris"
+    assert client.post("/api/sources", json={"name": "X", "kind": "inconnu"}).status_code == 422
+
+
+def test_runs_listing_shows_my_summary(db, alice, bob, as_user):
+    from app.models import SearchRun
+
+    db.add(SearchRun(kind="planifie", status="termine", jobs_seen=30, jobs_added=4, jobs_duplicates=2, jobs_closed=1,
+                     companies_checked=5, sources_added=1, summary="Bon passage", details={"per_user": [
+                         {"user_id": alice.id, "nouvelles": 2, "top": [{"titre": "Platform Engineer"}]},
+                         {"user_id": bob.id, "nouvelles": 0, "top": []}]}))
+    db.commit()
+    runs = as_user(alice).get("/api/runs").json()
+    assert runs["runs"][0]["mine"]["nouvelles"] == 2
+    assert as_user(bob).get("/api/runs").json()["runs"][0]["mine"]["nouvelles"] == 0
+
+
+def test_import_refuses_postings_older_than_two_months(db, catalog):
+    from datetime import date, timedelta
+
+    acme = acme_with_ats(db, catalog)
+    old = date.today() - timedelta(days=90)
+    fetch = lambda _a, _s: [ats.Posting("o1", "Vieille offre", None, None, old),  # noqa: E731
+                            ats.Posting("n1", "Offre récente", None, None, date.today())]
+    out = radar_api.import_postings(db, acme, ["o1", "n1"], fetch)
+    assert out.too_old == ["o1"] and len(out.created) == 1

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sources · Mire</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script type="module" src="/assets/js/sources.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main">
+      <header class="page-head">
+        <div class="intro">
+          <p class="label">// Où chercher</p>
+          <h1>Sources</h1>
+          <p class="muted">Les endroits où l'agent cherche des offres et des entreprises. Partagées entre utilisateurs.</p>
+        </div>
+        <button class="btn" type="button" id="add">Ajouter une source</button>
+      </header>
+
+      <div class="toolbar" id="kinds"></div>
+      <div id="groups"></div>
+
+      <section class="section">
+        <div class="section-head">
+          <div class="intro"><p class="label">// Agent de recherche</p><h2>Passages</h2></div>
+          <span class="small muted" id="schedule"></span>
+        </div>
+        <div class="card" id="runs"></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

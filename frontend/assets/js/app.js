@@ -301,6 +301,7 @@ export async function openFeedback(job, sentiment) {
 
 // --- Fiche d'un poste (contenu de l'offre) ------------------------------------
 
+const WORK_MODE_LABEL = { sur_site: "Sur site", hybride: "Hybride", remote: "Remote" };
 const httpUrl = (u) => (u && /^https?:\/\//i.test(u) ? u : null);
 
 /**
@@ -351,6 +352,16 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
           ${pill(job.display_status)}${score(job.score)}
           ${a?.manual_score != null ? html`<span class="small muted">note corrigée par vous</span>` : ""}
           ${job.source ? html`<span class="small muted">Source : ${job.source}</span>` : ""}
+        </div>
+        <div class="job-facts small">
+          ${job.closed_at ? html`<span class="fact closed">Offre fermée le ${fmtDate(job.closed_at)}</span>`
+            : job.verified_open_at ? html`<span class="fact open">Ouverture vérifiée le ${fmtDate(job.verified_open_at)}</span>`
+            : html`<span class="fact muted">Ouverture non vérifiée</span>`}
+          ${job.salary ? html`<span class="fact">Salaire : ${job.salary}</span>` : ""}
+          ${job.work_mode ? html`<span class="fact">${WORK_MODE_LABEL[job.work_mode] ?? job.work_mode}</span>` : ""}
+          ${job.travel ? html`<span class="fact">Déplacements : ${job.travel}</span>` : ""}
+          ${job.role_type ? html`<span class="fact">${job.role_type}</span>` : ""}
+          ${job.published_on ? html`<span class="fact muted">Publiée le ${fmtDate(job.published_on)}</span>` : ""}
         </div>
         ${stack.length ? html`<div class="tags">${stack.map((s) => html`<span class="tag">${s}</span>`)}</div>` : ""}
         ${assessmentSection(a)}
@@ -451,6 +462,7 @@ const NAV = [
   ["/", "Tableau de bord", null],
   ["/entreprises", "Entreprises", "companies"],
   ["/postes", "Postes", "jobs"],
+  ["/sources", "Sources", null],
   ["/mes-process", "Mes process", "processes"],
   ["/analytics", "Analytics", null],
   ["/mon-profil", "Mon profil", null],
@@ -467,6 +479,24 @@ export async function refreshCounts() {
     const el = $(`[data-count="${key}"]`);
     if (el) el.textContent = n;
   }
+  refreshWatch();
+}
+
+/** Bloc « Veille » de la barre latérale : planning de l'agent et dernier passage. */
+async function refreshWatch() {
+  if (!$("#watch")) return;
+  let data;
+  try {
+    data = await api("/runs?limit=1");
+  } catch {
+    return;
+  }
+  const set = (key, text) => { const el = $(`[data-watch="${key}"]`); if (el) el.textContent = text; };
+  set("schedule", data.schedule ?? "Non configurés");
+  const last = data.runs[0];
+  set("last", last ? `${fmtDate(last.started_at)} · +${last.jobs_added}` : "Aucun");
+  const n = last?.mine?.nouvelles;
+  set("mine", n ? `${n} nouvelle${n > 1 ? "s" : ""} offre${n > 1 ? "s" : ""} retenue${n > 1 ? "s" : ""} pour vous` : "");
 }
 
 /** Logo Mire (anneau ouvert + point central + satellite), coloré via currentColor. */
@@ -494,11 +524,12 @@ export async function renderShell() {
           <span>${label}</span>${count ? html`<span class="count" data-count="${count}"></span>` : ""}
         </a>`)}
     </nav>
-    <div class="watch">
+    <a class="watch" href="/sources" id="watch" style="text-decoration:none">
       <p class="label">// Veille personnelle</p>
-      <div class="row"><span class="muted">Prochain passage auto</span><span>Non configuré</span></div>
-      <p class="small muted">Données de démonstration</p>
-    </div>`.s;
+      <div class="row"><span class="muted">Passages auto</span><span data-watch="schedule">…</span></div>
+      <div class="row"><span class="muted">Dernier passage</span><span data-watch="last">…</span></div>
+      <p class="small muted" data-watch="mine"></p>
+    </a>`.s;
     mountChat();
   }
   try {

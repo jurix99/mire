@@ -3,16 +3,18 @@
 Ces données sont partagées entre utilisateurs (comme les entreprises et les postes).
 """
 
+import os
 from datetime import UTC, date, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from . import assessments, ats, services
 from .db import get_db
-from .models import Company, Job, User
+from .models import Company, Job, SearchRun, Source, User
 from .users import current_user
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
@@ -48,6 +50,10 @@ class ImportPostingsOut(BaseModel):
     created: list[int]
     duplicates: list[int]  # déjà connus (jamais recréés)
     missing: list[str]  # plus listés par l'ATS
+    too_old: list[str] = []  # publiées il y a plus de 2 mois : non ajoutées (docs §4)
+
+
+MAX_AGE_DAYS = 61
 
 
 def check_and_commit(db: Session, company: Company, fetch=ats.fetch_postings) -> CheckOut:
@@ -55,7 +61,10 @@ def check_and_commit(db: Session, company: Company, fetch=ats.fetch_postings) ->
     db.commit()
     return CheckOut(
         company_id=company.id, ats=result.ats, listed=result.listed, verified=result.verified, closed=result.closed,
-        new_postings=[PostingOut(**p.__dict__) for p in result.new_postings], error=result.error,
+        # Les plus récentes d'abord
+        new_postings=[PostingOut(**p.__dict__) for p in sorted(
+            result.new_postings, key=lambda p: (p.published_on is None, -(p.published_on or date.min).toordinal()))],
+        error=result.error,
         checked_at=company.last_checked_at,
     )
 
@@ -75,6 +84,9 @@ def import_postings(db: Session, company: Company, ids: list[str], fetch=ats.fet
         p = postings.get(ats_id)
         if p is None:
             out.missing.append(ats_id)
+            continue
+        if p.published_on and (date.today() - p.published_on).days > MAX_AGE_DAYS:
+            out.too_old.append(ats_id)
             continue
         if dup := services.find_duplicate(db, company.id, p.title, p.url):
             out.duplicates.append(dup.id)
@@ -99,3 +111,103 @@ def import_company_postings(company_id: int, body: ImportPostingsIn, db: DB) -> 
         return import_postings(db, company, body.ats_job_ids)
     except ats.ATSError as exc:
         raise services.ServiceError(502, str(exc)) from None
+
+
+# --- Sources (gérées par les utilisateurs ; l'agent ne peut qu'en ajouter) ---------------------
+
+SOURCE_KINDS = ("ats", "job_board", "vc_board", "funding_radar", "recruiter", "google_query", "autre")
+
+
+class SourceOut(BaseModel):
+    id: int
+    name: str
+    kind: str
+    query: str | None
+    active: bool
+    added_by: str
+    jobs_found: int
+    auto_readable: bool
+    notes: str | None
+    last_used_at: datetime | None
+    created_at: datetime
+
+
+class SourcePatch(BaseModel):
+    name: Annotated[str | None, Field(default=None, min_length=1, max_length=200)] = None
+    kind: Annotated[str | None, Field(default=None, pattern="^(" + "|".join(SOURCE_KINDS) + ")$")] = None
+    query: Annotated[str | None, Field(default=None, max_length=2000)] = None
+    active: bool | None = None
+    auto_readable: bool | None = None
+    notes: Annotated[str | None, Field(default=None, max_length=5000)] = None
+
+
+class SourceIn(SourcePatch):
+    name: Annotated[str, Field(min_length=1, max_length=200)]
+    kind: Annotated[str, Field(pattern="^(" + "|".join(SOURCE_KINDS) + ")$")]
+
+
+def _source_out(s: Source) -> SourceOut:
+    return SourceOut.model_validate(s, from_attributes=True)
+
+
+@router.get("/sources")
+def list_sources(db: DB) -> list[SourceOut]:
+    return [_source_out(s) for s in db.scalars(select(Source).order_by(Source.active.desc(), Source.kind, Source.name))]
+
+
+@router.post("/sources", status_code=201)
+def create_source(body: SourceIn, db: DB, user: Me) -> SourceOut:
+    if db.scalar(select(Source).where(func.lower(Source.name) == body.name.lower())):
+        raise HTTPException(409, "Une source porte déjà ce nom")
+    source = Source(**body.model_dump(exclude_none=True), added_by="user", added_by_user_id=user.id, jobs_found=0)
+    db.add(source)
+    db.commit()
+    return _source_out(source)
+
+
+@router.patch("/sources/{source_id}")
+def update_source(source_id: int, body: SourcePatch, db: DB) -> SourceOut:
+    """Modifier, désactiver ou réactiver une source (seul un utilisateur peut désactiver)."""
+    source = services.get_or_404(db, Source, source_id)
+    for field, value in body.model_dump(exclude_unset=True).items():
+        if field in ("name", "kind", "active", "auto_readable") and value is None:
+            continue
+        setattr(source, field, value)
+    db.commit()
+    return _source_out(source)
+
+
+# --- Passages de recherche -----------------------------------------------------------------------
+
+
+class RunOut(BaseModel):
+    id: int
+    kind: str
+    status: str
+    started_at: datetime
+    finished_at: datetime | None
+    jobs_seen: int
+    jobs_added: int
+    jobs_duplicates: int
+    jobs_closed: int
+    companies_checked: int
+    sources_added: int
+    summary: str | None
+    mine: dict | None = None  # résumé pour l'utilisateur connecté (nouvelles offres retenues, top)
+
+
+class RunsOut(BaseModel):
+    schedule: str | None  # passages planifiés (si l'agent est configuré)
+    runs: list[RunOut]
+
+
+@router.get("/runs")
+def list_runs(db: DB, user: Me, limit: int = 10) -> RunsOut:
+    runs = db.scalars(select(SearchRun).order_by(SearchRun.id.desc()).limit(max(1, min(limit, 50)))).all()
+    out = []
+    for r in runs:
+        item = RunOut.model_validate(r, from_attributes=True)
+        item.mine = next((u for u in (r.details or {}).get("per_user", []) if u.get("user_id") == user.id), None)
+        out.append(item)
+    schedule = os.environ.get("AGENT_SCHEDULE", "lundi et jeudi à 7h43") if os.environ.get("AGENT_TOKEN") else None
+    return RunsOut(schedule=schedule, runs=out)
