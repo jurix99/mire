@@ -245,7 +245,11 @@ def set_company_ats(company_id: int, body: AtsIn, db: DB) -> dict:
         postings = ats.fetch_postings(body.ats, body.slug)
     except ats.ATSError as exc:
         return {"ok": False, "error": str(exc)}
-    if postings and not ats.mentions_company(company, postings):
+    if not postings:
+        # Un tableau vide ne prouve rien (n'importe quel identifiant inutilisé peut répondre) : refusé
+        return {"ok": False, "error": "Tableau vide : impossible de vérifier qu'il appartient à cette entreprise. "
+                                      "Renseignez plutôt careers_url ; Mire réessaiera la détection plus tard."}
+    if not ats.mentions_company(company, postings):
         return {"ok": False, "error": "Ce tableau ne semble pas être celui de cette entreprise (nom absent des offres)"}
     if company.ats in ats.SUPPORTED and company.ats_slug and (company.ats, company.ats_slug) != (body.ats, body.slug):
         try:

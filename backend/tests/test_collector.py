@@ -245,3 +245,17 @@ def test_villejuif_is_not_abroad():
     data = ProfileData.model_validate({"preferences": {"locations": ["Paris"]}})
     job = Job(company=Company(name="X", slug="x"), title="Platform Engineer", location="Villejuif")
     assert hard_exclusion(job, data) is None
+
+
+def test_agent_ats_refuses_empty_board(db, catalog, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    monkeypatch.setenv("AGENT_TOKEN", "t")
+    client = TestClient(app, headers={"Authorization": "Bearer t"})
+    monkeypatch.setattr(ats, "fetch_postings", boards({("lever", "acme"): []}))
+    out = client.post(f"/api/agent/companies/{catalog['acme'].id}/ats", json={"ats": "lever", "slug": "acme"}).json()
+    assert out["ok"] is False and "vide" in out["error"]
+    db.refresh(catalog["acme"])
+    assert catalog["acme"].ats is None
