@@ -394,6 +394,7 @@ def billing_summary(db: Session, user: User) -> dict:
         "kind": current.kind if current else None,
         "past_due": any(s.status == "past_due" for s in granting),
         "limits": limits(plan),
+        "pro_limits": pro,
         "usage": usage(db, user),
         "locked_jobs": locked_jobs,
         "locked_fundings": locked_fundings,

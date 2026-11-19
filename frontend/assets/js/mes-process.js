@@ -1,4 +1,7 @@
-import { $, $$, STATUSES, STATUS_LABEL, api, attempt, boot, confirmDelete, daysUntil, fmtDate, html, logo, openForm, pill, refreshCounts, toast } from "./app.js";
+import {
+  $, $$, STATUSES, STATUS_LABEL, api, attempt, boot, confirmDelete, daysUntil, fmtDate, html, logo, openForm, pill, plain, refreshCounts,
+  renderValue, toast,
+} from "./app.js";
 
 // Colonnes du tableau (le statut « nouveau » reste sur la page Postes)
 const LANES = STATUSES.filter(([k]) => k !== "nouveau");
@@ -15,8 +18,8 @@ function nextStep(a) {
 
 const card = (a) => html`
   <button type="button" class="p-card" draggable="true" data-id="${a.id}" id="process-${a.id}">
-    <span class="co">${logo(a.company, "sm")}${a.company.name}</span>
-    <span class="small">${a.job.title}</span>
+    <span class="co">${logo(a.company, "sm")}${renderValue(a.company.name)}</span>
+    <span class="small">${renderValue(a.job.title)}</span>
     ${nextStep(a)}
   </button>`;
 
@@ -59,7 +62,7 @@ const timeline = (a) =>
 
 async function editApp(a) {
   const result = await openForm({
-    title: `${a.company.name} · ${a.job.title}`,
+    title: [plain(a.company.name), plain(a.job.title)].filter(Boolean).join(" · ") || "Process (offre réservée au Pro)",
     fields: [
       { name: "status", label: "Statut", type: "select", options: STATUSES, required: true },
       { name: "applied_on", label: "Candidature envoyée le", type: "date" },
@@ -88,7 +91,7 @@ async function editApp(a) {
 
 async function addApp() {
   const jobs = await api("/jobs");
-  const free = jobs.filter((j) => j.status === "nouveau");
+  const free = jobs.filter((j) => j.status === "nouveau" && !j.locked);
   if (!free.length) return toast("Tous les postes ont déjà un process. Ajoutez un poste depuis la page Postes.", true);
   const result = await openForm({
     title: "Nouveau process",

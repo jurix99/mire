@@ -1,4 +1,4 @@
-import { $, STATUS_LABEL, api, boot, fmtDate, html, logo } from "./app.js";
+import { $, STATUS_LABEL, api, boot, fmtDate, html, logo, renderValue } from "./app.js";
 
 async function render() {
   const data = await api("/analytics");
@@ -33,7 +33,7 @@ async function render() {
   $("#by-company").innerHTML = html`${data.by_company.map((r) => html`
     <div class="row-item">
       ${logo(r.company, "sm")}
-      <div class="grow"><span class="title">${r.company.name}</span></div>
+      <div class="grow"><span class="title">${renderValue(r.company.name)}</span></div>
       <span class="small muted">${r.jobs} poste${r.jobs > 1 ? "s" : ""}</span>
       <span class="pill ${r.processes ? "st-postule" : "plain"}">${r.processes} process</span>
     </div>`)}`.s;

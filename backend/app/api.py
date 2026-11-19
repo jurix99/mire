@@ -97,7 +97,8 @@ def list_companies(db: DB, user: Me) -> list[CompanyOut]:
         order = (Company.name,)  # l'ordre des levées trahirait leurs dates
     companies = list(db.scalars(select(Company).order_by(*order)))
     if not access.full:
-        companies.sort(key=lambda c: access.company_is_locked(c.id))
+        # Entreprises floutées en dernier, triées par id : l'ordre alphabétique trahirait leur nom
+        companies.sort(key=lambda c: (True, c.id) if access.company_is_locked(c.id) else (False, 0))
     return [_company_out(c, counts.get(c.id, 0), access) for c in companies]
 
 

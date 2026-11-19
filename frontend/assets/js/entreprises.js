@@ -1,4 +1,7 @@
-import { $, ICONS, api, attempt, boot, confirmDelete, fmtDate, fmtMoney, html, logo, openForm, refreshCounts, toast } from "./app.js";
+import {
+  $, ICONS, api, attempt, boot, confirmDelete, fmtDate, fmtMoney, html, isLocked, loadMe, logo, openForm, plain, proBar,
+  refreshCounts, renderValue, toast,
+} from "./app.js";
 
 let companies = [];
 
@@ -33,10 +36,12 @@ async function uploadLogo(id, file) {
 }
 
 async function editCompany(company) {
+  // Offre Free : les champs réservés au Pro (valeur verrouillée) ne sont ni affichés ni renvoyés
+  const fields = company ? FIELDS.filter((f) => !isLocked(company[f.name])) : FIELDS;
   const result = await openForm({
     title: company ? `Modifier ${company.name}` : "Nouvelle entreprise",
-    fields: FIELDS,
-    values: company ?? {},
+    fields,
+    values: company ? Object.fromEntries(Object.entries(company).filter(([, v]) => !isLocked(v))) : {},
     submitLabel: company ? "Enregistrer" : "Ajouter",
     danger: company && {
       label: "Supprimer",
@@ -61,34 +66,37 @@ async function editCompany(company) {
   if (result) await reload(result.deleted ? "Entreprise supprimée" : "Entreprise enregistrée");
 }
 
+const atsLabel = (c) => `${Object.fromEntries(ATS_OPTIONS)[c.ats] ?? c.ats}${c.ats_slug && !isLocked(c.ats_slug) ? ` (${c.ats_slug})` : ""}`;
+
 const card = (c) => html`
   <article class="card" style="display:grid;gap:14px;align-content:start" data-id="${c.id}">
     <div style="display:flex;align-items:center;gap:14px">
       ${logo(c, "lg")}
       <div style="flex:1;min-width:0">
-        <h2>${c.name}</h2>
-        <p class="small muted">${c.sector ?? "Secteur à préciser"}${c.city ? ` · ${c.city}` : ""}</p>
+        <h2>${renderValue(c.name)}</h2>
+        <p class="small muted">${c.sector ?? "Secteur à préciser"}${c.city ? html` · ${renderValue(c.city)}` : ""}</p>
       </div>
-      <button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>
+      ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>`}
     </div>
-    <p class="small">${c.description ?? ""}</p>
+    <p class="small">${renderValue(c.description, { block: true })}</p>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      ${c.funding_stage ? html`<span class="pill plain">${c.funding_stage}</span>` : ""}
-      ${c.funding_amount_meur != null ? html`<strong>${fmtMoney(c.funding_amount_meur)}</strong>` : ""}
-      ${c.funding_announced_on ? html`<span class="small muted">· ${fmtDate(c.funding_announced_on)}</span>` : ""}
+      ${c.funding_stage ? html`<span class="pill plain">${renderValue(c.funding_stage)}</span>` : ""}
+      ${c.funding_amount_meur != null ? html`<strong>${renderValue(c.funding_amount_meur, { fmt: fmtMoney })}</strong>` : ""}
+      ${c.funding_announced_on ? html`<span class="small muted">· ${renderValue(c.funding_announced_on, { fmt: fmtDate })}</span>` : ""}
     </div>
-    ${c.investors ? html`<p class="small muted">${c.investors}</p>` : ""}
+    ${c.investors ? html`<p class="small muted">${renderValue(c.investors)}</p>` : ""}
     ${c.ats || c.last_checked_at ? html`<p class="small muted">
-      ${c.ats ? `ATS : ${Object.fromEntries(ATS_OPTIONS)[c.ats] ?? c.ats}${c.ats_slug ? ` (${c.ats_slug})` : ""}` : ""}
-      ${c.last_checked_at ? ` · vérifiée le ${fmtDate(c.last_checked_at)}` : ""}
-      ${c.no_relevant_jobs_at ? " · sans offre pertinente" : ""}</p>` : ""}
+      ${c.ats ? html`ATS : ${isLocked(c.ats) ? renderValue(c.ats) : atsLabel(c)}` : ""}
+      ${c.last_checked_at ? html` · vérifiée le ${renderValue(c.last_checked_at, { fmt: fmtDate })}` : ""}
+      ${c.no_relevant_jobs_at && !isLocked(c.no_relevant_jobs_at) ? " · sans offre pertinente" : ""}</p>` : ""}
     <div class="card-foot" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto">
-      <a class="link-more" href="/postes?entreprise=${c.id}">${c.jobs_count} poste${c.jobs_count > 1 ? "s" : ""}</a>
+      ${isLocked(c.jobs_count) ? html`<span class="small muted">${renderValue(c.jobs_count)} postes récents</span>`
+        : html`<a class="link-more" href="/postes?entreprise=${c.id}">${c.jobs_count} poste${c.jobs_count > 1 ? "s" : ""}</a>`}
       <span style="display:flex;gap:2px">
         ${AUTO_ATS.has(c.ats) && c.ats_slug ? html`<button class="btn ghost sm" type="button" data-action="check"
           title="Vérifier les offres ouvertes dans la liste de l'ATS">Vérifier les offres</button>` : ""}
-        <button class="icon-btn" type="button" data-action="refresh-logo" title="Récupérer à nouveau le logo">${ICONS.image}</button>
-        ${c.website ? html`<a class="icon-btn" href="${c.website}" target="_blank" rel="noopener" title="Site web">${ICONS.link}</a>` : ""}
+        ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="refresh-logo" title="Récupérer à nouveau le logo">${ICONS.image}</button>`}
+        ${c.website && !isLocked(c.website) ? html`<a class="icon-btn" href="${c.website}" target="_blank" rel="noopener" title="Site web">${ICONS.link}</a>` : ""}
       </span>
     </div>
   </article>`;
@@ -143,7 +151,7 @@ function draw() {
   const shown = companies.filter(
     (c) =>
       (!sector || c.sector === sector) &&
-      (!q || [c.name, c.sector, c.description, c.investors].some((v) => v?.toLowerCase().includes(q)))
+      (!q || [c.name, c.sector, c.description, c.investors].some((v) => plain(v).toLowerCase().includes(q)))
   );
   $("#list").innerHTML = shown.length
     ? html`${shown.map(card)}`.s
@@ -158,10 +166,18 @@ async function reload(message) {
   const current = $("#sector").value;
   $("#sector").innerHTML = html`<option value="">Tous les secteurs</option>${sectors.map((s) => html`<option ${s === current ? "selected" : ""}>${s}</option>`)}`.s;
   draw();
+  drawProBanner().catch(() => {});
   if (message) {
     refreshCounts();
     toast(message);
   }
+}
+
+/** Offre Free : nombre de levées récentes floutées (calculé par l'API). */
+async function drawProBanner() {
+  const b = (await loadMe()).billing;
+  const n = b?.enabled && b.plan === "free" ? b.locked_fundings : 0;
+  $("#pro-banner").innerHTML = n ? proBar(`${n} levée${n > 1 ? "s" : ""} récente${n > 1 ? "s" : ""} floutée${n > 1 ? "s" : ""}`).s : "";
 }
 
 $("#search").addEventListener("input", draw);

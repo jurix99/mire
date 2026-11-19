@@ -1,5 +1,6 @@
 import {
-  $, $$, ICONS, STATUSES, api, attempt, boot, fmtToday, html, loadMe, openChatPanel, openForm, openJobDialog, pill, toast,
+  $, $$, ICONS, STATUSES, api, attempt, boot, fmtToday, html, loadMe, openChatPanel, openForm, openJobDialog, pill, plain, proTag, raw,
+  refreshCounts, toast,
 } from "./app.js";
 
 const HELP = {
@@ -26,6 +27,7 @@ let profile;
 let gemini = { enabled: false };
 let feedback = { new: 0, total: 0, threshold: 3, recent: [] };
 let jobNames = {}; // id de poste -> « Entreprise – Titre » (offres citées par les règles)
+let billing = null; // offre Free / Pro (GET /api/me)
 
 // --- Helpers ----------------------------------------------------------------
 
@@ -436,6 +438,9 @@ function renderList(key) {
 
 function renderImport() {
   const noAi = !gemini.enabled;
+  // Offre Free : analyse du profil et synthèse des règles réservées au Pro (clic : fenêtre Pro)
+  const proOnly = (feature) => (billing?.enabled && !billing.limits?.[feature] ? raw("data-pro") : "");
+  const proMark = (feature) => (proOnly(feature) ? html` ${proTag}` : "");
   $("#import").innerHTML = html`
     ${head("// Importer depuis LinkedIn", "Remplir mon profil")}
     <div style="display:grid;gap:14px">
@@ -463,14 +468,14 @@ function renderImport() {
       <div class="assist-actions">
         <p class="label">// Avec l'assistant</p>
         <div class="import-actions">
-          <button type="button" class="btn ghost sm" data-analyze ${noAi ? "disabled" : ""}
-            title="Déductions à partir de votre profil : point fort, rôles, compétences, années d'expérience">Analyser mon profil</button>
+          <button type="button" class="btn ghost sm" data-analyze ${noAi ? "disabled" : ""} ${proOnly("profile_analysis")}
+            title="Déductions à partir de votre profil : point fort, rôles, compétences, années d'expérience">Analyser mon profil${proMark("profile_analysis")}</button>
           <button type="button" class="btn ghost sm" data-onboarding ${noAi ? "disabled" : ""}
             title="L'assistant vous pose quelques questions sur ce qui manque">Compléter avec l'assistant</button>
           <button type="button" class="btn ${feedback.new >= feedback.threshold ? "" : "ghost"} sm" data-synthesize
-            ${noAi || !feedback.total ? "disabled" : ""}
+            ${noAi || !feedback.total ? "disabled" : ""} ${proOnly("rules_synthesis")}
             title="${feedback.total ? "Propose des règles à partir de vos retours (J'aime / Pas intéressé)" : "Donnez d'abord des retours sur des offres (J'aime / Pas intéressé)"}">
-            Mettre à jour mes règles${feedback.new ? ` (${feedback.new} nouveau${feedback.new > 1 ? "x" : ""} retour${feedback.new > 1 ? "s" : ""})` : ""}
+            Mettre à jour mes règles${feedback.new ? ` (${feedback.new} nouveau${feedback.new > 1 ? "x" : ""} retour${feedback.new > 1 ? "s" : ""})` : ""}${proMark("rules_synthesis")}
           </button>
         </div>
         ${feedback.new >= feedback.threshold && !noAi ? html`<p class="small">Vous avez ${feedback.new} nouveaux retours sur des offres :
@@ -640,6 +645,81 @@ function startOnboarding() {
   openChatPanel({ mode: "onboarding" });
 }
 
+// --- Abonnement ---------------------------------------------------------------
+
+const fmtLongDay = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+const USAGE_LABEL = {
+  chat_per_month: ["chat", "messages à l'assistant ce mois-ci"],
+  active_processes: ["processes", "process actifs"],
+  assessments_per_week: ["assessments", "évaluations ces 7 derniers jours"],
+  imports_total: ["imports", "import de profil"],
+};
+
+function renderBilling() {
+  const box = $("#billing");
+  box.hidden = !billing?.enabled;
+  if (!billing?.enabled) return;
+  const until = billing.pro_until ? fmtLongDay.format(new Date(billing.pro_until)) : "";
+  let plan, detail;
+  if (billing.plan === "free") {
+    plan = "Free";
+    detail = html`<div class="rows">${Object.entries(USAGE_LABEL).filter(([k]) => billing.limits[k] != null).map(([k, [u, label]]) => html`
+      <div class="row-item"><span class="grow muted small">${label}</span><span>${billing.usage[u] ?? 0} / ${billing.limits[k]}</span></div>`)}</div>`;
+  } else if (billing.kind === "subscription") {
+    plan = "Pro mensuel";
+    detail = billing.past_due ? html`<p class="small exclusion">Paiement en échec : mettez à jour votre moyen de paiement.</p>`
+      : billing.cancel_at_period_end ? html`<p class="small">Résilié, actif jusqu'au ${until}.</p>`
+      : until ? html`<p class="small muted">Prochain renouvellement le ${until}.</p>` : "";
+  } else if (billing.kind === "pass") {
+    plan = "Pass 3 mois";
+    detail = html`<p class="small">Actif jusqu'au ${until}, sans renouvellement automatique.</p>`;
+  } else {
+    plan = "Pro";
+    detail = html`<p class="small muted">Accès Pro offert.</p>`;
+  }
+  box.innerHTML = html`
+    <div class="section-head"><div class="intro"><p class="label">// Abonnement</p><h2>Offre ${plan}</h2></div></div>
+    <div style="display:grid;gap:10px">
+      ${detail}
+      <div class="import-actions">
+        ${billing.plan === "free" ? html`<button type="button" class="btn sm" data-pro>Passer Pro</button>` : ""}
+        ${billing.plan === "pro" && billing.kind === "pass" ? html`<button type="button" class="btn ghost sm" data-pro>Prolonger de 3 mois</button>` : ""}
+        ${billing.kind ? html`<button type="button" class="btn ghost sm" data-portal>Gérer mon abonnement</button>` : ""}
+      </div>
+    </div>`.s;
+  box.onclick = async (e) => {
+    const btn = e.target.closest("[data-portal]");
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      location.href = (await attempt(() => api("/billing/portal", { method: "POST" }))).url;
+    } catch {
+      btn.disabled = false;
+    }
+  };
+}
+
+/** Retour de Stripe Checkout (?checkout=success|cancel) : l'offre est activée par le webhook, on attend qu'il passe. */
+async function handleCheckoutReturn() {
+  const url = new URL(location.href);
+  const state = url.searchParams.get("checkout");
+  if (!state) return;
+  url.searchParams.delete("checkout");
+  history.replaceState(null, "", url);
+  if (state !== "success") return toast("Paiement annulé : aucun montant n'a été prélevé.");
+  toast("Paiement reçu, merci ! Activation de votre offre Pro…");
+  for (let i = 0; i < 5; i++) {
+    await refreshCounts().catch(() => {});
+    billing = (await loadMe()).billing;
+    if (billing?.plan === "pro") break;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
+  renderBilling();
+  renderImport();
+  if (billing?.plan === "pro") toast("Votre offre Pro est active.");
+  else toast("Paiement en cours de traitement : rechargez la page dans quelques instants.", true);
+}
+
 // --- Page -------------------------------------------------------------------
 
 function renderProfile() {
@@ -653,14 +733,19 @@ function renderProfile() {
   renderList("education");
 }
 
+let firstRender = true;
+
 async function render() {
-  const [{ user, counts }, data, chat, fb] = await Promise.all([
+  const [me, data, chat, fb] = await Promise.all([
     loadMe(),
     api("/profile"),
     api("/chat/status").catch(() => ({ enabled: false })),
     api("/feedback").catch(() => ({ new: 0, total: 0, threshold: 3, recent: [] })),
-    api("/jobs").then((jobs) => (jobNames = Object.fromEntries(jobs.map((j) => [j.id, `${j.company.name} – ${j.title}`])))).catch(() => {}),
+    api("/jobs").then((jobs) => (jobNames = Object.fromEntries(jobs.filter((j) => !j.locked)
+      .map((j) => [j.id, `${plain(j.company.name)} – ${plain(j.title)}`])))).catch(() => {}),
   ]);
+  const { user, counts } = me;
+  billing = me.billing;
   feedback = fb;
   profile = data;
   gemini = chat;
@@ -687,7 +772,12 @@ async function render() {
 
   // L'aperçu d'import en cours est conservé si la page est rafraîchie (ex. après une action du chat)
   if (!$("#import .import-preview")) renderImport();
+  renderBilling();
   renderProfile();
+  if (firstRender) {
+    firstRender = false;
+    handleCheckoutReturn();
+  }
 }
 
 boot(render);

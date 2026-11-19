@@ -68,6 +68,7 @@ class BillingOut(BaseModel):
     kind: Literal["subscription", "pass"] | None = None
     past_due: bool = False
     limits: dict[str, Any]
+    pro_limits: dict[str, Any] = {}  # limites du Pro (fenêtre « Passer Pro »)
     usage: dict[str, int]
     # Chiffres des bandeaux (Free) : offres récentes et levées récentes floutées
     locked_jobs: int = 0

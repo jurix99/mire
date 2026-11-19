@@ -1,15 +1,19 @@
-import { $, api, attempt, boot, daysUntil, fmtDate, fmtMoney, fmtToday, html, loadMe, logo, openJobDialog, pill, refreshCounts, score, statusSelect } from "./app.js";
+import {
+  $, api, attempt, boot, daysUntil, fmtDate, fmtMoney, fmtToday, html, isLocked, loadMe, logo, openJobDialog, pill, refreshCounts,
+  renderValue, score, statusSelect,
+} from "./app.js";
 
-const companyCard =(c) => html`
+const companyCard = (c) => html`
   <article class="card" style="display:grid;gap:14px;align-content:start">
     <p class="label">${c.sector ?? "Secteur à préciser"}</p>
-    <div style="display:flex;align-items:center;gap:12px">${logo(c, "lg")}<h2>${c.name}</h2></div>
-    <p class="muted small">${c.description ?? ""}</p>
+    <div style="display:flex;align-items:center;gap:12px">${logo(c, "lg")}<h2>${renderValue(c.name)}</h2></div>
+    <p class="muted small">${renderValue(c.description, { block: true })}</p>
     <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto">
-      ${c.funding_stage ? html`<span class="pill plain">${c.funding_stage}</span>` : html`<span></span>`}
-      <strong>${fmtMoney(c.funding_amount_meur)}</strong>
+      ${c.funding_stage ? html`<span class="pill plain">${renderValue(c.funding_stage)}</span>` : html`<span></span>`}
+      <strong>${isLocked(c.funding_amount_meur) ? renderValue(c.funding_amount_meur) : fmtMoney(c.funding_amount_meur)}</strong>
     </div>
-    <p class="small muted">${[c.city, c.funding_announced_on && `levée le ${fmtDate(c.funding_announced_on)}`].filter(Boolean).join(" · ")}</p>
+    <p class="small muted">${c.city ? renderValue(c.city) : ""}${c.city && c.funding_announced_on ? " · " : ""}${c.funding_announced_on
+      ? html`levée le ${renderValue(c.funding_announced_on, { fmt: fmtDate })}` : ""}</p>
   </article>`;
 
 const stat = (label, value, hint, href) => html`
@@ -47,9 +51,9 @@ async function render() {
         <div class="row-item clickable" data-job-id="${j.id}">
           ${logo(j.company)}
           <div class="grow">
-            <button type="button" class="link-btn title" title="Voir l'offre">${j.title}</button>
-            <span class="muted small">${j.company.name}${j.location ? ` · ${j.location}` : ""}</span>
-            ${j.assessment?.why ? html`<span class="small why-line">${j.assessment.why}</span>` : ""}
+            ${isLocked(j.title) ? renderValue(j.title) : html`<button type="button" class="link-btn title" title="Voir l'offre">${j.title}</button>`}
+            <span class="muted small">${renderValue(j.company.name)}${j.location ? ` · ${j.location}` : ""}</span>
+            ${j.assessment?.why && !isLocked(j.assessment.why) ? html`<span class="small why-line">${j.assessment.why}</span>` : ""}
           </div>
           ${score(j.score)}
           ${statusSelect(j.status, `data-job="${j.id}"`)}
@@ -61,8 +65,8 @@ async function render() {
         <a class="row-item" href="/mes-process#process-${a.id}" style="text-decoration:none">
           ${logo(a.company)}
           <div class="grow">
-            <div class="meta"><span class="title">${a.company.name}</span>${pill(a.status)}</div>
-            <span class="small">${a.job.title}</span>
+            <div class="meta"><span class="title">${renderValue(a.company.name)}</span>${pill(a.status)}</div>
+            <span class="small">${renderValue(a.job.title)}</span>
             ${nextStep(a)}
           </div>
         </a>`)}`.s

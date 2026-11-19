@@ -1,6 +1,6 @@
 import {
-  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, html, logo, openFeedback, openForm, openJobDialog, refreshCounts,
-  score, statusSelect, toast,
+  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, fmtAgo, html, isLocked, loadMe, logo, openFeedback, openForm,
+  openJobDialog, plain, proBar, proTag, refreshCounts, renderValue, score, statusSelect, toast,
 } from "./app.js";
 
 let jobs = [];
@@ -12,7 +12,8 @@ let pollTimer;
 function fields() {
   return [
     { name: "title", label: "Intitulé", required: true, full: true },
-    { name: "company_id", label: "Entreprise", type: "select", required: true, options: companies.map((c) => [c.id, c.name]) },
+    { name: "company_id", label: "Entreprise", type: "select", required: true,
+      options: companies.filter((c) => !c.locked).map((c) => [c.id, c.name]) },
     { name: "location", label: "Lieu", placeholder: "Paris · Hybride · peu de déplacements" },
     { name: "category", label: "Catégorie", placeholder: "Platform / MLOps" },
     { name: "seniority", label: "Expérience demandée", placeholder: "5+ ans" },
@@ -59,27 +60,31 @@ async function editJob(job) {
 
 /** Ligne sous le titre : pourquoi c'est intéressant, ou raison d'écart. */
 function subline(j) {
+  if (j.locked) return html`<span class="small muted">Publiée ${fmtAgo(j.published_on ?? j.created_at)} · ${proTag}</span>`;
   const a = j.assessment;
-  if (a?.exclusion && j.display_status === "ecartee") return html`<span class="small muted exclusion-line">${a.exclusion}</span>`;
-  if (a?.why) return html`<span class="small why-line">${a.why}</span>`;
+  if (a?.exclusion && j.display_status === "ecartee") return html`<span class="small muted exclusion-line">${renderValue(a.exclusion)}</span>`;
+  // « Pourquoi » verrouillé (Free) : flouté dans la fiche, la ligne garde le lieu et la source
+  if (a?.why && !isLocked(a.why)) return html`<span class="small why-line">${a.why}</span>`;
   return html`<span class="small muted">${[j.location, j.source].filter(Boolean).join(" · ")}</span>`;
 }
 
 const row = (j) => html`
-  <div class="job-row clickable ${j.display_status === "ecartee" ? "is-excluded" : ""}" data-id="${j.id}">
+  <div class="job-row clickable ${j.display_status === "ecartee" ? "is-excluded" : ""} ${j.locked ? "is-locked" : ""}" data-id="${j.id}">
     ${logo(j.company)}
     <div style="min-width:0;display:grid;gap:2px">
-      <button type="button" class="link-btn title" data-action="view" title="Voir l'offre">${j.title}</button>
+      ${isLocked(j.title) ? renderValue(j.title)
+        : html`<button type="button" class="link-btn title" data-action="view" title="Voir l'offre">${j.title}</button>`}
       ${subline(j)}
     </div>
-    <span class="col-company">${j.company.name}</span>
+    <span class="col-company">${renderValue(j.company.name)}</span>
     <span class="col-score" title="${j.assessment?.manual_score != null ? "Note corrigée par vous" : "Note calculée selon votre profil"}">${score(j.score)}</span>
     <span class="col-status">${statusSelect(j.display_status, `data-job="${j.id}"`)}</span>
     <span class="actions">
+      ${j.locked ? "" : html`
       <button class="icon-btn fb-like" type="button" data-action="like" title="J'aime (offre de référence)">${ICONS.heart}</button>
-      <button class="icon-btn fb-dislike" type="button" data-action="dislike" title="Pas intéressé">${ICONS.thumbDown}</button>
-      ${j.url ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
-      <button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>
+      <button class="icon-btn fb-dislike" type="button" data-action="dislike" title="Pas intéressé">${ICONS.thumbDown}</button>`}
+      ${j.url && !isLocked(j.url) ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
+      ${j.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>`}
     </span>
   </div>`;
 
@@ -105,7 +110,7 @@ function draw() {
     (j) =>
       (statusFilter ? j.display_status === statusFilter : j.display_status !== "ecartee") &&
       (!companyId || String(j.company.id) === companyId) &&
-      (!q || [j.title, j.company.name, j.stack, j.category, j.location].some((v) => v?.toLowerCase().includes(q)))
+      (!q || [j.title, j.company.name, j.stack, j.category, j.location].some((v) => plain(v).toLowerCase().includes(q)))
   );
   $("#list").innerHTML = shown.length ? html`${shown.map(row)}`.s : html`<p class="empty">Aucun poste ne correspond.</p>`.s;
 }
@@ -163,13 +168,24 @@ async function reloadJobs() {
   draw();
 }
 
+/** Offre Free : nombre d'offres récentes floutées (calculé par l'API). */
+async function drawProBanner() {
+  const b = (await loadMe()).billing;
+  const n = b?.enabled && b.plan === "free" ? b.locked_jobs : 0;
+  const days = b?.limits?.fresh_delay_days;
+  $("#pro-banner").innerHTML = n
+    ? proBar(`${n} offre${n > 1 ? "s" : ""} de moins de ${days} jours ${n > 1 ? "sont réservées" : "est réservée"} au Pro`).s
+    : "";
+}
+
 async function reload() {
   [jobs, companies] = await Promise.all([api("/jobs"), api("/companies")]);
   const current = $("#company").value || params.get("entreprise") || "";
   $("#company").innerHTML = html`<option value="">Toutes les entreprises</option>
-    ${companies.map((c) => html`<option value="${c.id}" ${String(c.id) === current ? "selected" : ""}>${c.name}</option>`)}`.s;
+    ${companies.filter((c) => !c.locked).map((c) => html`<option value="${c.id}" ${String(c.id) === current ? "selected" : ""}>${c.name}</option>`)}`.s;
   draw();
   drawAssessmentStatus();
+  drawProBanner().catch(() => {});
 }
 
 $("#search").addEventListener("input", draw);

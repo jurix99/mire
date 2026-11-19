@@ -419,6 +419,65 @@ dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
   font-size: 14px; z-index: 100; box-shadow: var(--shadow);
 }
 .toast.error { background: #b91c1c; }
+.toast .toast-action {
+  margin-left: 12px; padding: 3px 10px; border-radius: 100px; border: 0; cursor: pointer;
+  background: var(--white); color: var(--text); font: inherit; font-size: 13px; font-weight: 600;
+}
+
+/* --- Offre Pro : contenus verrouillés -------------------------------------- */
+/* Le serveur n'envoie jamais la vraie valeur : .locked floute un texte FACTICE (placeholder) */
+
+.locked {
+  position: relative; display: inline-flex; align-items: center; max-width: 100%;
+  vertical-align: middle; cursor: pointer; border-radius: 6px;
+}
+.locked .locked-text {
+  filter: blur(5px); user-select: none; -webkit-user-select: none; pointer-events: none;
+  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2ch;
+}
+.locked .pro-badge {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 100px;
+  background: var(--text); color: var(--white); font-size: 11px; font-weight: 600; line-height: 16px;
+  white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, .15);
+}
+.locked .pro-badge svg { width: 11px; height: 11px; }
+.locked:hover .pro-badge, .locked:focus-visible .pro-badge { background: var(--accent); }
+.locked:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* En bloc (description, « pourquoi », barème) : le texte factice garde ses retours à la ligne */
+.locked.block { display: block; padding: 4px 0; }
+.locked.block .locked-text { white-space: normal; display: block; }
+.locked.block .pro-badge { top: 50%; }
+/* Ligne de tableau entièrement verrouillée (offre récente) */
+.job-row.is-locked .title, .job-row.is-locked .col-company { color: var(--muted); }
+.logo.is-locked { background: var(--bg); color: var(--faint); }
+
+#plan-box { margin-top: 10px; justify-items: start; }
+.pro-bar {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;
+  margin: 0 0 14px; padding: 10px 14px; border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--accent); font-size: 14px;
+}
+.pro-bar > span { display: inline-flex; align-items: center; gap: 8px; }
+.pro-bar svg { width: 14px; height: 14px; flex: none; }
+.pro-tag {
+  display: inline-flex; align-items: center; gap: 3px; padding: 0 6px; border-radius: 100px;
+  background: var(--text); color: var(--white); font-size: 10px; font-weight: 600; line-height: 16px;
+}
+.pro-tag svg { width: 9px; height: 9px; }
+
+dialog.pro-dialog { width: min(600px, calc(100vw - 32px)); }
+.pro-dialog ul.pro-features { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
+.pro-prices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.pro-price {
+  display: grid; gap: 6px; align-content: start; padding: 16px; border: 1px solid var(--border);
+  border-radius: var(--radius-sm); background: var(--white);
+}
+.pro-price .amount { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+.pro-price .btn { justify-content: center; margin-top: 6px; }
+.pro-waiver { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); }
+.pro-waiver input { margin-top: 3px; flex: none; }
+@media (max-width: 560px) { .pro-prices { grid-template-columns: 1fr; } }
 
 /* --- Assistant (chat flottant) --------------------------------------------- */
 

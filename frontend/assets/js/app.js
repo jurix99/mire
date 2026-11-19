@@ -52,6 +52,14 @@ export async function api(path, { method = "GET", body, form } = {}) {
   }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
+  if (res.status === 402 && data?.detail?.code) {
+    // Offre Free : quota atteint ou fonction réservée au Pro (message et bouton Pro déjà affichés)
+    planError(data.detail);
+    const err = new Error(data.detail.message ?? "Réservé à l'offre Pro");
+    err.code = data.detail.code;
+    err.handled = true;
+    throw err;
+  }
   if (!res.ok) {
     const d = data?.detail;
     const msg = Array.isArray(d) ? d.map((e) => `${e.loc?.at(-1) ?? ""} : ${e.msg}`).join(" · ") : d;
@@ -68,6 +76,14 @@ const parseDay = (iso) => (iso && iso.length === 10 ? new Date(`${iso}T00:00:00`
 
 export const fmtDate = (iso) => (iso ? fmtShort.format(parseDay(iso)) : "");
 export const fmtToday = () => fmtLong.format(new Date());
+/** Date relative : « aujourd'hui », « hier », « il y a 3 jours ». */
+export function fmtAgo(iso) {
+  if (!iso) return "";
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const day = parseDay(iso); day.setHours(0, 0, 0, 0);
+  const n = Math.round((today - day) / 86400000);
+  return n <= 0 ? "aujourd'hui" : n === 1 ? "hier" : `il y a ${n} jours`;
+}
 export const fmtMoney = (m) => (m == null ? "" : `${Number(m).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} M€`);
 export function daysUntil(iso) {
   if (!iso) return null;
@@ -100,10 +116,40 @@ function hue(text) {
 const initials = (name) =>
   name.split(/[\s-]+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "?";
 
+// --- Offre Pro : valeurs verrouillées -----------------------------------------
+// Pour un utilisateur Free, l'API remplace les données réservées au Pro par {locked: true, placeholder} :
+// placeholder est un texte FACTICE (jamais la vraie valeur), affiché flouté avec un badge « Pro ».
+
+const LOCK_ICON = raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>`);
+
+export const isLocked = (v) => v != null && typeof v === "object" && v.locked === true;
+/** Valeur utilisable en texte (recherche, tri, titres de formulaire) : "" si verrouillée. */
+export const plain = (v) => (isLocked(v) ? "" : v ?? "");
+export const proTag = html`<span class="pro-tag">${LOCK_ICON} Pro</span>`;
+
+/**
+ * Affiche une valeur de l'API, ou son texte factice flouté si elle est verrouillée (clic : fenêtre Pro).
+ * fmt(v) : mise en forme de la vraie valeur ; block : bloc de texte (description, « pourquoi »…).
+ */
+export function renderValue(v, { fmt, block = false } = {}) {
+  if (isLocked(v)) {
+    return html`<span class="locked ${block ? "block" : ""}" data-pro role="button" tabindex="0" title="Réservé à l'offre Pro"
+      aria-label="Réservé à l'offre Pro"><span class="locked-text" aria-hidden="true">${v.placeholder}</span><span class="pro-badge">${LOCK_ICON} Pro</span></span>`;
+  }
+  if (v == null || v === "") return "";
+  return fmt ? fmt(v) : v;
+}
+
+/** Bandeau d'appel au Pro (chiffres calculés par l'API). */
+export const proBar = (text) => html`<div class="pro-bar" role="note"><span>${LOCK_ICON} ${text}</span>
+  <button type="button" class="btn sm" data-pro>Passer Pro</button></div>`;
+
 /** Logo d'entreprise : image récupérée par le backend, avec initiales colorées en repli. */
 export function logo(company, size = "") {
+  const name = plain(company.name);
+  if (!company.logo || !name) return html`<span class="logo ${size} is-locked" data-initials="${name ? initials(name) : "?"}"></span>`;
   const bust = company._v ? `?v=${company._v}` : "";
-  return html`<span class="logo ${size}" style="--hue:${hue(company.name)}" data-initials="${initials(company.name)}">
+  return html`<span class="logo ${size}" style="--hue:${hue(name)}" data-initials="${initials(name)}">
     <img src="${company.logo}${bust}" alt="" loading="lazy">
   </span>`;
 }
@@ -112,7 +158,8 @@ document.addEventListener("error", (e) => {
   if (e.target instanceof HTMLImageElement && e.target.parentElement?.classList.contains("logo")) e.target.remove();
 }, true);
 
-export const score = (s) => (s == null ? "" : html`<span class="score ${s < 7.5 ? "low" : ""}">${Number(s).toFixed(1)}</span>`);
+export const score = (s) => (s == null ? "" : isLocked(s) ? renderValue(s)
+  : html`<span class="score ${s < 7.5 ? "low" : ""}">${Number(s).toFixed(1)}</span>`);
 
 export const ICONS = {
   edit: raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>`),
@@ -128,7 +175,8 @@ export const ICONS = {
 // --- Notifications ----------------------------------------------------------
 
 let toastTimer;
-export function toast(message, error = false) {
+/** action : { label, onClick } pour un bouton dans la notification (ex. « Passer Pro »). */
+export function toast(message, error = false, action = null) {
   let el = $(".toast");
   if (!el) {
     el = document.createElement("div");
@@ -137,10 +185,18 @@ export function toast(message, error = false) {
     document.body.append(el);
   }
   el.textContent = message;
+  if (action) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "toast-action";
+    btn.textContent = action.label;
+    btn.addEventListener("click", () => { el.hidden = true; action.onClick(); });
+    el.append(btn);
+  }
   el.classList.toggle("error", error);
   el.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => (el.hidden = true), error ? 5000 : 2500);
+  toastTimer = setTimeout(() => (el.hidden = true), action ? 8000 : error ? 5000 : 2500);
 }
 
 /** Exécute une action et affiche l'erreur éventuelle. */
@@ -150,10 +206,102 @@ export async function attempt(fn, okMessage) {
     if (okMessage) toast(okMessage);
     return r;
   } catch (err) {
-    toast(err.message, true);
+    if (!err.handled) toast(err.message, true);
     throw err;
   }
 }
+
+// --- Offre Pro : fenêtre d'abonnement, erreurs 402 ---------------------------------
+
+/** Réponse 402 de l'API : quota Free atteint (message + bouton Pro), ou fonction réservée au Pro. */
+function planError(detail) {
+  if (detail.code === "quota") toast(detail.message, true, { label: "Passer Pro", onClick: openProModal });
+  else openProModal();
+}
+
+/** Fenêtre « Passer Pro » : ce qui est débloqué, les deux prix, la renonciation au droit de rétractation. */
+export async function openProModal() {
+  if ($("dialog.pro-dialog")) return;
+  let billing = null;
+  try { billing = (await loadMe()).billing; } catch { /* affichée sans les chiffres */ }
+  const free = billing?.limits ?? {};
+  const pro = billing?.pro_limits ?? {};
+  const prices = billing?.prices ?? {};
+  const isPro = billing && billing.plan === "pro";
+  const dlg = document.createElement("dialog");
+  dlg.className = "pro-dialog";
+  dlg.setAttribute("aria-label", "Passer à l'offre Pro");
+  dlg.innerHTML = html`
+    <div class="dialog-body">
+      <div class="job-head">
+        <div class="grow"><p class="label">// Mire Pro</p><h2>Le radar complet, à jour, et le travail de l'IA</h2></div>
+        <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
+      </div>
+      <ul class="pro-features">
+        <li>Toutes les offres dès leur publication${free.fresh_delay_days ? ` (en Free : après ${free.fresh_delay_days} jours)` : ""}</li>
+        <li>Levées de fonds, montants, investisseurs, effectifs et ATS de chaque entreprise</li>
+        <li>La note de l'IA, son détail et le « pourquoi » sur toutes les offres, évaluées en priorité</li>
+        <li>Process illimités, analyse de votre profil et règles apprises de vos retours</li>
+        <li>Assistant${pro.chat_per_month ? ` : jusqu'à ${pro.chat_per_month} messages par mois` : ""}${free.chat_per_month ? ` (Free : ${free.chat_per_month})` : ""}</li>
+      </ul>
+      ${isPro ? html`<p class="small">Vous avez déjà l'offre Pro.</p>` : html`
+      <div class="pro-prices">
+        <div class="pro-price">
+          <span class="label">// Mensuel</span>
+          <span class="amount">${prices.monthly ?? "Pro mensuel"}</span>
+          <span class="small muted">Sans engagement, résiliable à tout moment depuis votre profil.</span>
+          <button type="button" class="btn" data-checkout="monthly" disabled>Passer Pro</button>
+        </div>
+        <div class="pro-price">
+          <span class="label">// Pass 3 mois</span>
+          <span class="amount">${prices.pass_3m ?? "Pass 3 mois"}</span>
+          <span class="small muted">Paiement unique, sans renouvellement automatique.</span>
+          <button type="button" class="btn ghost" data-checkout="pass_3m" disabled>Acheter le Pass</button>
+        </div>
+      </div>
+      <label class="pro-waiver"><input type="checkbox" data-waiver>
+        <span>Je demande l'accès immédiat à Mire Pro et je renonce expressément à mon droit de rétractation de 14 jours
+        (service numérique fourni dès le paiement).</span></label>
+      <p class="small muted">Prix TTC. Paiement sécurisé par Stripe.</p>
+      <p class="form-error" hidden></p>`}
+    </div>`.s;
+  document.body.append(dlg);
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.addEventListener("click", async (e) => {
+    if (e.target === dlg || e.target.closest("[data-close]")) return dlg.close();
+    const btn = e.target.closest("[data-checkout]");
+    if (!btn) return;
+    $$("[data-checkout]", dlg).forEach((b) => (b.disabled = true));
+    try {
+      const res = await api("/billing/checkout", { method: "POST", body: { plan: btn.dataset.checkout, waive_withdrawal: true } });
+      location.href = res.url;
+    } catch (err) {
+      const box = $(".form-error", dlg);
+      box.textContent = err.message;
+      box.hidden = false;
+      $$("[data-checkout]", dlg).forEach((b) => (b.disabled = false));
+    }
+  });
+  $("[data-waiver]", dlg)?.addEventListener("change", (e) => {
+    $$("[data-checkout]", dlg).forEach((b) => (b.disabled = !e.target.checked));
+  });
+  dlg.showModal();
+}
+
+// Clic (ou Entrée) sur un élément verrouillé ou un bouton « Passer Pro » : fenêtre Pro, rien d'autre
+// (écouteur en phase de capture : passe avant les clics de ligne qui ouvriraient la fiche)
+document.addEventListener("click", (e) => {
+  if (!e.target.closest?.("[data-pro]")) return;
+  e.preventDefault();
+  e.stopPropagation();
+  openProModal();
+}, true);
+document.addEventListener("keydown", (e) => {
+  if ((e.key === "Enter" || e.key === " ") && e.target.closest?.(".locked[data-pro]")) {
+    e.preventDefault();
+    openProModal();
+  }
+});
 
 // --- Formulaire générique dans un <dialog> -----------------------------------
 
@@ -269,8 +417,9 @@ export async function openFeedback(job, sentiment) {
   const like = sentiment === "like";
   reasonsPromise ??= api("/feedback/reasons");
   const reasons = like ? [] : await reasonsPromise;
+  if (job.locked) return openProModal(); // offre récente verrouillée (Free)
   const values = await openForm({
-    title: like ? `J'aime : ${job.title}` : `Pas intéressé : ${job.title}`,
+    title: like ? `J'aime : ${plain(job.title)}` : `Pas intéressé : ${plain(job.title)}`,
     fields: [
       ...(like ? [] : [{ name: "reasons", label: "Pourquoi ? (facultatif)", type: "checks", full: true,
                          options: reasons.map((r) => [r.key, r.label]) }]),
@@ -343,32 +492,33 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
         <div class="job-head">
           ${logo(job.company, "lg")}
           <div class="grow">
-            <h2>${job.title}</h2>
-            <p class="muted small">${job.company.name}${meta ? ` · ${meta}` : ""}</p>
+            <h2>${renderValue(job.title)}</h2>
+            <p class="muted small">${renderValue(job.company.name)}${meta ? ` · ${meta}` : ""}</p>
           </div>
           <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
         </div>
+        ${job.locked ? proBar(`Offre publiée ${fmtAgo(job.published_on ?? job.created_at)} : les offres récentes sont réservées au Pro.`) : ""}
         <div class="meta">
           ${pill(job.display_status)}${score(job.score)}
           ${a?.manual_score != null ? html`<span class="small muted">note corrigée par vous</span>` : ""}
           ${job.source ? html`<span class="small muted">Source : ${job.source}</span>` : ""}
         </div>
         <div class="job-facts small">
-          ${job.closed_at ? html`<span class="fact closed">Offre fermée le ${fmtDate(job.closed_at)}</span>`
+          ${job.locked ? "" : job.closed_at ? html`<span class="fact closed">Offre fermée le ${fmtDate(job.closed_at)}</span>`
             : job.verified_open_at ? html`<span class="fact open">Ouverture vérifiée le ${fmtDate(job.verified_open_at)}</span>`
             : html`<span class="fact muted">Ouverture non vérifiée</span>`}
-          ${job.salary ? html`<span class="fact">Salaire : ${job.salary}</span>` : ""}
+          ${job.salary ? html`<span class="fact">Salaire : ${renderValue(job.salary)}</span>` : ""}
           ${job.work_mode ? html`<span class="fact">${WORK_MODE_LABEL[job.work_mode] ?? job.work_mode}</span>` : ""}
           ${job.travel ? html`<span class="fact">Déplacements : ${job.travel}</span>` : ""}
           ${job.role_type ? html`<span class="fact">${job.role_type}</span>` : ""}
           ${job.published_on ? html`<span class="fact muted">Publiée le ${fmtDate(job.published_on)}</span>` : ""}
         </div>
         ${stack.length ? html`<div class="tags">${stack.map((s) => html`<span class="tag">${s}</span>`)}</div>` : ""}
-        ${assessmentSection(a)}
+        ${job.locked ? "" : assessmentSection(a)}
         <section class="job-section">
           <p class="label">// L'offre</p>
-          ${job.summary
-            ? html`<div class="job-text prewrap">${job.summary}</div>`
+          ${isLocked(job.summary) ? renderValue(job.summary, { block: true })
+            : job.summary ? html`<div class="job-text prewrap">${job.summary}</div>`
             : html`<p class="muted small">Pas de description enregistrée pour ce poste.${url ? " Consultez l'offre originale." : ""}</p>`}
         </section>
         ${app ? html`<section class="job-section">
@@ -382,12 +532,14 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
       </div>
       <div class="dialog-foot">
         <div class="feedback-buttons">
-          ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Voir l'offre originale ${ICONS.link}</a>` : ""}
+          ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Voir l'offre originale ${ICONS.link}</a>`
+            : isLocked(job.url) ? html`<button type="button" class="btn ghost" data-pro>Voir l'offre originale ${proTag}</button>` : ""}
+          ${job.locked ? "" : html`
           <button type="button" class="btn ghost" data-feedback="like" title="Offre de référence">${ICONS.heart} J'aime</button>
-          <button type="button" class="btn ghost" data-feedback="dislike">${ICONS.thumbDown} Pas intéressé</button>
+          <button type="button" class="btn ghost" data-feedback="dislike">${ICONS.thumbDown} Pas intéressé</button>`}
         </div>
         <div class="right">
-          ${onEdit ? html`<button type="button" class="btn ghost" data-edit>Modifier</button>` : ""}
+          ${onEdit && !job.locked ? html`<button type="button" class="btn ghost" data-edit>Modifier</button>` : ""}
           <button type="button" class="btn" data-close>Fermer</button>
         </div>
       </div>`.s;
@@ -432,25 +584,30 @@ function assessmentSection(a) {
       <p class="small muted">Pas encore évaluée pour vous : l'évaluation se fait automatiquement dès que votre profil est rempli.</p>
     </section>`;
   }
+  const tags = (label, list, cls) => (isLocked(list)
+    ? html`<div class="tags"><span class="small muted">${label}</span>${renderValue(list)}</div>`
+    : list.length ? html`<div class="tags"><span class="small muted">${label}</span>${list.map((s) => html`<span class="tag ${cls}">${s}</span>`)}</div>` : "");
+  const auto = plain(a.auto_score);
   return html`<section class="job-section">
     <p class="label">// Mon évaluation</p>
-    ${a.exclusion ? html`<p class="small exclusion">Écartée : ${a.exclusion}</p>` : ""}
-    ${a.why ? html`<p class="small">${a.why}</p>` : ""}
-    ${a.criteria.length ? html`<div class="criteria">${a.criteria.map((c) => html`
+    ${a.exclusion ? html`<p class="small exclusion">Écartée : ${renderValue(a.exclusion)}</p>` : ""}
+    ${a.why ? html`<p class="small">${renderValue(a.why, { block: true })}</p>` : ""}
+    ${isLocked(a.criteria) ? html`<div class="criteria">${renderValue(a.criteria, { block: true })}</div>`
+      : a.criteria.length ? html`<div class="criteria">${a.criteria.map((c) => html`
       <div class="criterion">
         <span class="small">${c.label}</span>
         <span class="bar-track"><span class="bar-fill" style="width:${Math.round((c.points / (c.max || 1)) * 100)}%"></span></span>
         <span class="small n">${c.points.toLocaleString("fr-FR")} / ${c.max.toLocaleString("fr-FR")}</span>
       </div>`)}</div>` : ""}
-    ${a.skills_have.length ? html`<div class="tags"><span class="small muted">Vous avez :</span>${a.skills_have.map((s) => html`<span class="tag have">${s}</span>`)}</div>` : ""}
-    ${a.skills_missing.length ? html`<div class="tags"><span class="small muted">Manque :</span>${a.skills_missing.map((s) => html`<span class="tag missing">${s}</span>`)}</div>` : ""}
+    ${tags("Vous avez :", a.skills_have, "have")}
+    ${tags("Manque :", a.skills_missing, "missing")}
     <form class="manual-score">
       <label class="small">Ma note
         <input class="input" name="score" type="number" min="0" max="10" step="0.5" value="${a.manual_score ?? ""}"
-          placeholder="${a.auto_score ?? ""}" aria-label="Corriger la note (sur 10)">
+          placeholder="${auto}" aria-label="Corriger la note (sur 10)">
       </label>
       <button class="btn ghost sm">Corriger</button>
-      ${a.manual_score != null ? html`<button type="button" class="btn ghost sm" data-reset-score>Revenir à la note calculée${a.auto_score != null ? ` (${a.auto_score})` : ""}</button>` : ""}
+      ${a.manual_score != null ? html`<button type="button" class="btn ghost sm" data-reset-score>Revenir à la note calculée${auto !== "" ? ` (${auto})` : ""}</button>` : ""}
       <span class="small muted">${a.stale ? "Réévaluation en attente (profil modifié)" : `Évaluée le ${fmtDate(a.assessed_at)}`}</span>
     </form>
   </section>`;
@@ -479,6 +636,8 @@ export async function refreshCounts() {
     const el = $(`[data-count="${key}"]`);
     if (el) el.textContent = n;
   }
+  const plan = $("#plan-box");
+  if (plan) plan.hidden = !(me.billing?.enabled && me.billing.plan === "free");
   refreshWatch();
 }
 
@@ -529,7 +688,12 @@ export async function renderShell() {
       <p class="small" data-watch="schedule">…</p>
       <div class="row"><span class="muted">Dernier passage</span><span data-watch="last">…</span></div>
       <p class="small muted" data-watch="mine"></p>
-    </a>`.s;
+    </a>
+    <div class="watch" id="plan-box" hidden>
+      <p class="label">// Offre Free</p>
+      <p class="small muted">Offres récentes, levées de fonds et notes de l'IA réservées au Pro.</p>
+      <button type="button" class="btn sm" data-pro>Passer Pro</button>
+    </div>`.s;
     mountChat();
   }
   try {
