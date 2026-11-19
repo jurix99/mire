@@ -17,15 +17,16 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import assessments
+from .agent_api import router as agent_router
 from .api import router as api_router
 from .assessments_api import router as assessments_router
-from .feedback import router as feedback_router
-from .radar_api import router as radar_router
-from .llm import get_llm
 from .chat import router as chat_router
-from .profile_api import router as profile_router
 from .db import SessionLocal
+from .feedback import router as feedback_router
+from .llm import get_llm
 from .net import TLS_CONTEXT
+from .profile_api import router as profile_router
+from .radar_api import router as radar_router
 from .seed import seed_catalog
 from .users import normalize_locale, upsert_user
 
@@ -72,6 +73,7 @@ app.include_router(chat_router)
 app.include_router(assessments_router)
 app.include_router(feedback_router)
 app.include_router(radar_router)
+app.include_router(agent_router)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,

@@ -15,10 +15,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
 from . import assessments, chat_tools
+from .analysis import missing_topics
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
 from .models import STATUS_LABELS, ChatAction, ChatConversation, ChatMessage, User
-from .analysis import missing_topics
 from .profile import get_profile, job_labels, profile_data, profile_summary
 from .users import current_user
 

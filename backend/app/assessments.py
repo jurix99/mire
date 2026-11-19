@@ -27,7 +27,14 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import Application, Job, JobAssessment, User, UserProfile
-from .profile import ProfileData, _norm, get_profile, job_labels, profile_data, profile_summary
+from .profile import (
+    ProfileData,
+    _norm,
+    get_profile,
+    job_labels,
+    profile_data,
+    profile_summary,
+)
 
 log = logging.getLogger("mire.assessments")
 
