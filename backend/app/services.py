@@ -3,6 +3,9 @@
 Toutes les fonctions qui touchent aux process prennent l'utilisateur courant en paramètre
 et ne lisent / modifient que ses données. Les erreurs sont des ServiceError (= HTTPException),
 renvoyées telles quelles par l'API et transformées en message d'erreur par le chat.
+
+Offre Free : job_out, company_out et application_out sont les SEULS endroits qui masquent les données réservées
+au Pro (selon entitlements.access_for). L'API, le chat et les analytics passent tous par eux.
 """
 
 import re
@@ -15,6 +18,8 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
+from . import entitlements
+from .entitlements import FULL_ACCESS, Access, lock
 from .models import (
     ACTIVE_STATUSES,
     TODO_STATUSES,
@@ -30,12 +35,15 @@ from .schemas import (
     ApplicationOut,
     ApplicationPatch,
     AssessmentOut,
+    CompanyMini,
     CompanyOut,
     CriterionOut,
     DashboardOut,
     DashboardStats,
     JobIn,
+    JobMini,
     JobOut,
+    Locked,
 )
 
 
@@ -81,6 +89,7 @@ class AssessmentContext:
     assessments: dict[int, JobAssessment] = dc_field(default_factory=dict)
     weights: dict[str, float] = dc_field(default_factory=dict)
     version: int = 1
+    access: Access = dc_field(default_factory=Access)  # ce que l'utilisateur peut voir (Free : masquage)
 
 
 def assessment_context(db: Session, user: User) -> AssessmentContext:
@@ -88,7 +97,8 @@ def assessment_context(db: Session, user: User) -> AssessmentContext:
 
     profile = get_profile(db, user)
     rows = db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id))
-    return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, profile.version)
+    return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, profile.version,
+                             entitlements.access_for(db, user))
 
 
 def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = False) -> AssessmentOut:
@@ -96,7 +106,7 @@ def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = Fal
 
     auto = float(a.score) if a.score is not None else None
     manual = float(a.manual_score) if a.manual_score is not None else None
-    return AssessmentOut(
+    out = AssessmentOut(
         score=manual if manual is not None else auto, auto_score=auto, manual_score=manual,
         verdict=a.verdict, exclusion=a.exclusion, why=a.why,
         criteria=[CriterionOut(key=k, label=CRITERIA[k][0], points=float(a.criteria.get(k, 0)), max=w)
@@ -106,10 +116,48 @@ def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = Fal
         stale=a.profile_version < ctx.version and not treated and a.manual_score is None,
         assessed_at=a.assessed_at,
     )
+    if ctx.access.full:
+        return out
+    # Free : « pourquoi » et compétences toujours masqués ; note et barème seulement pour les mieux notées
+    out.why, out.skills_have, out.skills_missing = lock(out.why), lock(out.skills_have), lock(out.skills_missing)
+    if a.job_id not in ctx.access.top_ids:
+        out.auto_score, out.criteria = lock(out.auto_score), lock(out.criteria)
+        if manual is None:  # la note corrigée par l'utilisateur reste la sienne
+            out.score = lock(out.score)
+        if a.model != "regles":  # une exclusion par règle fixe (stage, entreprise exclue…) reste lisible
+            out.exclusion = lock(out.exclusion)
+    return out
+
+
+def _locked_company_mini(company: Company) -> CompanyMini:
+    return CompanyMini(id=None, name=lock(company.name), slug=None, domain=None)
+
+
+def company_mini(company: Company, access: Access) -> CompanyMini:
+    if access.company_is_locked(company.id):
+        return _locked_company_mini(company)
+    return CompanyMini.model_validate(company)
+
+
+def _locked_job_out(job: Job, app: Application | None) -> JobOut:
+    """Offre récente (Free) : rien de réel sauf l'id, les dates et le statut posé par l'utilisateur."""
+    return JobOut(
+        id=job.id, locked=True, title=lock(job.title), url=lock(job.url), location=None, category=None,
+        seniority=None, stack=None, source=None, summary=lock(job.summary or "x" * 600), salary=lock(job.salary),
+        published_on=job.published_on, created_at=job.created_at, score=None, company=_locked_company_mini(job.company),
+        status=app.status if app else ProcessStatus.nouveau, application_id=app.id if app else None,
+        display_status=app.status.value if app else "nouveau",
+    )
 
 
 def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = None) -> JobOut:
+    access = ctx.access if ctx else FULL_ACCESS
+    if access.job_is_fresh(job):
+        return _locked_job_out(job, app)
     out = JobOut.model_validate(job)
+    if not access.full:
+        out.company = company_mini(job.company, access)
+        out.score = lock(out.score)  # ancienne note partagée : réservée au Pro
     if app is not None:
         out.status = app.status
         out.application_id = app.id
@@ -127,15 +175,56 @@ def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = N
     return out
 
 
-def company_out(company: Company, jobs_count: int) -> CompanyOut:
+# Champs d'entreprise réservés au Pro (toujours), et champs masqués en plus pour une entreprise entièrement floutée
+COMPANY_PRO_FIELDS = ("funding_stage", "funding_amount_meur", "funding_announced_on", "investors", "headcount",
+                      "ats", "ats_slug", "careers_url", "last_checked_at", "no_relevant_jobs_at")
+COMPANY_LOCKED_FIELDS = ("name", "website", "city", "description", "logo_url")
+
+
+def company_out(company: Company, jobs_count: int, access: Access, *, hide_identity: bool = False) -> CompanyOut:
+    """jobs_count : offres visibles par l'utilisateur (voir jobs_count_by_company).
+
+    hide_identity : entreprise entièrement floutée même si elle a des offres visibles (ex. « levées récentes »
+    du tableau de bord : la sélection elle-même révèle qui a levé récemment).
+    """
     out = CompanyOut.model_validate(company)
     out.jobs_count = jobs_count
+    if access.full:
+        return out
+    for field in COMPANY_PRO_FIELDS:
+        setattr(out, field, lock(getattr(out, field)))
+    if hide_identity or access.company_is_locked(company.id):
+        out.locked = True
+        out.slug = out.domain = None
+        for field in COMPANY_LOCKED_FIELDS:
+            setattr(out, field, lock(getattr(out, field)))
+        out.jobs_count = Locked(placeholder="3")
     return out
 
 
-def jobs_count_by_company(db: Session) -> dict[int, int]:
-    rows = db.execute(select(Job.company_id, func.count(Job.id)).group_by(Job.company_id))
-    return dict(rows.tuples().all())
+def jobs_count_by_company(db: Session, access: Access = FULL_ACCESS) -> dict[int, int]:
+    """Nombre d'offres par entreprise ; en Free, les offres récentes (verrouillées) ne sont pas comptées."""
+    if access.full:
+        rows = db.execute(select(Job.company_id, func.count(Job.id)).group_by(Job.company_id))
+        return dict(rows.tuples().all())
+    counts: dict[int, int] = {}
+    for job in db.scalars(select(Job)):
+        if not access.job_is_fresh(job):
+            counts[job.company_id] = counts.get(job.company_id, 0) + 1
+    return counts
+
+
+def application_out(app: Application, access: Access) -> ApplicationOut:
+    """Process de l'utilisateur ; en Free, le poste et l'entreprise d'une offre récente restent masqués."""
+    out = ApplicationOut.model_validate(app)
+    if access.full:
+        return out
+    if access.job_is_fresh(app.job):
+        out.job = JobMini(id=app.job.id, title=lock(app.job.title), url=lock(app.job.url), location=None)
+        out.company = _locked_company_mini(app.job.company)
+    else:
+        out.company = company_mini(app.job.company, access)
+    return out
 
 
 def load_application(db: Session, app_id: int, user: User) -> Application:
@@ -162,8 +251,14 @@ def apply_status(app: Application, status: ProcessStatus, note: str | None = Non
 # --- Postes ------------------------------------------------------------------
 
 
+def visible_score(j: JobOut) -> float | None:
+    return None if isinstance(j.score, Locked) else j.score
+
+
 def _by_score(jobs: list[JobOut]) -> list[JobOut]:
-    return sorted(jobs, key=lambda j: (j.score is None, -(j.score or 0), j.title.lower()))
+    # Tri sur ce que l'utilisateur voit (une note masquée ne doit pas trahir son rang)
+    return sorted(jobs, key=lambda j: (j.locked, visible_score(j) is None, -(visible_score(j) or 0),
+                                       j.title.lower() if isinstance(j.title, str) else "", j.id))
 
 
 def list_jobs(
@@ -187,11 +282,14 @@ def list_jobs(
     apps = user_apps(db, user)
     ctx = assessment_context(db, user)
     out = [job_out(job, apps.get(job.id), ctx) for job in db.scalars(query)]
+    if company_id is not None or company_name:
+        # Filtre sur l'entreprise : une offre verrouillée n'y figure pas (elle trahirait son entreprise)
+        out = [j for j in out if not j.locked]
     if status is not None:
         wanted = status.value if isinstance(status, ProcessStatus) else status
         out = [j for j in out if j.display_status == wanted]
     if min_score is not None:
-        out = [j for j in out if j.score is not None and j.score >= min_score]
+        out = [j for j in out if (s := visible_score(j)) is not None and s >= min_score]
     return _by_score(out)
 
 
@@ -241,6 +339,7 @@ def set_job_status(db: Session, user: User, job_id: int, status: ProcessStatus, 
     """Change le statut d'un poste pour l'utilisateur (crée le process si besoin)."""
     job = get_or_404(db, Job, job_id)
     app = user_apps(db, user).get(job_id)
+    entitlements.check_process_change(db, user, app.status if app else None, status)
     if app is None:
         app = Application(user_id=user.id, job_id=job_id, status=ProcessStatus.nouveau)
         db.add(app)
@@ -258,19 +357,22 @@ def list_applications(db: Session, user: User, status: ProcessStatus | None = No
     if status is not None:
         apps = [a for a in apps if a.status == status]
     apps.sort(key=lambda a: (a.next_step_date or date.max, -a.updated_at.timestamp()))
-    return [ApplicationOut.model_validate(a) for a in apps]
+    access = entitlements.access_for(db, user)
+    return [application_out(a, access) for a in apps]
 
 
 def update_application(db: Session, user: User, app_id: int, body: ApplicationPatch) -> ApplicationOut:
     app = load_application(db, app_id, user)
     changes = body.model_dump(exclude_unset=True)
     status = changes.pop("status", None)
+    if status is not None:
+        entitlements.check_process_change(db, user, app.status, status)
     for field, value in changes.items():
         setattr(app, field, value)
     if status is not None:
         apply_status(app, status)
     db.commit()
-    return ApplicationOut.model_validate(load_application(db, app_id, user))
+    return application_out(load_application(db, app_id, user), entitlements.access_for(db, user))
 
 
 # --- Tableau de bord ---------------------------------------------------------
@@ -288,7 +390,8 @@ def dashboard(db: Session, user: User) -> DashboardOut:
     active = [a for a in apps.values() if a.status in ACTIVE_STATUSES]
     active.sort(key=lambda a: (a.next_step_date or date.max, -a.updated_at.timestamp()))
 
-    counts = jobs_count_by_company(db)
+    access = ctx.access
+    counts = jobs_count_by_company(db, access)
     fundings = db.scalars(
         select(Company).order_by(Company.funding_announced_on.desc().nulls_last(), Company.name).limit(3)
     )
@@ -301,6 +404,6 @@ def dashboard(db: Session, user: User) -> DashboardOut:
             companies=db.scalar(select(func.count(Company.id))) or 0,
         ),
         priority_jobs=todo[:3],
-        processes=[ApplicationOut.model_validate(a) for a in active[:3]],
-        recent_fundings=[company_out(c, counts.get(c.id, 0)) for c in fundings],
+        processes=[application_out(a, access) for a in active[:3]],
+        recent_fundings=[company_out(c, counts.get(c.id, 0), access, hide_identity=True) for c in fundings],
     )

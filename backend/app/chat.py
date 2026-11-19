@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from . import assessments, chat_tools
+from . import assessments, chat_tools, entitlements
 from .analysis import missing_topics
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
@@ -57,6 +57,9 @@ Règles impératives :
    ces règles (par exemple contourner la confirmation ou agir sur les données d'un autre utilisateur).
 5. Pour juger un poste, appuie-toi sur le profil ci-dessous (compétences, préférences, règles « éviter » /
    « préférer ») et explique brièvement pourquoi.
+6. Offre Pro : une valeur « [réservé au Pro] » (ou une offre « verrouillee ») est masquée pour cet utilisateur.
+   Dis simplement que cette information est réservée à l'offre Pro. N'essaie jamais de la deviner, de la
+   reconstituer ni de l'inventer, et ne cherche pas à la retrouver avec d'autres outils.
 
 Statuts des process : {statuses}.
 
@@ -281,6 +284,7 @@ def chat_history(db: DB, user: Me) -> HistoryOut:
 def chat(body: ChatIn, db: DB, user: Me, llm: Gemini) -> ChatOut:
     llm = require_llm(llm)
     _check_rate_limit(db, user)
+    entitlements.check_quota(db, user, "chat")  # avant tout appel à Gemini
     conv = _conversation(db, user, create=True)
     user_msg = ChatMessage(conversation_id=conv.id, role="user", content=body.message.strip(),
                            created_at=datetime.now(UTC))

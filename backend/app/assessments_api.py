@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from . import assessments, services
+from . import assessments, entitlements, services
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
 from .models import Application, Job, JobAssessment, User
@@ -26,10 +26,11 @@ Gemini = Annotated[LLM | None, Depends(get_llm)]
 class AssessmentStatus(BaseModel):
     enabled: bool  # évaluation automatique possible (Gemini configuré)
     profile_ready: bool  # profil assez rempli pour évaluer
-    pending: int  # offres à (ré)évaluer
+    pending: int  # offres à (ré)évaluer (Free : dans la limite du quota hebdomadaire)
     kept: int
     excluded: int
     last_error: str | None = None
+    weekly_left: int | None = None  # Free : évaluations restantes sur 7 jours (None = sans plafond)
 
 
 class RunResult(BaseModel):
@@ -44,10 +45,13 @@ def assessment_status(db: DB, user: Me, llm: Gemini) -> AssessmentStatus:
     profile = get_profile(db, user)
     rows = list(db.scalars(select(JobAssessment.verdict).where(JobAssessment.user_id == user.id)))
     worker = assessments.assessor
+    scope = assessments.scope_of(db, user)
+    pending = len(assessments.jobs_to_assess(db, user, profile, before=scope.before))
     return AssessmentStatus(
         enabled=llm is not None,
         profile_ready=assessments.profile_is_usable(profile_data(profile)),
-        pending=len(assessments.jobs_to_assess(db, user, profile)),
+        pending=pending if scope.budget is None else min(pending, scope.budget),
+        weekly_left=scope.budget,
         kept=rows.count("nouveau"), excluded=rows.count("ecartee"),
         last_error=worker.last_error if worker else None,
     )
@@ -55,8 +59,11 @@ def assessment_status(db: DB, user: Me, llm: Gemini) -> AssessmentStatus:
 
 @router.post("/assessments/run")
 def run_assessments(db: DB, user: Me, llm: Gemini) -> RunResult:
-    """Évalue tout de suite jusqu'à 10 offres en attente (sinon la tâche de fond s'en charge)."""
-    stats = assessments.assess_user(db, user, require_llm(llm), limit=10)
+    """Évalue tout de suite jusqu'à 10 offres en attente (sinon la tâche de fond s'en charge).
+    Free : même règle que la tâche de fond (quota hebdomadaire, offres visibles seulement)."""
+    llm = require_llm(llm)
+    entitlements.check_quota(db, user, "assessments")
+    stats = assessments.assess_within_plan(db, user, llm, 10)
     assessments.wake()
     return RunResult(**stats)
 

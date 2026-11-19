@@ -18,12 +18,13 @@ from pydantic import ValidationError
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import services
+from . import entitlements, services
+from .entitlements import PlanError
 from .llm import ToolSpec, to_json
 from .models import STATUS_LABELS, Application, ChatAction, Company, ProcessStatus, User
 from .profile import ProfileData, get_profile, profile_data, save_fields
 from .proposals import PREF_LABELS
-from .schemas import ApplicationPatch, JobIn
+from .schemas import ApplicationPatch, JobIn, Locked
 from .services import ServiceError
 
 log = logging.getLogger("mire.chat.actions")
@@ -166,21 +167,43 @@ def _compact(data: dict) -> dict:
     return {k: v for k, v in data.items() if v not in (None, "", [], {})}
 
 
+# Valeur verrouillée (offre Free) : le modèle ne reçoit que ce marqueur, jamais le texte factice ni la vraie valeur
+LOCKED_MARK = "[réservé au Pro]"
+
+
+def _v(value):
+    return LOCKED_MARK if isinstance(value, Locked) else value
+
+
+def _text(value, n: int) -> str | None:
+    return LOCKED_MARK if isinstance(value, Locked) else _short(value, n)
+
+
+def _num(value) -> str:
+    return LOCKED_MARK if isinstance(value, Locked) else f"{value:g}"
+
+
 def _job_row(job) -> dict:
     return _compact({
-        "job_id": job.id, "title": job.title, "company": job.company.name, "score": job.score,
+        "job_id": job.id, "title": _v(job.title), "company": _v(job.company.name), "score": _v(job.score),
         "status": job.display_status, "location": job.location, "stack": _short(job.stack, 120),
-        "pourquoi": _short(job.assessment.why, 200) if job.assessment else None,
-        "raison_ecart": job.assessment.exclusion if job.assessment and job.display_status == "ecartee" else None,
+        "verrouillee": True if job.locked else None,
+        "pourquoi": _text(job.assessment.why, 200) if job.assessment else None,
+        "raison_ecart": _v(job.assessment.exclusion) if job.assessment and job.display_status == "ecartee" else None,
     })
 
 
 def _app_row(app) -> dict:
     return _compact({
-        "application_id": app.id, "job_id": app.job.id, "title": app.job.title, "company": app.company.name,
+        "application_id": app.id, "job_id": app.job.id, "title": _v(app.job.title), "company": _v(app.company.name),
         "status": app.status.value, "next_step": app.next_step, "next_step_date": app.next_step_date,
         "applied_on": app.applied_on, "notes": _short(app.notes, 200),
     })
+
+
+def _label(job) -> str:
+    """« Titre · Entreprise » pour les résumés de propositions (sans fuite d'une offre verrouillée)."""
+    return f"{_v(job.title)} · {_v(job.company.name)}"
 
 
 def _read(db: Session, user: User, name: str, args: dict) -> Any:
@@ -198,18 +221,20 @@ def _read(db: Session, user: User, name: str, args: dict) -> Any:
         case "get_job":
             job = services.get_job(db, user, int(args["job_id"]))
             out = _job_row(job) | _compact({
-                "url": job.url, "seniority": job.seniority, "category": job.category, "source": job.source,
-                "stack": job.stack, "summary": _short(job.summary, 4000),
+                "url": _v(job.url), "seniority": job.seniority, "category": job.category, "source": job.source,
+                "stack": job.stack, "salary": _v(job.salary), "summary": _text(job.summary, 4000),
             })
             if job.application_id:
-                out["application"] = _app_row(services.load_application(db, job.application_id, user))
+                app = services.load_application(db, job.application_id, user)
+                out["application"] = _app_row(services.application_out(app, entitlements.access_for(db, user)))
             if job.assessment:
                 a = job.assessment
                 out["evaluation"] = _compact({
-                    "note": a.score, "note_calculee": a.auto_score, "note_manuelle": a.manual_score,
-                    "verdict": a.verdict, "raison_ecart": a.exclusion, "pourquoi": a.why,
-                    "criteres": [f"{c.label} : {c.points:g}/{c.max:g}" for c in a.criteria],
-                    "competences_ok": a.skills_have, "competences_manquantes": a.skills_missing,
+                    "note": _v(a.score), "note_calculee": _v(a.auto_score), "note_manuelle": a.manual_score,
+                    "verdict": a.verdict, "raison_ecart": _v(a.exclusion), "pourquoi": _v(a.why),
+                    "criteres": LOCKED_MARK if isinstance(a.criteria, Locked)
+                    else [f"{c.label} : {c.points:g}/{c.max:g}" for c in a.criteria],
+                    "competences_ok": _v(a.skills_have), "competences_manquantes": _v(a.skills_missing),
                 })
             return out
         case "list_applications":
@@ -221,9 +246,9 @@ def _read(db: Session, user: User, name: str, args: dict) -> Any:
                 "stats": d.stats.model_dump(),
                 "priority_jobs": [_job_row(j) for j in d.priority_jobs],
                 "processes": [_app_row(a) for a in d.processes],
-                "recent_fundings": [_compact({"company": c.name, "stage": c.funding_stage,
-                                              "amount_meur": c.funding_amount_meur,
-                                              "announced_on": c.funding_announced_on}) for c in d.recent_fundings],
+                "recent_fundings": [_compact({"company": _v(c.name), "stage": _v(c.funding_stage),
+                                              "amount_meur": _v(c.funding_amount_meur),
+                                              "announced_on": _v(c.funding_announced_on)}) for c in d.recent_fundings],
             }
     raise ToolError(f"Outil inconnu : {name}")
 
@@ -335,6 +360,7 @@ def _plan_set_job_status(db: Session, user: User, args: dict) -> Plan:
     job = services.get_job(db, user, int(args["job_id"]))
     if job.status == status:
         raise ToolError(f"Le poste est déjà au statut « {_status_label(status)} ».")
+    entitlements.check_process_change(db, user, job.status if job.application_id else None, status)
     note = (args.get("note") or "").strip()[:1000] or None
     changes = [{"label": "Statut", "before": _status_label(job.status), "after": _status_label(status)}]
     if status == ProcessStatus.postule:
@@ -346,8 +372,7 @@ def _plan_set_job_status(db: Session, user: User, args: dict) -> Plan:
         out = services.set_job_status(db, user, job.id, status, note)
         return {"job_id": out.id, "status": out.status.value, "application_id": out.application_id}
 
-    return Plan(summary=f"{job.title} · {job.company.name}", changes=changes, run=run,
-                refresh=("jobs", "applications", "dashboard"))
+    return Plan(summary=_label(job), changes=changes, run=run, refresh=("jobs", "applications", "dashboard"))
 
 
 def _find_application(db: Session, user: User, args: dict) -> Application:
@@ -397,7 +422,8 @@ def _plan_update_application(db: Session, user: User, args: dict) -> Plan:
         out = services.update_application(db, user, app_id, body)
         return {"application_id": out.id, "status": out.status.value}
 
-    return Plan(summary=f"{app.job.title} · {app.company.name}", changes=changes, run=run,
+    shown = services.application_out(app, entitlements.access_for(db, user))
+    return Plan(summary=f"{_v(shown.job.title)} · {_v(shown.company.name)}", changes=changes, run=run,
                 refresh=("applications", "jobs", "dashboard"))
 
 
@@ -453,8 +479,8 @@ def _plan_rate_job(db: Session, user: User, args: dict) -> Plan:
     if score == current:
         raise ToolError("La note est déjà à cette valeur.")
     auto = job.assessment.auto_score if job.assessment else None
-    changes = [{"label": "Ma note", "before": f"{job.score:g}" if job.score is not None else None,
-                "after": f"{score:g}" if score is not None else f"note calculée ({auto:g})" if auto is not None else "note calculée"}]
+    changes = [{"label": "Ma note", "before": _num(job.score) if job.score is not None else None,
+                "after": f"{score:g}" if score is not None else f"note calculée ({_num(auto)})" if auto is not None else "note calculée"}]
     if args.get("reason"):
         changes.append({"label": "Raison", "before": None, "after": _short(str(args["reason"]), 200)})
 
@@ -465,8 +491,7 @@ def _plan_rate_job(db: Session, user: User, args: dict) -> Plan:
         out = set_manual_score(job.id, ManualScoreIn(score=score), db, user)
         return {"job_id": out.id, "score": out.score}
 
-    return Plan(summary=f"Note de {job.title} · {job.company.name}", changes=changes, run=run,
-                refresh=("jobs", "dashboard"))
+    return Plan(summary=f"Note de {_label(job)}", changes=changes, run=run, refresh=("jobs", "dashboard"))
 
 
 PLANNERS: dict[str, Callable[[Session, User, dict], Plan]] = {
@@ -498,6 +523,8 @@ class ToolRunner:
             if name in UI_TOOLS:
                 return {"ok": True, "note": "Les réponses rapides sont affichées ; pose ta question dans ta réponse."}
             return {"error": f"Outil inconnu : {name}"}
+        except PlanError as exc:  # quota Free atteint ou fonction réservée au Pro
+            return {"error": exc.message, "offre": "reservee_au_pro"}
         except (ToolError, ServiceError) as exc:
             return {"error": exc.detail if isinstance(exc, ServiceError) else str(exc)}
         except (KeyError, TypeError, ValueError) as exc:
@@ -546,11 +573,12 @@ def confirm_action(db: Session, user: User, action_id: int) -> tuple[ChatAction,
     try:
         plan = PLANNERS[action.tool](db, user, dict(action.args))
         result = plan.run()
-    except (ToolError, ServiceError) as exc:
+    except (ToolError, ServiceError, PlanError) as exc:
         db.rollback()
         action = db.get(ChatAction, action_id)
         action.status = "failed"
-        action.error = exc.detail if isinstance(exc, ServiceError) else str(exc)
+        action.error = (exc.message if isinstance(exc, PlanError)
+                        else exc.detail if isinstance(exc, ServiceError) else str(exc))
         db.commit()
         log.info("Action %s (%s) de l'utilisateur %s refusée : %s", action.id, action.tool, user.id, action.error)
         raise ServiceError(409, f"Action impossible : {action.error}") from None

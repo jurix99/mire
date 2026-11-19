@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, undefer
 
-from . import assessments, logos, services
+from . import assessments, entitlements, logos, services
 from .assessments_api import invalidate_job
 from .db import get_db
 from .models import (
@@ -27,9 +27,9 @@ from .schemas import (
     ApplicationIn,
     ApplicationOut,
     ApplicationPatch,
+    BillingOut,
     CompanyActivity,
     CompanyIn,
-    CompanyMini,
     CompanyOut,
     CompanyPatch,
     DashboardOut,
@@ -75,7 +75,8 @@ def me(db: DB, user: Me) -> MeOut:
         jobs=db.scalar(select(func.count(Job.id))) or 0,
         processes=processes or 0,
     )
-    return MeOut(user=UserOut.model_validate(user), counts=counts)
+    return MeOut(user=UserOut.model_validate(user), counts=counts,
+                 billing=BillingOut(**entitlements.billing_summary(db, user)))
 
 
 @router.get("/statuses")
@@ -87,30 +88,36 @@ def statuses() -> list[StatusOut]:
 
 
 @router.get("/companies")
-def list_companies(db: DB) -> list[CompanyOut]:
-    counts = _jobs_count_by_company(db)
-    companies = db.scalars(
-        select(Company).order_by(Company.funding_announced_on.desc().nulls_last(), Company.name)
-    )
-    return [_company_out(c, counts.get(c.id, 0)) for c in companies]
+def list_companies(db: DB, user: Me) -> list[CompanyOut]:
+    access = entitlements.access_for(db, user)
+    counts = _jobs_count_by_company(db, access)
+    if access.full:
+        order = (Company.funding_announced_on.desc().nulls_last(), Company.name)
+    else:
+        order = (Company.name,)  # l'ordre des levées trahirait leurs dates
+    companies = list(db.scalars(select(Company).order_by(*order)))
+    if not access.full:
+        companies.sort(key=lambda c: access.company_is_locked(c.id))
+    return [_company_out(c, counts.get(c.id, 0), access) for c in companies]
 
 
 @router.post("/companies", status_code=201)
-def create_company(body: CompanyIn, db: DB) -> CompanyOut:
+def create_company(body: CompanyIn, db: DB, user: Me) -> CompanyOut:
     company = Company(**body.model_dump(), slug=_slugify(db, body.name))
     db.add(company)
     db.commit()
-    return _company_out(company, 0)
+    return _company_out(company, 0, entitlements.access_for(db, user))
 
 
 @router.get("/companies/{company_id}")
-def get_company(company_id: int, db: DB) -> CompanyOut:
+def get_company(company_id: int, db: DB, user: Me) -> CompanyOut:
     company = _get_or_404(db, Company, company_id)
-    return _company_out(company, _jobs_count_by_company(db).get(company_id, 0))
+    access = entitlements.access_for(db, user)
+    return _company_out(company, _jobs_count_by_company(db, access).get(company_id, 0), access)
 
 
 @router.patch("/companies/{company_id}")
-def update_company(company_id: int, body: CompanyPatch, db: DB) -> CompanyOut:
+def update_company(company_id: int, body: CompanyPatch, db: DB, user: Me) -> CompanyOut:
     company = _get_or_404(db, Company, company_id)
     changes = body.model_dump(exclude_unset=True)
     if "name" in changes and changes["name"] is None:
@@ -122,7 +129,8 @@ def update_company(company_id: int, body: CompanyPatch, db: DB) -> CompanyOut:
     if {"website", "logo_url"} & changes.keys():
         logos.reset_logo(company)
     db.commit()
-    return _company_out(company, _jobs_count_by_company(db).get(company_id, 0))
+    access = entitlements.access_for(db, user)
+    return _company_out(company, _jobs_count_by_company(db, access).get(company_id, 0), access)
 
 
 @router.delete("/companies/{company_id}", status_code=204)
@@ -141,10 +149,12 @@ LOGO_HEADERS = {
 
 
 @router.get("/companies/{company_id}/logo")
-def company_logo(company_id: int, db: DB) -> Response:
+def company_logo(company_id: int, db: DB, user: Me) -> Response:
     company = db.scalar(select(Company).where(Company.id == company_id).options(undefer(Company.logo_data)))
     if company is None:
         raise HTTPException(404, "Introuvable")
+    if entitlements.access_for(db, user).company_is_locked(company_id):
+        return Response(status_code=404, headers={"Cache-Control": "no-store"})  # entreprise floutée (Free)
     if logos.should_fetch(company):
         found = logos.fetch_logo(company)
         company.logo_fetched_at = datetime.now(UTC)
@@ -192,7 +202,8 @@ def get_job(job_id: int, db: DB, user: Me) -> JobDetailOut:
     """Détail d'un poste (contenu de l'offre) et process de l'utilisateur pour ce poste, s'il existe."""
     job = services.get_job(db, user, job_id)
     app = services.load_application(db, job.application_id, user) if job.application_id else None
-    return JobDetailOut(**job.model_dump(), application=ApplicationOut.model_validate(app) if app else None)
+    application = services.application_out(app, entitlements.access_for(db, user)) if app else None
+    return JobDetailOut(**job.model_dump(), application=application)
 
 
 @router.post("/jobs", status_code=201)
@@ -247,6 +258,7 @@ def list_applications(db: DB, user: Me) -> list[ApplicationOut]:
 @router.post("/applications", status_code=201)
 def create_application(body: ApplicationIn, db: DB, user: Me) -> ApplicationOut:
     _get_or_404(db, Job, body.job_id)
+    entitlements.check_process_change(db, user, None, body.status)
     app = Application(user_id=user.id, **body.model_dump())
     app.events.append(ApplicationEvent(from_status=None, to_status=body.status))
     if body.status == ProcessStatus.postule and app.applied_on is None:
@@ -256,7 +268,7 @@ def create_application(body: ApplicationIn, db: DB, user: Me) -> ApplicationOut:
         db.commit()
     except IntegrityError:
         raise HTTPException(409, "Un process existe déjà pour ce poste") from None
-    return ApplicationOut.model_validate(_load_application(db, app.id, user))
+    return services.application_out(_load_application(db, app.id, user), entitlements.access_for(db, user))
 
 
 @router.patch("/applications/{app_id}")
@@ -296,10 +308,14 @@ def analytics(db: DB, user: Me) -> AnalyticsOut:
         FunnelStep(label="Offres", count=sum(1 for s in reached.values() if ProcessStatus.offre in s)),
     ]
 
+    # Par entreprise : en Free, seulement les offres visibles (une offre récente ne doit pas trahir son entreprise)
+    access = entitlements.access_for(db, user)
     companies: dict[int, CompanyActivity] = {}
     for job in jobs:
+        if access.job_is_fresh(job):
+            continue
         row = companies.setdefault(
-            job.company_id, CompanyActivity(company=CompanyMini.model_validate(job.company), jobs=0, processes=0)
+            job.company_id, CompanyActivity(company=services.company_mini(job.company, access), jobs=0, processes=0)
         )
         row.jobs += 1
         if job.id in apps and apps[job.id].status != ProcessStatus.nouveau:
@@ -315,6 +331,6 @@ def analytics(db: DB, user: Me) -> AnalyticsOut:
     return AnalyticsOut(
         by_status=[StatusCount(status=s, count=by_status.get(s, 0)) for s in ProcessStatus],
         funnel=funnel,
-        by_company=sorted(companies.values(), key=lambda r: (-r.processes, -r.jobs, r.company.name)),
+        by_company=sorted(companies.values(), key=lambda r: (-r.processes, -r.jobs, str(r.company.name))),
         weekly=[WeekActivity(week=w, events=per_week.get(w, 0)) for w in weeks],
     )

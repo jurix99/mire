@@ -14,18 +14,24 @@ applications (statuts posés par l'utilisateur) ni dans job_assessments.manual_s
 
 (Ré)évaluation : offres jamais évaluées ; et offres évaluées avec une ancienne version du profil, seulement
 si l'utilisateur ne les a pas traitées (aucun process) et n'a pas corrigé la note.
+
+Offres Free / Pro (entitlements.PLAN_LIMITS) : la tâche de fond sert d'abord les utilisateurs Pro ; les Free
+passent ensuite, dans la limite de leur quota hebdomadaire, et seulement pour les offres qu'ils voient (les
+offres récentes leur sont verrouillées).
 """
 
 import logging
 import re
 import threading
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
+from . import entitlements
 from .models import Application, Job, JobAssessment, User, UserProfile
 from .profile import (
     CRITERIA,
@@ -305,13 +311,32 @@ def apply_evaluation(a: JobAssessment, ev: JobEvaluation | None, data: ProfileDa
 # --- Sélection des offres à (ré)évaluer --------------------------------------------------
 
 
-def jobs_to_assess(db: Session, user: User, profile: UserProfile, limit: int | None = None) -> list[Job]:
+@dataclass
+class Scope:
+    """Ce que la tâche de fond peut faire pour un utilisateur, selon son offre."""
+
+    priority: int  # 0 = servi en premier
+    budget: int | None  # évaluations Gemini restantes sur 7 jours (None = sans plafond)
+    before: datetime | None  # Free : seulement les offres plus anciennes (les récentes lui sont verrouillées)
+
+
+def scope_of(db: Session, user: User) -> Scope:
+    plan = entitlements.plan_of(db, user)
+    lim = entitlements.limits(plan)
+    before = entitlements.now() - timedelta(days=lim["fresh_delay_days"]) if lim["fresh_delay_days"] else None
+    return Scope(lim["assessment_priority"], entitlements.remaining(db, user, "assessments", plan), before)
+
+
+def jobs_to_assess(db: Session, user: User, profile: UserProfile, limit: int | None = None,
+                   before: datetime | None = None) -> list[Job]:
     assessments = {a.job_id: a for a in db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id))}
     treated = set(db.scalars(select(Application.job_id).where(Application.user_id == user.id)))
     out = []
     # Les offres fermées ne sont plus évaluées
     query = select(Job).where(Job.closed_at.is_(None)).options(selectinload(Job.company)).order_by(Job.id.desc())
     for job in db.scalars(query):
+        if before is not None and entitlements.job_date(job) > before:
+            continue
         a = assessments.get(job.id)
         if a is None:
             out.append(job)
@@ -326,14 +351,18 @@ def profile_is_usable(data: ProfileData) -> bool:
     return bool(data.skills or data.experiences or data.positioning)
 
 
-def assess_user(db: Session, user: User, llm, limit: int = 20, models: list[str] | None = None) -> dict:
-    """Évalue jusqu'à `limit` offres en attente pour l'utilisateur. Retourne des compteurs."""
+def assess_user(db: Session, user: User, llm, limit: int = 20, models: list[str] | None = None,
+                before: datetime | None = None) -> dict:
+    """Évalue jusqu'à `limit` offres en attente pour l'utilisateur. Retourne des compteurs.
+
+    before : n'évaluer que les offres publiées avant cette date (plan Free, voir scope_of).
+    """
     profile = get_profile(db, user)
     data = profile_data(profile)
     stats = {"evaluated": 0, "excluded": 0, "kept": 0, "remaining": 0}
-    if not profile_is_usable(data):
+    if not profile_is_usable(data) or limit <= 0:
         return stats
-    jobs = jobs_to_assess(db, user, profile, limit=limit)
+    jobs = jobs_to_assess(db, user, profile, limit=limit, before=before)
     existing = {a.job_id: a for a in db.scalars(
         select(JobAssessment).where(JobAssessment.user_id == user.id, JobAssessment.job_id.in_([j.id for j in jobs])))}
 
@@ -372,8 +401,16 @@ def assess_user(db: Session, user: User, llm, limit: int = 20, models: list[str]
                 stats["evaluated"] += 1
                 stats["excluded" if a.verdict == "ecartee" else "kept"] += 1
             db.commit()
-    stats["remaining"] = len(jobs_to_assess(db, user, profile))
+    stats["remaining"] = len(jobs_to_assess(db, user, profile, before=before))
     return stats
+
+
+def assess_within_plan(db: Session, user: User, llm, limit: int, models: list[str] | None = None) -> dict:
+    """assess_user dans les limites de l'offre de l'utilisateur (quota hebdomadaire et offres visibles en Free)."""
+    scope = scope_of(db, user)
+    if scope.budget is not None:
+        limit = min(limit, scope.budget)
+    return assess_user(db, user, llm, limit=limit, models=models, before=scope.before)
 
 
 # --- Tâche de fond -----------------------------------------------------------------------
@@ -410,14 +447,22 @@ class Assessor:
         self.event.set()
 
     def run_once(self) -> int:
+        """Un passage : utilisateurs par ordre de priorité de leur offre (Pro, puis Free). Un groupe moins
+        prioritaire n'est servi que si les groupes précédents n'avaient plus rien à évaluer pendant ce passage."""
         llm = self.llm_factory()
         done = 0
         with self.session_factory() as db:
+            groups: dict[int, list[User]] = {}
             for user in db.scalars(select(User)).all():
-                stats = assess_user(db, user, llm, limit=self.per_cycle, models=self.models)
-                done += stats["evaluated"]
-                if stats["evaluated"]:
-                    log.info("Évaluation utilisateur %s : %s", user.id, stats)
+                groups.setdefault(scope_of(db, user).priority, []).append(user)
+            for priority in sorted(groups):
+                if done:
+                    break  # le groupe précédent a eu du travail : les suivants attendent le prochain passage
+                for user in groups[priority]:
+                    stats = assess_within_plan(db, user, llm, self.per_cycle, models=self.models)
+                    done += stats["evaluated"]
+                    if stats["evaluated"]:
+                        log.info("Évaluation utilisateur %s : %s", user.id, stats)
         return done
 
     def _loop(self) -> None:

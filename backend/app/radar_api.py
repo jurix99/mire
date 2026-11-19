@@ -12,8 +12,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import assessments, ats, services
+from . import assessments, ats, entitlements, services
 from .db import get_db
+from .entitlements import RequirePro
 from .models import Company, Job, SearchRun, Source, User
 from .users import current_user
 
@@ -69,7 +70,9 @@ def check_and_commit(db: Session, company: Company, fetch=ats.fetch_postings) ->
     )
 
 
-@router.post("/companies/{company_id}/check")
+# Vérification et import depuis l'ATS : réservés au Pro (la réponse donne l'ATS et les offres les plus récentes,
+# masqués pour un utilisateur Free)
+@router.post("/companies/{company_id}/check", dependencies=[RequirePro()])
 def check_company_postings(company_id: int, db: DB) -> CheckOut:
     """Vérifie les offres de l'entreprise dans la liste actuelle de son ATS (ouvertes / fermées / nouvelles)."""
     return check_and_commit(db, services.get_or_404(db, Company, company_id))
@@ -103,7 +106,7 @@ def import_postings(db: Session, company: Company, ids: list[str], fetch=ats.fet
     return out
 
 
-@router.post("/companies/{company_id}/postings/import")
+@router.post("/companies/{company_id}/postings/import", dependencies=[RequirePro()])
 def import_company_postings(company_id: int, body: ImportPostingsIn, db: DB) -> ImportPostingsOut:
     """Ajoute au radar des offres listées par l'ATS de l'entreprise (vérifiées ouvertes, sans doublon)."""
     company = services.get_or_404(db, Company, company_id)
@@ -204,10 +207,13 @@ class RunsOut(BaseModel):
 @router.get("/runs")
 def list_runs(db: DB, user: Me, limit: int = 10) -> RunsOut:
     runs = db.scalars(select(SearchRun).order_by(SearchRun.id.desc()).limit(max(1, min(limit, 50)))).all()
+    full = entitlements.plan_of(db, user) == "pro"
     out = []
     for r in runs:
         item = RunOut.model_validate(r, from_attributes=True)
         item.mine = next((u for u in (r.details or {}).get("per_user", []) if u.get("user_id") == user.id), None)
+        if item.mine and not full:
+            item.mine = {k: v for k, v in item.mine.items() if k != "top"}  # offres récentes : réservées au Pro
         out.append(item)
     from . import collector
 

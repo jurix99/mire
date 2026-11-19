@@ -14,8 +14,9 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import assessments, rules_synthesis, services
+from . import assessments, entitlements, rules_synthesis, services
 from .db import get_db
+from .entitlements import RequirePro
 from .llm import LLM, get_llm, require_llm
 from .models import Job, JobFeedback, ProcessStatus, User
 from .profile import ReferenceJob, get_profile, profile_data, save_fields
@@ -110,10 +111,13 @@ def feedback_summary(db: DB, user: Me) -> FeedbackSummary:
     rows = db.scalars(select(JobFeedback).where(JobFeedback.user_id == user.id)
                       .order_by(JobFeedback.id.desc()).limit(30)).all()
     total = db.scalar(select(func.count(JobFeedback.id)).where(JobFeedback.user_id == user.id)) or 0
-    return FeedbackSummary(new=new_feedback_count(db, user), total=total, recent=[feedback_out(f) for f in rows])
+    access = entitlements.access_for(db, user)
+    # Retour donné pendant une période Pro sur une offre encore récente : omis en Free (son libellé la révélerait)
+    recent = [feedback_out(f) for f in rows if not access.job_is_fresh(f.job)]
+    return FeedbackSummary(new=new_feedback_count(db, user), total=total, recent=recent)
 
 
-@router.post("/profile/rules/synthesize")
+@router.post("/profile/rules/synthesize", dependencies=[RequirePro("rules_synthesis")])
 def synthesize_rules(db: DB, user: Me, llm: Gemini) -> ProposalPreview:
     """« Mettre à jour mes règles » : règles proposées à partir des retours, validées une par une."""
     llm = require_llm(llm)
@@ -129,6 +133,9 @@ def synthesize_rules(db: DB, user: Me, llm: Gemini) -> ProposalPreview:
 @router.post("/jobs/{job_id}/feedback")
 def give_feedback(job_id: int, body: FeedbackIn, db: DB, user: Me) -> FeedbackResult:
     job = services.get_or_404(db, Job, job_id)
+    if entitlements.access_for(db, user).job_is_fresh(job):
+        # Offre verrouillée (Free) : la réponse (offre de référence, libellé) révélerait son titre et son entreprise
+        raise entitlements.pro_required("Cette offre récente est réservée à l'offre Pro")
     text = body.text.strip() if body.text and body.text.strip() else None
     fb = JobFeedback(user_id=user.id, job_id=job.id, sentiment=body.sentiment, reasons=list(body.reasons), text=text)
     db.add(fb)

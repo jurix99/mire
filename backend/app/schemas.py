@@ -2,7 +2,7 @@
 
 import re
 from datetime import date, datetime
-from typing import Annotated
+from typing import Annotated, Any, Literal
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, computed_field
 
@@ -41,6 +41,14 @@ class ORM(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class Locked(BaseModel):
+    """Donnée réservée au Pro : la vraie valeur n'est jamais envoyée, seulement un texte factice
+    (de longueur voisine) que le front affiche flouté. Voir entitlements.lock()."""
+
+    locked: Literal[True] = True
+    placeholder: str
+
+
 # --- Utilisateur -------------------------------------------------------------
 
 
@@ -48,6 +56,23 @@ class NavCounts(BaseModel):
     companies: int
     jobs: int
     processes: int
+
+
+class BillingOut(BaseModel):
+    """Offre de l'utilisateur (voir entitlements.billing_summary)."""
+
+    enabled: bool  # BILLING_ENABLED : sinon tout le monde est Pro
+    plan: Literal["free", "pro"]
+    pro_until: datetime | None = None
+    cancel_at_period_end: bool = False
+    kind: Literal["subscription", "pass"] | None = None
+    past_due: bool = False
+    limits: dict[str, Any]
+    usage: dict[str, int]
+    # Chiffres des bandeaux (Free) : offres récentes et levées récentes floutées
+    locked_jobs: int = 0
+    locked_fundings: int = 0
+    prices: dict[str, str] = {}  # libellés des prix (Pro mensuel, Pass 3 mois)
 
 
 class UserOut(ORM):
@@ -64,6 +89,7 @@ class UserOut(ORM):
 class MeOut(BaseModel):
     user: UserOut
     counts: NavCounts
+    billing: BillingOut | None = None
 
 
 class StatusOut(BaseModel):
@@ -75,34 +101,40 @@ class StatusOut(BaseModel):
 
 
 class CompanyMini(ORM):
-    id: int
-    name: str
-    slug: str
+    # Entreprise d'une offre verrouillée (Free) : id absent, nom verrouillé
+    id: int | None
+    name: str | Locked
+    slug: str | None
     domain: str | None
 
     @computed_field
     @property
-    def logo(self) -> str:
+    def logo(self) -> str | None:
+        if self.id is None or isinstance(self.name, Locked):
+            return None
         return f"/api/companies/{self.id}/logo"
 
 
 class CompanyOut(CompanyMini):
-    website: str | None
+    """Les champs « | Locked » sont remplacés par un objet Locked pour un utilisateur Free (services.company_out)."""
+
+    locked: bool = False  # entreprise entièrement floutée (toutes ses offres sont récentes), sauf le secteur
+    website: str | Locked | None
     sector: str | None
-    city: str | None
-    funding_stage: str | None
-    funding_amount_meur: float | None
-    funding_announced_on: date | None
-    investors: str | None
-    description: str | None
-    logo_url: str | None
-    ats: str | None = None
-    ats_slug: str | None = None
-    careers_url: str | None = None
-    headcount: str | None = None
-    last_checked_at: datetime | None = None
-    no_relevant_jobs_at: datetime | None = None
-    jobs_count: int = 0
+    city: str | Locked | None
+    funding_stage: str | Locked | None
+    funding_amount_meur: float | Locked | None
+    funding_announced_on: date | Locked | None
+    investors: str | Locked | None
+    description: str | Locked | None
+    logo_url: str | Locked | None
+    ats: str | Locked | None = None
+    ats_slug: str | Locked | None = None
+    careers_url: str | Locked | None = None
+    headcount: str | Locked | None = None
+    last_checked_at: datetime | Locked | None = None
+    no_relevant_jobs_at: datetime | Locked | None = None
+    jobs_count: int | Locked = 0
 
 
 class CompanyPatch(BaseModel):
@@ -154,8 +186,8 @@ class JobIn(JobPatch):
 
 class JobMini(ORM):
     id: int
-    title: str
-    url: str | None
+    title: str | Locked
+    url: str | Locked | None
     location: str | None
 
 
@@ -167,37 +199,39 @@ class CriterionOut(BaseModel):
 
 
 class AssessmentOut(BaseModel):
-    """Évaluation calculée de l'offre pour l'utilisateur connecté."""
+    """Évaluation calculée de l'offre pour l'utilisateur connecté (champs « | Locked » : masqués en Free)."""
 
-    score: float | None  # note retenue : correction manuelle, sinon note calculée
-    auto_score: float | None
+    score: float | Locked | None  # note retenue : correction manuelle, sinon note calculée
+    auto_score: float | Locked | None
     manual_score: float | None
     verdict: str  # nouveau | ecartee
-    exclusion: str | None
-    why: str | None
-    criteria: list[CriterionOut]
-    skills_have: list[str]
-    skills_missing: list[str]
+    exclusion: str | Locked | None
+    why: str | Locked | None
+    criteria: list[CriterionOut] | Locked
+    skills_have: list[str] | Locked
+    skills_missing: list[str] | Locked
     stale: bool  # évaluée avec une ancienne version du profil (réévaluation en attente)
     assessed_at: datetime
 
 
 class JobOut(JobMini):
+    # Offre récente verrouillée (Free) : titre, entreprise, salaire, lien et contenu factices ; seule la date reste
+    locked: bool = False
     category: str | None
     seniority: str | None
     stack: str | None
     source: str | None
-    summary: str | None
+    summary: str | Locked | None
     role_type: str | None = None
     work_mode: str | None = None
     travel: str | None = None
-    salary: str | None = None
+    salary: str | Locked | None = None
     published_on: date | None = None
     verified_open_at: datetime | None = None  # ouverture vérifiée dans la liste de l'entreprise
     closed_at: datetime | None = None  # offre fermée (donnée partagée)
     # Note de l'utilisateur connecté : correction manuelle, sinon évaluation automatique,
     # sinon ancienne note partagée (saisie à la main avant l'évaluation par utilisateur)
-    score: float | None
+    score: float | Locked | None
     created_at: datetime
     company: CompanyMini
     # Statut posé par l'utilisateur connecté (« nouveau » s'il n'a pas de process)

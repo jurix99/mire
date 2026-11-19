@@ -144,7 +144,7 @@ def finish_run(run_id: int, body: RunFinishIn, db: DB, llm: Annotated[LLM | None
     for user in db.scalars(select(User)).all():
         if added and llm is not None:
             try:
-                assessments.assess_user(db, user, llm, limit=len(added) + 10)
+                assessments.assess_within_plan(db, user, llm, len(added) + 10)  # quota hebdomadaire des Free
             except HTTPException:  # quota / Gemini indisponible : la tâche de fond reprendra
                 pass
         rows = db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id,

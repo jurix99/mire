@@ -11,13 +11,14 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from . import assessments, linkedin_export, pdf_import
+from . import assessments, entitlements, linkedin_export, pdf_import
 from .analysis import analysis_input, analysis_proposals, compute_years, missing_topics
 from .db import get_db
+from .entitlements import RequirePro
 from .llm import LLM, get_llm, require_llm
 from .models import ProfileImport, User
 from .profile import (
@@ -105,11 +106,13 @@ def create_proposal(
     db: Session, user: User, *, kind: str, source: str, items: list[dict], filename: str | None = None,
     data: ProfileData | None = None, extra: dict | None = None,
 ) -> ProposalPreview:
-    # Ménage : propositions expirées ou déjà appliquées de cet utilisateur
-    db.execute(delete(ProfileImport).where(
-        ProfileImport.user_id == user.id,
-        (ProfileImport.applied_at.is_not(None)) | (ProfileImport.created_at < datetime.now(UTC) - IMPORT_TTL),
-    ))
+    # Ménage : propositions expirées ou déjà appliquées de cet utilisateur. Les imports ne sont pas supprimés mais
+    # vidés de leur contenu : ils restent comptés dans le quota d'imports du plan Free (entitlements).
+    done = (ProfileImport.user_id == user.id) & (
+        (ProfileImport.applied_at.is_not(None)) | (ProfileImport.created_at < datetime.now(UTC) - IMPORT_TTL))
+    db.execute(delete(ProfileImport).where(done, ProfileImport.kind != "import"))
+    db.execute(update(ProfileImport).where(done, ProfileImport.kind == "import")
+               .values(data=None, proposals=None, extra=None))
     imp = ProfileImport(
         id=str(uuid.uuid4()), user_id=user.id, kind=kind, source=source, filename=_safe_filename(filename),
         data=data.model_dump(mode="json") if data else None, proposals=items, extra=extra or {},
@@ -130,7 +133,7 @@ def create_import(
 
 def _load_proposal(db: Session, user: User, proposal_id: str) -> ProfileImport:
     imp = db.scalar(select(ProfileImport).where(ProfileImport.id == proposal_id, ProfileImport.user_id == user.id))
-    if imp is None or imp.applied_at is not None:
+    if imp is None or imp.applied_at is not None or (imp.extra or {}).get("cancelled"):
         raise HTTPException(404, "Proposition introuvable ou déjà appliquée")
     created = imp.created_at if imp.created_at.tzinfo else imp.created_at.replace(tzinfo=UTC)
     if created < datetime.now(UTC) - IMPORT_TTL:
@@ -149,6 +152,7 @@ async def _read_upload(file: UploadFile, limit: int, label: str) -> bytes:
 
 @router.post("/import/linkedin-export")
 async def import_linkedin_export(file: UploadFile, db: DB, user: Me) -> ProposalPreview:
+    entitlements.check_quota(db, user, "imports")
     data = await _read_upload(file, linkedin_export.MAX_ZIP_BYTES, "Fichier")
     profile, found = linkedin_export.parse_export(data)
     details = [f"Fichiers reconnus : {', '.join(found)}"]
@@ -158,6 +162,7 @@ async def import_linkedin_export(file: UploadFile, db: DB, user: Me) -> Proposal
 @router.post("/import/pdf")
 async def import_pdf(file: UploadFile, db: DB, user: Me, llm: Gemini) -> ProposalPreview:
     llm = require_llm(llm)
+    entitlements.check_quota(db, user, "imports")
     data = await _read_upload(file, pdf_import.MAX_PDF_BYTES, "PDF")
     text = pdf_import.extract_text(data)
     profile = await run_in_threadpool(llm.extract_profile, text)
@@ -166,7 +171,9 @@ async def import_pdf(file: UploadFile, db: DB, user: Me, llm: Gemini) -> Proposa
 
 @router.post("/import/text")
 def import_text(body: ImportText, db: DB, user: Me, llm: Gemini) -> ProposalPreview:
-    profile = require_llm(llm).extract_profile(body.text)
+    llm = require_llm(llm)
+    entitlements.check_quota(db, user, "imports")
+    profile = llm.extract_profile(body.text)
     return create_import(db, user, "text", None, profile)
 
 
@@ -195,7 +202,11 @@ def apply_proposal(proposal_id: str, db: DB, user: Me, body: ProposalApply | Non
 @router.delete("/proposals/{proposal_id}", status_code=204)
 @router.delete("/import/{proposal_id}", status_code=204, include_in_schema=False)  # ancien chemin
 def cancel_proposal(proposal_id: str, db: DB, user: Me) -> Response:
-    db.delete(_load_proposal(db, user, proposal_id))
+    imp = _load_proposal(db, user, proposal_id)
+    if imp.kind == "import":  # conservé (vidé) : compte dans le quota d'imports
+        imp.data, imp.proposals, imp.extra = None, None, {"cancelled": True}
+    else:
+        db.delete(imp)
     db.commit()
     return Response(status_code=204)
 
@@ -203,7 +214,7 @@ def cancel_proposal(proposal_id: str, db: DB, user: Me) -> Response:
 # --- Analyse du profil (déductions) ------------------------------------------------
 
 
-@router.post("/analyze")
+@router.post("/analyze", dependencies=[RequirePro("profile_analysis")])
 def analyze_profile(db: DB, user: Me, llm: Gemini) -> ProposalPreview:
     """Déductions sur le profil structuré -> propositions « déduit », validées une par une."""
     llm = require_llm(llm)
