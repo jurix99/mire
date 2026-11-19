@@ -16,7 +16,7 @@ from fastapi.responses import JSONResponse, RedirectResponse, Response
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import assessments
+from . import assessments, collector
 from .agent_api import router as agent_router
 from .api import router as api_router
 from .assessments_api import router as assessments_router
@@ -62,9 +62,15 @@ async def lifespan(_: FastAPI):
             SessionLocal, get_llm, interval=float(os.environ.get("ASSESSMENT_INTERVAL_S", "120")),
         )
         assessments.assessor.start()
+    # Collecte quotidienne des offres sur les ATS (sans LLM)
+    if os.environ.get("COLLECTOR", "true").lower() not in ("0", "false", "no"):
+        collector.collector = collector.DailyCollector(SessionLocal, on_done=assessments.wake)
+        collector.collector.start()
     yield
     if assessments.assessor is not None:
         assessments.assessor.stop()
+    if collector.collector is not None:
+        collector.collector.stop()
 
 
 app = FastAPI(title="Mire", lifespan=lifespan)

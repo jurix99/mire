@@ -13,6 +13,7 @@ _TMP = Path(tempfile.mkdtemp(prefix="mire-tests-"))
 os.environ["DATABASE_URL"] = f"sqlite:///{(_TMP / 'test.db').as_posix()}"
 os.environ.setdefault("SESSION_SECRET", "test-secret")
 os.environ["SEED_DEMO"] = "false"
+os.environ["COLLECTOR"] = "false"  # pas de collecte réseau pendant les tests
 os.environ["GEMINI_API_KEY"] = ""  # aucun appel réseau : les tests injectent un faux client Gemini
 
 from fastapi.testclient import TestClient  # noqa: E402

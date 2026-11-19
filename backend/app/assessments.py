@@ -22,12 +22,13 @@ import threading
 from datetime import UTC, datetime
 from typing import Annotated
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
 from .models import Application, Job, JobAssessment, User, UserProfile
 from .profile import (
+    CRITERIA,
     ProfileData,
     _norm,
     get_profile,
@@ -68,6 +69,69 @@ def required_years(text: str, *, field_is_experience: bool = False) -> int | Non
     return max(values) if values else None
 
 
+# Pré-filtre (gratuit, sans LLM) : métiers hors cible, d'après le titre ou le service de l'offre.
+# (libellé, motif) ; non appliqué si un rôle visé par l'utilisateur relève de ce métier.
+NON_TECH_ROLES: list[tuple[str, re.Pattern]] = [(label, re.compile(p, re.IGNORECASE)) for label, p in [
+    ("commercial", r"\b(sales|account (executive|manager)|business develop\w*|bdr|sdr|commercial|key account|"
+                   r"partnerships?|revenue|deal desk|pre-?sales|solutions? consultant)\b"),
+    ("marketing", r"\b(marketing|growth marketer|brand|content (writer|manager|marketing)|community manager|"
+                  r"communication|seo|social media|pr manager|events?)\b"),
+    ("recrutement / RH", r"\b(recruit\w*|talent (acquisition|partner)|people (partner|ops|operations)|"
+                         r"human resources|hr\b|ressources humaines|payroll)\b"),
+    ("finance / juridique", r"\b(finance|financial|accountant|accounting|comptab\w*|controller|fp&a|legal|"
+                            r"juriste|counsel|compliance officer|tax)\b"),
+    ("support / customer success", r"\b(customer (success|support|care|experience)|support (specialist|agent)|"
+                                   r"help ?desk|service client)\b"),
+    ("design", r"\b(product designer|ux|ui designer|graphic designer|design lead|brand designer)\b"),
+    ("product management", r"\b(product (manager|owner|lead)|head of product|chief product)\b"),
+    ("fonctions support", r"\b(office manager|executive assistant|chief of staff|operations (manager|associate)|"
+                          r"workplace|admin\w* assistant)\b"),
+]]
+NON_TECH_DEPARTMENTS = re.compile(r"\b(sales|marketing|g&a|people|talent|finance|legal|customer success|"
+                                  r"go[- ]to[- ]market|gtm|revenue|business)\b", re.IGNORECASE)
+TECH_HINT = re.compile(r"\b(engineer\w*|ing[ée]nieur|developer|d[ée]veloppeu\w*|devops|sre|mlops|platform|"
+                       r"infrastructure|backend|full[- ]?stack|software|data scientist|machine learning|"
+                       r"technical staff|cto|architect)\b", re.IGNORECASE)
+
+# Lieux explicitement hors de France (le pré-filtre n'écarte que ceux-là ; un lieu inconnu reste à évaluer)
+ABROAD = re.compile(
+    r"\b(usa|u\.s\.|united states|new york|nyc|san francisco|sf|bay area|palo alto|mountain view|austin|seattle|"
+    r"boston|chicago|los angeles|denver|miami|atlanta|toronto|montreal|canada|london|uk|united kingdom|england|"
+    r"dublin|ireland|berlin|munich|germany|amsterdam|netherlands|madrid|barcelona|spain|lisbon|portugal|milan|"
+    r"italy|zurich|switzerland|stockholm|sweden|copenhagen|warsaw|poland|tel aviv|israel|singapore|tokyo|india|"
+    r"bangalore|sydney|australia|dubai)\b|,\s*(ca|ny|wa|tx|ma|il|co|fl|ga)\b", re.IGNORECASE)
+FR_HINT = re.compile(r"\b(france|paris|lyon|marseille|toulouse|lille|nantes|bordeaux|grenoble|nice|rennes|"
+                     r"montpellier|sophia|ile[- ]de[- ]france|île[- ]de[- ]france|europe|emea|eu\b|remote|"
+                     r"t[ée]l[ée]travail|anywhere)\b", re.IGNORECASE)
+
+
+def role_mismatch(job: Job, data: ProfileData) -> str | None:
+    """Métier clairement hors cible (commercial, marketing…), sauf si l'utilisateur vise ce métier."""
+    title = job.title or ""
+    if TECH_HINT.search(title):
+        return None  # « Sales engineer », « Marketing data engineer »… : laissés à l'évaluation
+    wanted = " ".join(data.preferences.roles + ([data.headline] if data.headline else []))
+    for label, pattern in NON_TECH_ROLES:
+        if pattern.search(title) and not pattern.search(wanted):
+            return f"Rôle hors de votre cible ({label})"
+    if job.category and NON_TECH_DEPARTMENTS.search(job.category) and not NON_TECH_DEPARTMENTS.search(wanted):
+        return f"Rôle hors de votre cible (service {job.category})"
+    return None
+
+
+def location_mismatch(job: Job, data: ProfileData) -> str | None:
+    """Hors zone : l'utilisateur a indiqué ses lieux, et l'offre est EXPLICITEMENT à l'étranger (ex. « San
+    Francisco, CA », « London ») sans mention de la France, de l'Europe ni du télétravail. Lieu inconnu ou
+    ville française non listée (ex. Villejuif) : laissé à l'évaluation."""
+    if not data.preferences.locations or not job.location:
+        return None
+    if job.work_mode == "remote" or FR_HINT.search(job.location) or not ABROAD.search(job.location):
+        return None
+    if any(_norm(loc) in _norm(job.location) for loc in data.preferences.locations):
+        return None
+    return f"Hors zone géographique ({job.location})"
+
+
 def hard_exclusion(job: Job, data: ProfileData) -> str | None:
     company = job.company
     for ex in data.excluded_companies:
@@ -75,6 +139,10 @@ def hard_exclusion(job: Job, data: ProfileData) -> str | None:
             return f"Entreprise exclue : {company.name}" + (f" ({ex.reason})" if ex.reason else "")
     if INTERNSHIP.search(f"{job.title} {job.seniority or ''}"):
         return "Stage ou alternance"
+    if reason := role_mismatch(job, data):
+        return reason
+    if reason := location_mismatch(job, data):
+        return reason
     if data.years_experience is not None:
         found = [required_years(job.seniority or "", field_is_experience=True),
                  required_years(f"{job.title}\n{job.summary or ''}")]
@@ -90,8 +158,34 @@ def hard_exclusion(job: Job, data: ProfileData) -> str | None:
 Fraction = Annotated[float, Field(ge=0, le=1)]
 
 
+def _cut(limit: int):
+    return BeforeValidator(lambda v: v[:limit] if isinstance(v, str) else v)
+
+
 class JobEvaluation(BaseModel):
+    """Lecture TOLÉRANTE de la sortie du modèle : textes tronqués, notes en points ramenées sur 0-1."""
+
     model_config = ConfigDict(extra="ignore")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize(cls, data):
+        if not isinstance(data, dict):
+            return data
+        data = dict(data)
+        keys = [k for k in CRITERIA if isinstance(data.get(k), int | float)]
+        # Le modèle a répondu en points (ex. 2 sur un critère noté sur 2) : ramené sur 0-1
+        if any(data[k] > 1 for k in keys):
+            for k in keys:
+                data[k] = data[k] / CRITERIA[k][1] if data[k] > 1 else data[k]
+        for k in keys:
+            data[k] = min(1.0, max(0.0, float(data[k])))
+        if isinstance(data.get("adjustment"), int | float):
+            data["adjustment"] = min(1.0, max(-4.0, float(data["adjustment"])))
+        for k in ("skills_have", "skills_missing"):
+            if isinstance(data.get(k), list):
+                data[k] = [str(x)[:60] for x in data[k]][:15]
+        return data
 
     job_id: int
     competences: Fraction = Field(description="Correspondance des compétences (0 à 1)")
@@ -102,10 +196,10 @@ class JobEvaluation(BaseModel):
     references: Fraction = Field(description="Ressemblance avec les offres de référence (0 à 1)")
     adjustment: Annotated[float, Field(ge=-4, le=1)] = Field(
         0, description="Points ajoutés ou retirés par les règles « éviter » / « préférer » (-4 à +1)")
-    adjustment_reason: Annotated[str | None, Field(max_length=200)] = None
-    exclusion: Annotated[str | None, Field(max_length=200)] = Field(
+    adjustment_reason: Annotated[str | None, Field(max_length=200), _cut(200)] = None
+    exclusion: Annotated[str | None, Field(max_length=200), _cut(200)] = Field(
         None, description="Raison d'exclusion si une règle d'exclusion s'applique, sinon null")
-    why: Annotated[str, Field(max_length=300)] = Field(
+    why: Annotated[str, Field(max_length=300), _cut(300)] = Field(
         "", description="Pourquoi c'est intéressant (1 ligne, salaire inclus s'il est affiché)")
     skills_have: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=15)
     skills_missing: list[Annotated[str, Field(max_length=60)]] = Field(default_factory=list, max_length=15)
@@ -115,6 +209,20 @@ class EvaluationBatch(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     evaluations: list[JobEvaluation] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _skip_invalid(cls, data):
+        """Un élément invalide est ignoré (réessayé au prochain passage) sans faire échouer tout le lot."""
+        if isinstance(data, dict) and isinstance(data.get("evaluations"), list):
+            kept = []
+            for item in data["evaluations"]:
+                try:
+                    kept.append(JobEvaluation.model_validate(item))
+                except ValidationError as exc:
+                    log.info("Évaluation ignorée (sortie invalide) : %s", exc.errors()[:1])
+            data = {**data, "evaluations": kept}
+        return data
 
 
 EVALUATE_INSTRUCTION = """Tu évalues des offres d'emploi pour UNE personne, à partir de son profil (entre <profil>).

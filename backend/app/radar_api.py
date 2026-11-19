@@ -209,5 +209,45 @@ def list_runs(db: DB, user: Me, limit: int = 10) -> RunsOut:
         item = RunOut.model_validate(r, from_attributes=True)
         item.mine = next((u for u in (r.details or {}).get("per_user", []) if u.get("user_id") == user.id), None)
         out.append(item)
-    schedule = os.environ.get("AGENT_SCHEDULE", "lundi et jeudi à 7h43") if os.environ.get("AGENT_TOKEN") else None
+    from . import collector
+
+    parts = []
+    if collector.collector is not None:
+        parts.append(f"collecte chaque jour à {collector.collector.at.replace(':', 'h')}")
+    if os.environ.get("AGENT_TOKEN"):
+        parts.append(f"découverte {os.environ.get('AGENT_SCHEDULE', 'le lundi à 7h43')}")
+    schedule = " · ".join(parts).capitalize() if parts else None
     return RunsOut(schedule=schedule, runs=out)
+
+
+# --- Collecte quotidienne (processus 2) ---------------------------------------------------------
+
+
+class CollectStatus(BaseModel):
+    enabled: bool
+    running: bool
+    at: str | None  # heure quotidienne (Paris)
+    last: RunOut | None
+
+
+@router.get("/collect/status")
+def collect_status(db: DB) -> CollectStatus:
+    from . import collector
+
+    c = collector.collector
+    last = db.scalars(select(SearchRun).where(SearchRun.kind == "collecte").order_by(SearchRun.id.desc()).limit(1)).first()
+    return CollectStatus(enabled=c is not None, running=bool(c and c.running), at=c.at if c else None,
+                         last=RunOut.model_validate(last, from_attributes=True) if last else None)
+
+
+@router.post("/collect/run", status_code=202)
+def collect_run() -> dict:
+    """Lance la collecte tout de suite (en tâche de fond)."""
+    from . import collector
+
+    c = collector.collector
+    if c is None:
+        raise HTTPException(503, "Collecte désactivée (COLLECTOR=false)")
+    if not c.trigger():
+        raise HTTPException(409, "Une collecte est déjà en cours")
+    return {"started": True}

@@ -137,6 +137,7 @@ class Company(TimestampMixin, Base):
     # Dernière vérification sans offre pertinente (pour ne pas la revérifier à chaque passage)
     no_relevant_jobs_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     headcount: Mapped[str | None] = mapped_column(String(40))  # effectif approximatif, ex. « 11-50 »
+    ats_probed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # dernière détection auto
 
     jobs: Mapped[list["Job"]] = relationship(back_populates="company", cascade="all, delete-orphan")
 

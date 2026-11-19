@@ -10,7 +10,10 @@ const KINDS = [
   ["autre", "Autres"],
 ];
 const KIND_LABEL = Object.fromEntries(KINDS);
-const RUN_KIND = { planifie: "Planifié", manuel: "Manuel", approfondi: "Approfondi" };
+const RUN_KIND = {
+  collecte: "Collecte des offres", decouverte: "Découverte des entreprises", planifie: "Planifié", manuel: "Manuel",
+  approfondi: "Approfondi",
+};
 const RUN_STATUS = { en_cours: "En cours", termine: "Terminé", echec: "Échec" };
 
 let sources = [];
@@ -77,7 +80,8 @@ function draw() {
 }
 
 function drawRuns({ schedule, runs }) {
-  $("#schedule").textContent = schedule ? `Passages planifiés : ${schedule}` : "Agent non configuré (voir docs/agent.md)";
+  $("#schedule").innerHTML = html`<span>${schedule ?? "Aucun passage planifié"}</span>
+    <button type="button" class="btn ghost sm" data-collect title="Lire maintenant les offres de toutes les entreprises (ATS)">Collecter maintenant</button>`.s;
   $("#runs").innerHTML = runs.length ? html`<div class="rows">${runs.map((r) => html`
     <div class="row-item run">
       <div class="grow">
@@ -99,6 +103,26 @@ async function reload() {
 }
 
 $("#add").addEventListener("click", () => editSource(null));
+$("main").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-collect]");
+  if (!btn) return;
+  btn.disabled = true;
+  btn.textContent = "Collecte en cours…";
+  try {
+    await attempt(() => api("/collect/run", { method: "POST" }), "Collecte lancée : les nouvelles offres seront ensuite évaluées pour vous");
+    // Suivi jusqu'à la fin de la collecte
+    for (let i = 0; i < 120; i++) {
+      await new Promise((r) => setTimeout(r, 5000));
+      if (!document.body.contains(btn)) return;
+      const st = await api("/collect/status");
+      if (!st.running) break;
+    }
+    await reload();
+  } catch {
+    btn.disabled = false;
+    btn.textContent = "Collecter maintenant";
+  }
+});
 $("#kinds").addEventListener("click", (e) => {
   const chip = e.target.closest("[data-kind]");
   if (!chip) return;

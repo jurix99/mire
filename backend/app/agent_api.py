@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from . import assessments, services
+from . import assessments, ats, services
 from .db import get_db
 from .dedup import normalize_url
 from .llm import LLM, get_llm
@@ -77,6 +77,8 @@ def context(db: DB) -> dict:
             "id": c.id, "nom": c.name, "site": c.website, "ats": c.ats, "ats_slug": c.ats_slug,
             "carrieres": c.careers_url, "stade": c.funding_stage, "levee_date": c.funding_announced_on,
             "verifiee_le": c.last_checked_at, "sans_offre_pertinente_le": c.no_relevant_jobs_at,
+            # ATS lu chaque jour par Mire (collecte) : rien à faire pour ses offres
+            "ats_lisible": c.ats in ats.SUPPORTED and bool(c.ats_slug),
         } for c in companies],
         # Offres déjà vues (jamais à reproposer, quel que soit leur statut)
         "offres_connues": [{"id": j.id, "entreprise": j.company.name, "titre": j.title, "url": j.url,
@@ -91,7 +93,7 @@ def context(db: DB) -> dict:
 
 
 class RunIn(BaseModel):
-    kind: Literal["planifie", "manuel", "approfondi"] = "planifie"
+    kind: Literal["decouverte", "planifie", "manuel", "approfondi"] = "decouverte"
 
 
 class RunFinishIn(BaseModel):
@@ -227,6 +229,33 @@ def agent_check_company(company_id: int, db: DB, run_id: int | None = None) -> C
         run.jobs_closed += len(out.closed)
         db.commit()
     return out
+
+
+class AtsIn(BaseModel):
+    ats: Literal[ats.SUPPORTED]  # type: ignore[valid-type]
+    slug: Annotated[str, Field(min_length=1, max_length=100, pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")]
+
+
+@router.post("/companies/{company_id}/ats")
+def set_company_ats(company_id: int, body: AtsIn, db: DB) -> dict:
+    """Mire teste l'ATS + identifiant proposés : enregistrés seulement si le tableau répond et contient les offres
+    de CETTE entreprise. Une valeur existante n'est remplacée que si elle ne fonctionne pas."""
+    company = services.get_or_404(db, Company, company_id)
+    try:
+        postings = ats.fetch_postings(body.ats, body.slug)
+    except ats.ATSError as exc:
+        return {"ok": False, "error": str(exc)}
+    if postings and not ats.mentions_company(company, postings):
+        return {"ok": False, "error": "Ce tableau ne semble pas être celui de cette entreprise (nom absent des offres)"}
+    if company.ats in ats.SUPPORTED and company.ats_slug and (company.ats, company.ats_slug) != (body.ats, body.slug):
+        try:
+            ats.fetch_postings(company.ats, company.ats_slug)
+            return {"ok": False, "error": f"Un ATS fonctionnel est déjà enregistré ({company.ats}/{company.ats_slug})"}
+        except ats.ATSError:
+            pass  # l'ancien identifiant ne fonctionne pas : on le remplace
+    company.ats, company.ats_slug = body.ats, body.slug
+    db.commit()
+    return {"ok": True, "postings": len(postings), "note": "Les offres seront collectées par Mire (collecte quotidienne)"}
 
 
 @router.post("/companies/{company_id}/checked")

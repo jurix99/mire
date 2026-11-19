@@ -1,13 +1,14 @@
-﻿# Lance un passage de recherche d'offres pour Mire (Claude Code en mode non interactif).
+﻿# Lance un passage de l'agent de Mire (Claude Code en mode non interactif) : par défaut, la découverte
+# hebdomadaire des entreprises qui ont levé des fonds et de leur ATS (les offres sont collectées par Mire).
 #
-#   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1                 # passage « planifie »
+#   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1                 # découverte (défaut)
 #   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind approfondi
 #
 # L'agent n'a accès qu'à la recherche web, à la lecture de pages, à l'écriture de fichiers dans agent/tmp/
 # (corps JSON longs) et au client de l'API de Mire (agent/mire_api.py) : aucune autre commande. Journal : agent\logs\run-AAAAMMJJ-HHmm.log
 param(
-    [ValidateSet("planifie", "manuel", "approfondi")]
-    [string]$Kind = "planifie",
+    [ValidateSet("decouverte", "approfondi", "manuel")]
+    [string]$Kind = "decouverte",
     [string]$Model = ""
 )
 

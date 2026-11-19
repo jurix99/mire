@@ -526,7 +526,7 @@ export async function renderShell() {
     </nav>
     <a class="watch" href="/sources" id="watch" style="text-decoration:none">
       <p class="label">// Veille personnelle</p>
-      <div class="row"><span class="muted">Passages auto</span><span data-watch="schedule">…</span></div>
+      <p class="small" data-watch="schedule">…</p>
       <div class="row"><span class="muted">Dernier passage</span><span data-watch="last">…</span></div>
       <p class="small muted" data-watch="mine"></p>
     </a>`.s;
