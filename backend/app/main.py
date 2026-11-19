@@ -20,6 +20,7 @@ from . import assessments, collector
 from .agent_api import router as agent_router
 from .api import router as api_router
 from .assessments_api import router as assessments_router
+from .billing import router as billing_router
 from .chat import router as chat_router
 from .db import SessionLocal
 from .feedback import router as feedback_router
@@ -81,6 +82,7 @@ app.include_router(assessments_router)
 app.include_router(feedback_router)
 app.include_router(radar_router)
 app.include_router(agent_router)
+app.include_router(billing_router)  # /api/billing/webhook : sans session (appelé par Stripe)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,
