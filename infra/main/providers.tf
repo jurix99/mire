@@ -47,11 +47,15 @@ data "azurerm_resource_group" "prod" {
   name = var.resource_group_name
 }
 
-# Noms uniques dans tout Azure (coffre, serveur PostgreSQL) : suffixe aléatoire stable
+# Noms uniques dans tout Azure (coffre, serveur PostgreSQL) : suffixe aléatoire stable. Il change avec la
+# région : un coffre supprimé reste réservé 7 jours (purge protection), le nouveau doit porter un autre nom.
 resource "random_string" "suffix" {
   length  = 5
   upper   = false
   special = false
+  keepers = {
+    location = data.azurerm_resource_group.prod.location
+  }
 }
 
 locals {

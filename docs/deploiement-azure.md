@@ -33,6 +33,19 @@ l'infrastructure. Seul le bootstrap se lance en local, une fois (voir plus bas p
 | `mire-daily` | Job planifié chaque jour : collecte sur les ATS, embeddings, présélection par similarité, évaluation Gemini (Pro d'abord), ping healthchecks.io. |
 | `mire-migrate` | Job manuel : `alembic upgrade head`. La CI le lance avant chaque mise à jour de l'API. |
 
+## Régions
+
+- `rg-mire-prod` et toute l'application : **northeurope** (Irlande). En francecentral, la création du serveur
+  PostgreSQL `B_Standard_B1ms` échoue pour cet abonnement (`SkuNotAvailable`, avec ou sans zone fixée), et
+  westeurope est fermé aux nouveaux abonnements. Région réglée par `prod_location` dans `infra/bootstrap`.
+- `rg-mire-tfstate` (state Terraform, identité de la CI) : francecentral.
+
+Avant de changer de région, vérifier la disponibilité :
+`az postgres flexible-server list-skus --location <région>` (champ `reason` vide, `Standard_B1ms` présent).
+Pour changer : supprimer `rg-mire-prod` (`az group delete`), modifier `prod_location`, relancer le bootstrap,
+reposer les secrets dans le nouveau coffre, puis relancer *Deploy*. Le suffixe des noms (coffre, serveur)
+change avec la région, car un coffre supprimé reste réservé 7 jours.
+
 ## Prérequis
 
 - Un abonnement Azure dont vous êtes propriétaire (`Owner`). Pour la gratuité de PostgreSQL 12 mois, il faut
@@ -147,7 +160,7 @@ Passez la variable `MIRE_APPS_ENABLED` à `true`, puis relancez *Deploy* (*Run w
 ### 6. Domaine personnalisé et certificat managé (gratuit)
 
 1. Chez votre registraire DNS, créez :
-   - `CNAME  <domaine>        → <api_fqdn>` (ex. `mire-api.<…>.francecentral.azurecontainerapps.io`) ;
+   - `CNAME  <domaine>        → <api_fqdn>` (ex. `mire-api.<…>.northeurope.azurecontainerapps.io`) ;
    - `TXT    asuid.<domaine>  → <custom_domain_verification_id>` (sortie Terraform).
 
    Pour un domaine racine (apex), utilisez un enregistrement `A` vers l'IP statique de l'environnement :
@@ -283,7 +296,7 @@ démarre à froid. Le jeton du `.env` local n'est jamais envoyé à un autre ser
 distante doit être en `https://`. Pour la tâche planifiée Windows, définissez ces deux variables d'environnement
 pour l'utilisateur.
 
-## Coûts estimés (francecentral, hors TVA, ordres de grandeur)
+## Coûts estimés (northeurope, hors TVA, ordres de grandeur)
 
 | Poste | Estimation | Commentaire |
 |---|---|---|

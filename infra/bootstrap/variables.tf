@@ -4,9 +4,19 @@ variable "subscription_id" {
 }
 
 variable "location" {
-  description = "Région Azure"
+  description = "Région du state Terraform (rg-mire-tfstate)"
   type        = string
   default     = "francecentral"
+}
+
+variable "prod_location" {
+  description = <<-EOT
+    Région de l'application (rg-mire-prod ; infra/main y crée toutes ses ressources). northeurope : PostgreSQL
+    B_Standard_B1ms refusé à cet abonnement en francecentral (SkuNotAvailable) et westeurope fermé aux
+    nouveaux abonnements. Changer de région = recréer rg-mire-prod (docs/deploiement-azure.md).
+  EOT
+  type        = string
+  default     = "northeurope"
 }
 
 variable "github_oidc_repository" {

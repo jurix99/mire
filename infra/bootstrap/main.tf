@@ -110,7 +110,7 @@ resource "azurerm_storage_container" "tfstate" {
 
 resource "azurerm_resource_group" "prod" {
   name     = "rg-mire-prod"
-  location = var.location
+  location = var.prod_location
   tags     = local.tags
 }
 
