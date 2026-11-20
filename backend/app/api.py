@@ -210,6 +210,16 @@ def get_job(job_id: int, db: DB, user: Me) -> JobDetailOut:
     return JobDetailOut(**job.model_dump(), application=application)
 
 
+@router.get("/jobs/{job_id}/similar")
+def similar_jobs(job_id: int, db: DB, user: Me) -> list[JobOut]:
+    """Les 5 offres ouvertes les plus proches (similarité des embeddings, requête SQL, sans LLM).
+    Vide tant que l'offre n'a pas d'embedding (calculé par le worker)."""
+    from . import embeddings
+
+    services.get_job(db, user, job_id)  # 404 si l'offre n'existe pas
+    return [services.get_job(db, user, other) for other, _ in embeddings.similar_jobs(db, job_id)]
+
+
 @router.post("/jobs", status_code=201, dependencies=[RequireAdmin])
 def create_job(body: JobIn, db: DB) -> JobOut:
     out = services.create_job(db, body)

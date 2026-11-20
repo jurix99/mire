@@ -34,9 +34,22 @@ def users_by_priority(db: Session) -> list[tuple[User, assessments.Scope]]:
     return sorted(users, key=lambda pair: pair[1].priority)
 
 
-def rank(db: Session, user: User, job_ids: list[int]) -> list[tuple[int, float]] | None:
-    """Offres triées par similarité avec le profil (None : présélection indisponible, ex. sans embeddings)."""
-    return None
+def rank(db: Session, user: User, job_ids: list[int], top_k: int) -> list[tuple[int, float]] | None:
+    """Les top_k offres les plus proches du profil : [(job_id, similarité)] ; None : présélection indisponible
+    (pas de modèle d'embeddings dans ce processus, ex. API ou docker compose local)."""
+    from . import embeddings
+
+    embedder = embeddings.get_embedder()
+    if embedder is None:
+        return None
+    if not job_ids:
+        return []
+    embeddings.embed_pending_jobs(db, embedder)  # offres arrivées depuis le dernier passage d'embed_jobs
+    profile = get_profile(db, user)
+    vector = embeddings.ensure_profile_embedding(db, profile, profile_data(profile), embedder)
+    if vector is None:
+        return None
+    return embeddings.nearest_jobs(db, vector, job_ids=job_ids, limit=top_k)
 
 
 def match_user(db: Session, user: User, top_k: int | None = None) -> dict:
@@ -49,11 +62,13 @@ def match_user(db: Session, user: User, top_k: int | None = None) -> dict:
     scope = assessments.scope_of(db, user)
     pending = assessments.jobs_to_assess(db, user, profile, before=scope.before)
     remaining = assessments.apply_hard_exclusions(db, user, profile, data, pending)
-    ranked = rank(db, user, [j.id for j in remaining])
+    ranked = rank(db, user, [j.id for j in remaining], top_k)
     if ranked is None:  # sans similarité : les plus récentes d'abord (comportement historique)
         return {"job_ids": [j.id for j in remaining][:top_k], "similarity": {}}
-    ranked = ranked[:top_k]
-    return {"job_ids": [job_id for job_id, _ in ranked], "similarity": {job_id: sim for job_id, sim in ranked}}
+    log.info("Présélection utilisateur %s : %s offres retenues sur %s", user.id, len(ranked), len(remaining),
+             extra={"user_id": user.id, "kept": len(ranked), "pending": len(remaining)})
+    # Clés en texte : la présélection voyage dans le payload JSON de la tâche assess_user
+    return {"job_ids": [job_id for job_id, _ in ranked], "similarity": {str(job_id): sim for job_id, sim in ranked}}
 
 
 def enqueue_matches(db: Session) -> int:

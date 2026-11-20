@@ -104,6 +104,10 @@ Commandes utiles :
   docker compose exec db psql -U jobradar                console SQL
   docker compose down -v                                 tout arrêter ET effacer la base
 
+Passage à l'image pgvector (base créée avant, avec postgres:17-alpine) : les données sont compatibles, mais
+l'ordre de tri du texte diffère entre Alpine (musl) et Debian. Une fois, après le premier `docker compose up -d` :
+  docker compose exec db psql -U jobradar -c "REINDEX DATABASE jobradar" -c "ALTER DATABASE jobradar REFRESH COLLATION VERSION"
+
 Modifier le modèle (backend/app/models.py), puis générer et vérifier la migration :
   docker compose run --rm backend uv run alembic revision --autogenerate -m "description"
   docker compose restart backend                         (applique la migration)

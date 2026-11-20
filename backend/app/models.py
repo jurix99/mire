@@ -29,12 +29,14 @@ from datetime import date, datetime
 from decimal import Decimal
 from urllib.parse import urlparse
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
     Date,
     DateTime,
     Enum,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -84,6 +86,13 @@ status_enum = Enum(
     values_callable=lambda e: [m.value for m in e],
 )
 
+
+# Dimension des embeddings (présélection par similarité, voir embeddings.py) : modèle
+# sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 -> 384. Changer de modèle = nouvelle migration.
+EMBEDDING_DIM = 384
+
+# Champs d'une offre qui composent son embedding : le modifier efface embedded_at (recalcul)
+JOB_EMBEDDED_FIELDS = ("title", "role_type", "stack", "summary", "location")
 
 # JSONB sous PostgreSQL, JSON ailleurs (tests sur SQLite).
 # Les colonnes JSON sont toujours réaffectées (jamais modifiées sur place) pour être détectées par SQLAlchemy.
@@ -189,6 +198,11 @@ class Job(TimestampMixin, Base):
     verified_open_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Présélection par similarité (pgvector) : embedding partagé entre utilisateurs, calculé par le worker ;
+    # embedded_at = None -> à (re)calculer (offre nouvelle, ou un champ de JOB_EMBEDDED_FIELDS a changé)
+    embedding: Mapped[list[float] | None] = deferred(mapped_column(Vector(EMBEDDING_DIM)))
+    embedded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     company: Mapped[Company] = relationship(back_populates="jobs")
     applications: Mapped[list["Application"]] = relationship(back_populates="job", cascade="all, delete-orphan")
     source_ref: Mapped["Source | None"] = relationship()
@@ -201,11 +215,21 @@ class Job(TimestampMixin, Base):
         return value
 
     @validates("title")
-    def _set_title_key(self, _key, value):
+    def _set_title_key(self, key, value):
         from .dedup import title_key
 
         self.title_key = title_key(value)
+        self._embedded_field_changed(key, value)
         return value
+
+    @validates("role_type", "stack", "summary", "location")
+    def _reset_embedding(self, key, value):
+        self._embedded_field_changed(key, value)
+        return value
+
+    def _embedded_field_changed(self, key: str, value) -> None:
+        if self.__dict__.get(key) != value:
+            self.embedded_at = None
 
 
 class Application(TimestampMixin, Base):
@@ -282,6 +306,10 @@ class UserProfile(TimestampMixin, Base):
     # Incrémentée à chaque changement du contenu du profil : les évaluations d'une version
     # antérieure sont réévaluées (seulement pour les offres que l'utilisateur n'a pas traitées)
     version: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # Embedding du profil (présélection) et version du profil pour laquelle il a été calculé : recalculé quand
+    # la version change (un J'aime ajoute une offre de référence, donc change aussi la version)
+    embedding: Mapped[list[float] | None] = deferred(mapped_column(Vector(EMBEDDING_DIM)))
+    embedding_version: Mapped[int | None] = mapped_column(Integer)
 
     user: Mapped[User] = relationship(back_populates="profile")
 
@@ -400,6 +428,8 @@ class JobAssessment(TimestampMixin, Base):
     model: Mapped[str | None] = mapped_column(String(60))  # « regles » si exclusion dure, sinon modèle Gemini
     manual_score: Mapped[Decimal | None] = mapped_column(Numeric(4, 1))  # correction de l'utilisateur
     assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    # Similarité cosinus profil / offre au moment de la présélection (tri, débogage) ; None sans présélection
+    similarity: Mapped[float | None] = mapped_column(Float)
 
     job: Mapped["Job"] = relationship()
 

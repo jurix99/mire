@@ -43,7 +43,9 @@ services:
 
   # Base PostgreSQL (données dans le volume postgres-data)
   db:
-    image: postgres:17-alpine
+    # PostgreSQL 17 + extension pgvector (présélection par similarité). Volume créé avec l'ancienne image
+    # postgres:17-alpine : voir README (« Passage à l'image pgvector »)
+    image: pgvector/pgvector:pg17
     environment:
       POSTGRES_DB: jobradar
       POSTGRES_USER: jobradar
