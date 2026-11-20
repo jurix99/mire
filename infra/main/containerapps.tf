@@ -164,7 +164,13 @@ resource "azurerm_container_app" "api" {
     }
   }
 
-  depends_on = [azurerm_role_assignment.runtime_key_vault]
+  # Dépendances explicites : les références Key Vault ne passent que par l'URI du coffre, et `-target` (CI)
+  # doit aussi créer PostgreSQL et les secrets générés
+  depends_on = [
+    azurerm_role_assignment.runtime_key_vault,
+    azurerm_key_vault_secret.database_url,
+    azurerm_key_vault_secret.keda_postgres,
+  ]
 }
 
 # Domaine personnalisé : enregistrements DNS (CNAME + TXT asuid) à créer AVANT de renseigner custom_domain.
@@ -237,7 +243,13 @@ resource "azurerm_container_app_job" "migrate" {
     }
   }
 
-  depends_on = [azurerm_role_assignment.runtime_key_vault]
+  # Dépendances explicites : les références Key Vault ne passent que par l'URI du coffre, et `-target` (CI)
+  # doit aussi créer PostgreSQL et les secrets générés
+  depends_on = [
+    azurerm_role_assignment.runtime_key_vault,
+    azurerm_key_vault_secret.database_url,
+    azurerm_key_vault_secret.keda_postgres,
+  ]
 }
 
 resource "azurerm_container_app_job" "daily" {
@@ -310,7 +322,13 @@ resource "azurerm_container_app_job" "daily" {
     }
   }
 
-  depends_on = [azurerm_role_assignment.runtime_key_vault]
+  # Dépendances explicites : les références Key Vault ne passent que par l'URI du coffre, et `-target` (CI)
+  # doit aussi créer PostgreSQL et les secrets générés
+  depends_on = [
+    azurerm_role_assignment.runtime_key_vault,
+    azurerm_key_vault_secret.database_url,
+    azurerm_key_vault_secret.keda_postgres,
+  ]
 }
 
 resource "azurerm_container_app_job" "worker" {
@@ -403,5 +421,11 @@ resource "azurerm_container_app_job" "worker" {
     }
   }
 
-  depends_on = [azurerm_role_assignment.runtime_key_vault]
+  # Dépendances explicites : les références Key Vault ne passent que par l'URI du coffre, et `-target` (CI)
+  # doit aussi créer PostgreSQL et les secrets générés
+  depends_on = [
+    azurerm_role_assignment.runtime_key_vault,
+    azurerm_key_vault_secret.database_url,
+    azurerm_key_vault_secret.keda_postgres,
+  ]
 }
