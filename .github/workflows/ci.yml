@@ -1,0 +1,140 @@
+# Intégration continue : tests du backend (SQLite + PostgreSQL/pgvector), vérification de Terraform, et sur
+# une pull request, terraform plan (OIDC) posté en commentaire.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: Tests backend
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_PASSWORD: test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 2s --health-timeout 3s --health-retries 30
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - run: uv sync --frozen
+      # Les tests marqués « postgres » (SKIP LOCKED, pgvector, migrations) utilisent le service ci-dessus
+      - run: uv run pytest -q
+        env:
+          TEST_POSTGRES_URL: postgresql+psycopg://postgres:test@localhost:5432/postgres
+
+  terraform:
+    name: Terraform fmt / validate / test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - run: terraform fmt -check -recursive infra
+      - name: validate
+        run: |
+          for dir in infra/bootstrap infra/main; do
+            terraform -chdir="$dir" init -backend=false -input=false
+            terraform -chdir="$dir" validate
+          done
+      # Plan simulé (fournisseurs mockés, aucun accès à Azure) : infra/main/tests/plan.tftest.hcl
+      - run: terraform -chdir=infra/main test
+
+  plan:
+    name: Terraform plan (PR)
+    # Pas pour les PR venant d'un fork : pas de jeton OIDC, et pas d'accès à Azure pour du code extérieur
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    needs: terraform
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write # OIDC (identifiant fédéré repo:<dépôt>:pull_request)
+      pull-requests: write # commentaire du plan
+    env:
+      ARM_CLIENT_ID: ${{ vars.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ vars.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_apps_enabled: ${{ vars.MIRE_APPS_ENABLED || 'false' }}
+      TF_VAR_custom_domain: ${{ vars.MIRE_CUSTOM_DOMAIN }}
+      TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
+      TF_VAR_billing_enabled: ${{ vars.BILLING_ENABLED || 'false' }}
+      TF_VAR_stripe_price_monthly: ${{ vars.STRIPE_PRICE_MONTHLY }}
+      TF_VAR_stripe_price_pass_3m: ${{ vars.STRIPE_PRICE_PASS_3M }}
+      TF_VAR_pro_user_emails: ${{ vars.PRO_USER_EMAILS }}
+      TF_VAR_admin_emails: ${{ vars.ADMIN_EMAILS }}
+    defaults:
+      run:
+        working-directory: infra/main
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: 1.16.5
+          terraform_wrapper: false
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      # Le plan compare aux images déjà déployées (sinon il montrerait un changement vers « latest »)
+      - name: tags d'image déployés
+        run: |
+          az extension add --name containerapp --upgrade --yes --only-show-errors
+          api=$(az containerapp show -n mire-api -g rg-mire-prod --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)
+          worker=$(az containerapp job show -n mire-worker -g rg-mire-prod --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)
+          if [ -n "$api" ]; then echo "TF_VAR_api_image_tag=${api##*:}" >> "$GITHUB_ENV"; fi
+          if [ -n "$worker" ]; then echo "TF_VAR_worker_image_tag=${worker##*:}" >> "$GITHUB_ENV"; fi
+      - name: init
+        run: terraform init -input=false -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
+      - name: plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -input=false -lock=false -no-color -out=tfplan > plan.log 2>&1
+          code=$?
+          set -e
+          if [ $code -eq 0 ]; then terraform show -no-color tfplan > plan.txt; else cp plan.log plan.txt; fi
+          echo "exitcode=$code" >> "$GITHUB_OUTPUT"
+      - name: commentaire de la PR
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const fs = require('fs');
+            let plan = fs.readFileSync('infra/main/plan.txt', 'utf8');
+            if (plan.length > 60000) plan = plan.slice(0, 60000) + '\n… (tronqué)';
+            const ok = '${{ steps.plan.outputs.exitcode }}' === '0';
+            const marker = '<!-- terraform-plan:infra/main -->';
+            const body = `${marker}\n### Terraform plan — infra/main ${ok ? '✅' : '❌'}\n\n<details><summary>Afficher le plan</summary>\n\n\`\`\`\n${plan}\n\`\`\`\n</details>`;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const previous = comments.find(c => c.body && c.body.startsWith(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+      - name: résultat
+        if: steps.plan.outputs.exitcode != '0'
+        run: exit 1

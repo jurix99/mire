@@ -70,6 +70,7 @@ variable "budget_amount" {
 variable "budget_alert_email" {
   description = "Adresse des alertes de budget (variable GitHub BUDGET_ALERT_EMAIL, jamais dans le dépôt)"
   type        = string
+  sensitive   = true # adresses personnelles : masquées dans les plans (commentaire de PR)
 }
 
 variable "budget_start_date" {
@@ -114,12 +115,14 @@ variable "stripe_price_pass_3m" {
 variable "pro_user_emails" {
   description = "Comptes toujours Pro (variable GitHub, jamais dans le dépôt)"
   type        = string
+  sensitive   = true # adresses personnelles : masquées dans les plans (commentaire de PR)
   default     = ""
 }
 
 variable "admin_emails" {
   description = "Administrateurs du radar partagé (variable GitHub, jamais dans le dépôt)"
   type        = string
+  sensitive   = true # adresses personnelles : masquées dans les plans (commentaire de PR)
   default     = ""
 }
 

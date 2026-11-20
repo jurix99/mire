@@ -38,10 +38,9 @@ locals {
     GEMINI_FALLBACK_MODEL  = var.gemini_fallback_model
     GEMINI_EVAL_MODEL      = var.gemini_eval_model
     BILLING_ENABLED        = tostring(var.billing_enabled)
-    PRO_USER_EMAILS        = var.pro_user_emails
-    ADMIN_EMAILS           = var.admin_emails
     MATCH_TOP_K            = tostring(var.match_top_k)
   }
+  # Adresses (variables sensibles) : blocs env statiques, un for_each ne peut pas porter de valeur sensible
   api_env = merge(local.common_env, {
     PUBLIC_URL           = local.public_url
     DEV_LOGIN_BYPASS     = "false"
@@ -141,6 +140,15 @@ resource "azurerm_container_app" "api" {
           name        = env.key
           secret_name = env.value
         }
+      }
+
+      env {
+        name  = "PRO_USER_EMAILS"
+        value = var.pro_user_emails
+      }
+      env {
+        name  = "ADMIN_EMAILS"
+        value = var.admin_emails
       }
 
       liveness_probe {
@@ -291,6 +299,14 @@ resource "azurerm_container_app_job" "daily" {
           secret_name = env.value
         }
       }
+      env {
+        name  = "PRO_USER_EMAILS"
+        value = var.pro_user_emails
+      }
+      env {
+        name  = "ADMIN_EMAILS"
+        value = var.admin_emails
+      }
     }
   }
 
@@ -375,6 +391,14 @@ resource "azurerm_container_app_job" "worker" {
           name        = env.key
           secret_name = env.value
         }
+      }
+      env {
+        name  = "PRO_USER_EMAILS"
+        value = var.pro_user_emails
+      }
+      env {
+        name  = "ADMIN_EMAILS"
+        value = var.admin_emails
       }
     }
   }
