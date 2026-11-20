@@ -5,3 +5,10 @@ __pycache__/
 .DS_Store
 agent/logs/
 agent/tmp/
+# Terraform : dossiers de travail, state local du bootstrap (à conserver hors du dépôt), plans
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+tfplan
+crash.log
