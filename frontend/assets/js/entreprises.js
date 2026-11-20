@@ -86,7 +86,7 @@ const card = (c) => {
       ${hasPro ? html`<span data-pro title="Levée réservée à l'offre Pro" style="cursor:pointer">${proTag}</span>` : ""}
       ${c.funding_stage ? html`<span class="pill plain">${renderValue(c.funding_stage)}</span>` : ""}
       ${c.funding_amount_meur != null ? html`<strong>${renderValue(c.funding_amount_meur, { fmt: fmtMoney })}</strong>` : ""}
-      ${c.funding_announced_on ? html`<span class="small muted">· ${renderValue(c.funding_announced_on, { fmt: fmtDate })}</span>` : ""}
+      ${c.funding_announced_on ? html`<span class="small muted">${renderValue(c.funding_announced_on, { fmt: fmtDate })}</span>` : ""}
     </div>
     ${c.investors ? html`<p class="small muted">${renderValue(c.investors)}</p>` : ""}
     ${c.ats || c.last_checked_at ? html`<p class="small muted">

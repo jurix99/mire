@@ -77,7 +77,7 @@ img { display: block; }
 .watch { margin-top: auto; padding: 16px; border-radius: var(--radius); background: var(--bg); display: grid; gap: 8px; }
 .watch .row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
 
-.main { padding: 40px 48px 64px; max-width: 1280px; width: 100%; }
+.main { padding: 40px 48px 64px; max-width: 1760px; width: 100%; }
 
 /* Apparition de la page : masquée le temps de charger ses données, puis fondu léger */
 .main:not(.ready) { opacity: 0; }
@@ -103,7 +103,10 @@ img { display: block; }
 .grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
 
-.card { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
+.card { background: var(--white); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; min-width: 0; }
+/* Carte en grille : une colonne bornée à la carte (sinon un texte sans retour à la ligne, comme une valeur
+   floutée, élargit la colonne et tout le contenu déborde du cadre) */
+.card[style*="display:grid"] { grid-template-columns: minmax(0, 1fr); }
 .card.pad-lg { padding: 24px; }
 
 /* --- Boutons, liens ------------------------------------------------------- */
@@ -431,12 +434,14 @@ body.not-admin [data-admin] { display: none !important; }
 /* Le serveur n'envoie jamais la vraie valeur : .locked floute un texte FACTICE (placeholder) */
 
 .locked {
-  position: relative; display: inline-flex; align-items: center; max-width: 100%;
+  position: relative; display: inline-flex; align-items: center; max-width: 100%; min-width: 0;
   vertical-align: middle; cursor: pointer; border-radius: 6px;
+  overflow: hidden; /* le flou reste dans sa zone, sans traînée autour */
 }
 .locked .locked-text {
-  filter: blur(5px); user-select: none; -webkit-user-select: none; pointer-events: none;
-  color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 2ch;
+  filter: blur(4px); user-select: none; -webkit-user-select: none; pointer-events: none;
+  color: var(--text); opacity: .45; padding: 0 4px;
+  overflow: hidden; white-space: nowrap; min-width: 2ch; max-width: 100%;
 }
 .locked .pro-badge {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
