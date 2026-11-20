@@ -12,10 +12,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import assessments, ats, entitlements, services
+from . import ats, entitlements, services, tasks
 from .db import get_db
 from .entitlements import RequireAdmin
-from .models import Company, Job, SearchRun, Source, User
+from .models import Company, Job, SearchRun, Source, Task, User
 from .users import current_user
 
 router = APIRouter(prefix="/api", dependencies=[Depends(current_user)])
@@ -58,6 +58,8 @@ MAX_AGE_DAYS = 61
 
 
 def check_and_commit(db: Session, company: Company, fetch=ats.fetch_postings) -> CheckOut:
+    # Synchrone (exception à la règle « traitement de fond = tâche en file ») : une seule lecture de l'ATS,
+    # quelques secondes, et le résultat (offres ouvertes / fermées / nouvelles) est affiché tout de suite.
     result = ats.check_company(db, company, fetch)
     db.commit()
     return CheckOut(
@@ -102,7 +104,7 @@ def import_postings(db: Session, company: Company, ids: list[str], fetch=ats.fet
         out.created.append(job.id)
     db.commit()
     if out.created:
-        assessments.wake()  # nouvelles offres : évaluation pour chaque utilisateur
+        tasks.jobs_changed(db)  # nouvelles offres : embeddings, présélection et évaluation pour chaque utilisateur
     return out
 
 
@@ -218,8 +220,8 @@ def list_runs(db: DB, user: Me, limit: int = 10) -> RunsOut:
     from . import collector
 
     parts = []
-    if collector.collector is not None:
-        parts.append(f"collecte chaque jour à {collector.collector.at.replace(':', 'h')}")
+    if collector.enabled():
+        parts.append(f"collecte chaque jour à {collector.collect_time().replace(':', 'h')}")
     if os.environ.get("AGENT_TOKEN"):
         parts.append(f"découverte {os.environ.get('AGENT_SCHEDULE', 'le lundi à 7h43')}")
     schedule = " · ".join(parts).capitalize() if parts else None
@@ -236,24 +238,31 @@ class CollectStatus(BaseModel):
     last: RunOut | None
 
 
+def _collect_pending(db: Session) -> bool:
+    """Collecte en file ou en cours (tâche « collect » ou « daily »)."""
+    return db.scalar(select(func.count(Task.id)).where(
+        Task.kind.in_(("collect", "daily")), Task.status.in_(("queued", "running")))) > 0
+
+
 @router.get("/collect/status", dependencies=[RequireAdmin])
 def collect_status(db: DB) -> CollectStatus:
     from . import collector
 
-    c = collector.collector
+    enabled = collector.enabled()
     last = db.scalars(select(SearchRun).where(SearchRun.kind == "collecte").order_by(SearchRun.id.desc()).limit(1)).first()
-    return CollectStatus(enabled=c is not None, running=bool(c and c.running), at=c.at if c else None,
+    running = _collect_pending(db) or bool(last and last.status == "en_cours")
+    return CollectStatus(enabled=enabled, running=running, at=collector.collect_time() if enabled else None,
                          last=RunOut.model_validate(last, from_attributes=True) if last else None)
 
 
 @router.post("/collect/run", status_code=202, dependencies=[RequireAdmin])
-def collect_run() -> dict:
-    """Lance la collecte tout de suite (en tâche de fond)."""
+def collect_run(db: DB) -> dict:
+    """Lance la collecte tout de suite : tâche « collect » mise en file (traitée par le worker)."""
     from . import collector
 
-    c = collector.collector
-    if c is None:
+    if not collector.enabled():
         raise HTTPException(503, "Collecte désactivée (COLLECTOR=false)")
-    if not c.trigger():
+    if _collect_pending(db):
         raise HTTPException(409, "Une collecte est déjà en cours")
+    tasks.enqueue(db, "collect", dedup_key="collect")
     return {"started": True}

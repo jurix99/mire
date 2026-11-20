@@ -10,8 +10,11 @@ Pour chaque entreprise du référentiel :
 Chaque collecte est un passage (search_runs, kind « collecte ») ; les nouvelles offres sont ensuite évaluées
 pour chaque utilisateur par la tâche de fond (processus 3).
 
-Planification : tous les jours à COLLECT_TIME (heure de Paris, défaut 06:30) ; au démarrage, rattrapage si la
-dernière collecte date de plus de 20 h. Désactivable : COLLECTOR=false.
+Planification :
+- production : job Container Apps « mire-daily » (cron, `python -m app.jobs daily`) ;
+- local (RUN_BACKGROUND_THREADS) : DailyCollector, tous les jours à COLLECT_TIME (heure de Paris, défaut 06:30),
+  avec rattrapage au démarrage si la dernière collecte date de plus de 20 h ; il met une tâche « collect » en
+  file (tasks.py), comme le bouton « Collecter maintenant ». Désactivable : COLLECTOR=false.
 """
 
 import logging
@@ -83,8 +86,19 @@ def collect_company(db: Session, company: Company, fetch=ats.fetch_postings, det
     return stats
 
 
+def mark_interrupted(db: Session, older_than: timedelta = timedelta()) -> None:
+    """Collectes restées « en cours » (processus arrêté pendant le passage) : marquées en échec (sans commit)."""
+    limit = datetime.now(UTC) - older_than
+    for run in db.scalars(select(SearchRun).where(SearchRun.kind == "collecte", SearchRun.status == "en_cours")):
+        started = run.started_at if run.started_at is None or run.started_at.tzinfo else run.started_at.replace(tzinfo=UTC)
+        if started is None or started <= limit:
+            run.status, run.finished_at = "echec", datetime.now(UTC)
+            run.summary = (run.summary or "") + "Collecte interrompue (redémarrage de Mire)."
+
+
 def collect_all(db: Session, fetch=ats.fetch_postings, detect=ats.detect_ats) -> SearchRun:
     """Collecte pour tout le référentiel ; enregistre et retourne le passage."""
+    mark_interrupted(db, older_than=timedelta(hours=2))  # job ou worker arrêté en cours de collecte
     run = SearchRun(kind="collecte", status="en_cours", details={}, jobs_seen=0, jobs_added=0, jobs_duplicates=0,
                     jobs_closed=0, companies_checked=0, sources_added=0)
     db.add(run)
@@ -130,6 +144,15 @@ def collect_all(db: Session, fetch=ats.fetch_postings, detect=ats.detect_ats) ->
 # --- Planification -----------------------------------------------------------------------------
 
 
+def enabled() -> bool:
+    return os.environ.get("COLLECTOR", "true").lower() not in ("0", "false", "no")
+
+
+def collect_time() -> str:
+    """Heure de la collecte quotidienne (HH:MM, heure de Paris), affichée dans l'interface."""
+    return os.environ.get("COLLECT_TIME", "06:30")
+
+
 def _paris():
     try:
         from zoneinfo import ZoneInfo
@@ -151,13 +174,13 @@ def next_run_at(now: datetime, at: str) -> datetime:
 
 
 class DailyCollector:
-    def __init__(self, session_factory, on_done=None, at: str | None = None):
+    """Planificateur local (thread) : met une tâche « collect » en file chaque jour à COLLECT_TIME."""
+
+    def __init__(self, session_factory, at: str | None = None):
         self.session_factory = session_factory
-        self.on_done = on_done
-        self.at = at or os.environ.get("COLLECT_TIME", "06:30")
+        self.at = at or collect_time()
         self.event = threading.Event()
         self.stop_event = threading.Event()
-        self.running = False
         self.thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -169,19 +192,9 @@ class DailyCollector:
         self.stop_event.set()
         self.event.set()
 
-    def trigger(self) -> bool:
-        """Collecte immédiate (bouton « Collecter maintenant »). False si une collecte est déjà en cours."""
-        if self.running:
-            return False
-        self.event.set()
-        return True
-
     def _due_at_startup(self) -> bool:
         with self.session_factory() as db:
-            # Collecte interrompue (redémarrage pendant le passage) : marquée en échec
-            for run in db.scalars(select(SearchRun).where(SearchRun.kind == "collecte", SearchRun.status == "en_cours")):
-                run.status, run.finished_at = "echec", datetime.now(UTC)
-                run.summary = (run.summary or "") + "Collecte interrompue (redémarrage de Mire)."
+            mark_interrupted(db)  # redémarrage pendant le passage
             db.commit()
             last = db.scalar(select(SearchRun.started_at).where(SearchRun.kind == "collecte", SearchRun.status == "termine")
                              .order_by(SearchRun.id.desc()).limit(1))
@@ -191,17 +204,13 @@ class DailyCollector:
         return datetime.now(UTC) - last > timedelta(hours=20)
 
     def run_now(self) -> None:
-        self.running = True
+        from . import tasks
+
         try:
             with self.session_factory() as db:
-                run = collect_all(db)
-                log.info("%s", run.summary)
-            if self.on_done:
-                self.on_done()
+                tasks.enqueue(db, "collect", dedup_key="collect")
         except Exception as exc:
-            log.warning("Collecte en échec : %s", exc)
-        finally:
-            self.running = False
+            log.warning("Collecte non planifiée : %s", exc)
 
     def _loop(self) -> None:
         if self._due_at_startup():  # PC éteint à l'heure prévue : rattrapage

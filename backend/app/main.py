@@ -1,7 +1,12 @@
 """Backend Mire : connexion LinkedIn (OpenID Connect) + session par cookie + API (/api, voir api.py).
 
-nginx appelle /auth/check (auth_request) avant de servir chaque fichier du site :
-200 = connecté, 401 = nginx redirige vers /auth/login.
+En local (docker compose), nginx appelle /auth/check (auth_request) avant de servir chaque fichier du site :
+200 = connecté, 401 = nginx redirige vers la landing.
+
+Traitements de fond (évaluation Gemini, collecte, file de tâches) :
+- RUN_BACKGROUND_THREADS=true (défaut, docker compose) : threads dans ce processus, comme avant ;
+- RUN_BACKGROUND_THREADS=false (production) : aucun thread ; l'API ne fait que mettre des tâches en file
+  (tasks.py), traitées par les jobs Container Apps (`python -m app.jobs daily|worker`).
 """
 
 import logging
@@ -13,10 +18,11 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
+from sqlalchemy import text
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import assessments, collector
+from . import assessments, collector, logs, tasks
 from .agent_api import router as agent_router
 from .api import router as api_router
 from .assessments_api import router as assessments_router
@@ -30,7 +36,7 @@ from .profile_api import router as profile_router
 from .public_api import router as public_router
 from .radar_api import router as radar_router
 from .seed import seed_catalog, seed_sources
-from .users import SEED_DEMO, normalize_locale, upsert_user
+from .users import DEV_LOGIN_BYPASS, SEED_DEMO, normalize_locale, upsert_user
 
 LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -43,37 +49,57 @@ PUBLIC_URL = os.environ.get("PUBLIC_URL", "http://localhost:8080").rstrip("/")
 REDIRECT_URI = f"{PUBLIC_URL}/auth/callback"
 SESSION_SECRET = os.environ["SESSION_SECRET"]
 
-# Journal applicatif (actions exécutées par l'assistant, erreurs Gemini…) : logger "mire", niveau INFO
-_mire_log = logging.getLogger("mire")
-if not _mire_log.handlers:
-    _handler = logging.StreamHandler()
-    _handler.setFormatter(logging.Formatter("%(levelname)s [%(name)s] %(message)s"))
-    _mire_log.addHandler(_handler)
-    _mire_log.setLevel(logging.INFO)
+
+def _flag(name: str, default: str) -> bool:
+    return os.environ.get(name, default).lower() not in ("0", "false", "no", "")
+
+
+# Threads de fond dans le processus de l'API : oui en local (défaut), non en production (jobs Container Apps)
+RUN_BACKGROUND_THREADS = _flag("RUN_BACKGROUND_THREADS", "true")
+
+
+def check_production_settings(public_url: str, dev_login_bypass: bool) -> None:
+    """Refuse de démarrer si l'accès sans login (en-tête X-Dev-User) est activé sur un site public en HTTPS :
+    en production il n'y a pas de nginx pour retirer cet en-tête, n'importe qui pourrait l'envoyer."""
+    if dev_login_bypass and public_url.startswith("https://"):
+        raise RuntimeError("DEV_LOGIN_BYPASS doit valoir false quand PUBLIC_URL est en https (production)")
+
+
+check_production_settings(PUBLIC_URL, DEV_LOGIN_BYPASS)
+
+# Journaux : JSON sur la sortie standard (LOG_FORMAT=text en local), logger "mire", niveau INFO
+logs.configure()
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    # Le schéma est créé par les migrations Alembic (lancées avant uvicorn, voir docker-compose.yml)
+    # Le schéma est créé par les migrations Alembic : avant uvicorn en local (docker-compose.yml), par le job
+    # mire-migrate en production (lancé par la CI avant chaque mise à jour de l'API)
     with SessionLocal() as db:
         if SEED_DEMO:  # données de démo de la maquette (fausses offres) : désactivées par défaut
             seed_catalog(db)
         seed_sources(db)  # sources de départ (même sans données de démo : ce sont de vraies sources)
-    # Évaluation automatique des offres en tâche de fond (seulement si Gemini est configuré)
-    if get_llm() is not None and os.environ.get("ASSESSMENT_WORKER", "true").lower() not in ("0", "false", "no"):
-        assessments.assessor = assessments.Assessor(
-            SessionLocal, get_llm, interval=float(os.environ.get("ASSESSMENT_INTERVAL_S", "120")),
-        )
-        assessments.assessor.start()
-    # Collecte quotidienne des offres sur les ATS (sans LLM)
-    if os.environ.get("COLLECTOR", "true").lower() not in ("0", "false", "no"):
-        collector.collector = collector.DailyCollector(SessionLocal, on_done=assessments.wake)
-        collector.collector.start()
+    if RUN_BACKGROUND_THREADS:
+        # Évaluation automatique des offres en tâche de fond (seulement si Gemini est configuré)
+        if get_llm() is not None and _flag("ASSESSMENT_WORKER", "true"):
+            assessments.assessor = assessments.Assessor(
+                SessionLocal, get_llm, interval=float(os.environ.get("ASSESSMENT_INTERVAL_S", "120")),
+            )
+            assessments.assessor.start()
+        # Collecte quotidienne des offres sur les ATS (sans LLM) : met une tâche « collect » en file
+        if collector.enabled():
+            collector.collector = collector.DailyCollector(SessionLocal)
+            collector.collector.start()
+        # File de tâches (collecte à la demande, présélection…) traitée dans ce processus
+        tasks.local_worker = tasks.LocalWorker(SessionLocal)
+        tasks.local_worker.start()
     yield
     if assessments.assessor is not None:
         assessments.assessor.stop()
     if collector.collector is not None:
         collector.collector.stop()
+    if tasks.local_worker is not None:
+        tasks.local_worker.stop()
 
 
 app = FastAPI(title="Mire", lifespan=lifespan)
@@ -109,6 +135,24 @@ def _safe_next(value: str | None) -> str:
     if value and value.startswith("/") and not value.startswith("//") and value not in ("/", "/bienvenue"):
         return value
     return APP_HOME
+
+
+@app.get("/healthz", include_in_schema=False)
+def healthz() -> dict:
+    """Probe de liveness : le processus répond (sans session, sans accès à la base)."""
+    return {"status": "ok"}
+
+
+@app.get("/readyz", include_in_schema=False)
+def readyz() -> JSONResponse:
+    """Probe de readiness : la base répond à SELECT 1."""
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1"))
+    except Exception as exc:  # noqa: BLE001
+        logging.getLogger("mire").warning("readyz : base injoignable (%s)", type(exc).__name__)
+        return JSONResponse({"status": "unavailable"}, status_code=503)
+    return JSONResponse({"status": "ok"})
 
 
 @app.get("/auth/check")

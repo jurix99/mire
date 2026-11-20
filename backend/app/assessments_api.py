@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from . import assessments, entitlements, services
+from . import assessments, entitlements, services, tasks
 from .db import get_db
 from .llm import LLM, get_llm, require_llm
 from .models import Application, Job, JobAssessment, User
@@ -60,11 +60,15 @@ def assessment_status(db: DB, user: Me, llm: Gemini) -> AssessmentStatus:
 @router.post("/assessments/run")
 def run_assessments(db: DB, user: Me, llm: Gemini) -> RunResult:
     """Évalue tout de suite jusqu'à 10 offres en attente (sinon la tâche de fond s'en charge).
-    Free : même règle que la tâche de fond (quota hebdomadaire, offres visibles seulement)."""
+    Free : même règle que la tâche de fond (quota hebdomadaire, offres visibles seulement).
+
+    Synchrone (exception à la règle « traitement de fond = tâche en file ») : bouton « Évaluer maintenant »,
+    dont l'interface affiche le résultat ; borné à 10 offres (2 appels Gemini)."""
     llm = require_llm(llm)
     entitlements.check_quota(db, user, "assessments")
     stats = assessments.assess_within_plan(db, user, llm, 10)
-    assessments.wake()
+    if stats["remaining"]:
+        tasks.profile_changed(db, user.id)  # le reste : présélection puis évaluation en tâche de fond
     return RunResult(**stats)
 
 

@@ -13,6 +13,7 @@ et sources, et enregistre ses passages. Garde-fous (docs/processus-recherche.md)
 
 import os
 import secrets
+import time
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Annotated, Literal
@@ -22,7 +23,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
-from . import assessments, ats, services
+from . import assessments, ats, services, tasks
 from .db import get_db
 from .dedup import normalize_url
 from .llm import LLM, get_llm
@@ -131,7 +132,12 @@ def start_run(body: RunIn, db: DB) -> dict:
 
 @router.post("/runs/{run_id}/finish")
 def finish_run(run_id: int, body: RunFinishIn, db: DB, llm: Annotated[LLM | None, Depends(get_llm)]) -> dict:
-    """Clôt le passage : évalue tout de suite les offres ajoutées pour chaque utilisateur, puis résume."""
+    """Clôt le passage : évalue tout de suite les offres ajoutées pour chaque utilisateur, puis résume.
+
+    Synchrone (exception à la règle « traitement de fond = tâche en file ») : l'agent attend le résumé par
+    utilisateur. Borné à FINISH_BUDGET_S secondes (l'ingress Container Apps coupe à 240 s) ; le reste est
+    traité par la file (tâche embed_jobs -> présélection -> évaluation), mise en file dans tous les cas.
+    """
     run = _run(db, run_id)
     run.status, run.finished_at = body.status, datetime.now(UTC)
     run.jobs_seen = max(run.jobs_seen, body.jobs_seen)
@@ -140,13 +146,14 @@ def finish_run(run_id: int, body: RunFinishIn, db: DB, llm: Annotated[LLM | None
     db.commit()
 
     added = list((run.details or {}).get("jobs_added", []))
+    deadline = time.monotonic() + float(os.environ.get("FINISH_BUDGET_S", "90"))
     per_user = []
     for user in db.scalars(select(User)).all():
-        if added and llm is not None:
-            try:
-                assessments.assess_within_plan(db, user, llm, len(added) + 10)  # quota hebdomadaire des Free
-            except HTTPException:  # quota / Gemini indisponible : la tâche de fond reprendra
-                pass
+        if added and llm is not None and time.monotonic() < deadline:
+            try:  # seulement les offres de ce passage, dans le quota hebdomadaire des Free
+                assessments.assess_within_plan(db, user, llm, len(added), job_ids=added)
+            except HTTPException:  # quota / Gemini indisponible : la file reprendra
+                db.rollback()
         rows = db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id,
                                                       JobAssessment.job_id.in_(added or [-1]))
                           .options(selectinload(JobAssessment.job).selectinload(Job.company))).all()
@@ -163,6 +170,8 @@ def finish_run(run_id: int, body: RunFinishIn, db: DB, llm: Annotated[LLM | None
     run.summary = "\n".join(filter(None, lines))
     run.details = {**run.details, "per_user": per_user}
     db.commit()
+    if added:
+        tasks.jobs_changed(db)  # embeddings des nouvelles offres, puis présélection et évaluation restantes
     return {"run_id": run.id, "summary": run.summary, "par_utilisateur": per_user}
 
 
@@ -281,7 +290,9 @@ def set_company_ats(company_id: int, body: AtsIn, db: DB) -> dict:
             pass  # l'ancien identifiant ne fonctionne pas : on le remplace
     company.ats, company.ats_slug = body.ats, body.slug
     db.commit()
-    return {"ok": True, "postings": len(postings), "note": "Les offres seront collectées par Mire (collecte quotidienne)"}
+    # Collecte de cette entreprise tout de suite, en tâche de fond (sans attendre la collecte quotidienne)
+    tasks.enqueue(db, "check_company", {"company_id": company.id}, dedup_key=f"check_company:{company.id}")
+    return {"ok": True, "postings": len(postings), "note": "Les offres seront collectées par Mire (tâche de fond)"}
 
 
 @router.post("/companies/{company_id}/checked")
@@ -330,7 +341,7 @@ def add_job(body: AgentJobIn, db: DB) -> dict:
         run.jobs_added += 1
         _add_to_run(run, "jobs_added", out.id)
     db.commit()
-    assessments.wake()
+    tasks.jobs_changed(db)
     return {"id": out.id, "open_verified": body.open_verified}
 
 

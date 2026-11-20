@@ -328,12 +328,15 @@ def scope_of(db: Session, user: User) -> Scope:
 
 
 def jobs_to_assess(db: Session, user: User, profile: UserProfile, limit: int | None = None,
-                   before: datetime | None = None) -> list[Job]:
+                   before: datetime | None = None, job_ids: list[int] | None = None) -> list[Job]:
+    """Offres ouvertes à (ré)évaluer pour l'utilisateur ; job_ids : seulement parmi celles-ci (présélection)."""
     assessments = {a.job_id: a for a in db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id))}
     treated = set(db.scalars(select(Application.job_id).where(Application.user_id == user.id)))
     out = []
     # Les offres fermées ne sont plus évaluées
     query = select(Job).where(Job.closed_at.is_(None)).options(selectinload(Job.company)).order_by(Job.id.desc())
+    if job_ids is not None:
+        query = query.where(Job.id.in_(job_ids or [-1]))
     for job in db.scalars(query):
         if before is not None and entitlements.job_date(job) > before:
             continue
@@ -351,28 +354,65 @@ def profile_is_usable(data: ProfileData) -> bool:
     return bool(data.skills or data.experiences or data.positioning)
 
 
+class _Rows:
+    """Lignes job_assessments de l'utilisateur pour un lot d'offres (créées à la demande)."""
+
+    def __init__(self, db: Session, user: User, jobs: list[Job]):
+        self.db, self.user = db, user
+        self.existing = {a.job_id: a for a in db.scalars(select(JobAssessment).where(
+            JobAssessment.user_id == user.id, JobAssessment.job_id.in_([j.id for j in jobs] or [-1])))}
+
+    def __call__(self, job: Job) -> JobAssessment:
+        a = self.existing.get(job.id)
+        if a is None:
+            a = self.existing[job.id] = JobAssessment(
+                user_id=self.user.id, job_id=job.id, criteria={}, skills_have=[], skills_missing=[],
+                verdict="nouveau", profile_version=0, assessed_at=datetime.now(UTC))
+            self.db.add(a)
+        return a
+
+
+def apply_hard_exclusions(db: Session, user: User, profile: UserProfile, data: ProfileData,
+                          jobs: list[Job]) -> list[Job]:
+    """Écarte (sans LLM) les offres touchées par une exclusion dure ; retourne les autres. Valide la transaction."""
+    row = _Rows(db, user, jobs)
+    kept = []
+    for job in jobs:
+        reason = hard_exclusion(job, data)
+        if reason:
+            apply_evaluation(row(job), None, data, profile.version, "regles", exclusion=reason)
+        else:
+            kept.append(job)
+    db.commit()
+    return kept
+
+
 def assess_user(db: Session, user: User, llm, limit: int = 20, models: list[str] | None = None,
-                before: datetime | None = None) -> dict:
+                before: datetime | None = None, job_ids: list[int] | None = None,
+                similarity: dict[int, float] | None = None) -> dict:
     """Évalue jusqu'à `limit` offres en attente pour l'utilisateur. Retourne des compteurs.
 
     before : n'évaluer que les offres publiées avant cette date (plan Free, voir scope_of).
+    job_ids : seulement ces offres, dans cet ordre (présélection par similarité, voir matching.py) ;
+    similarity : similarité cosinus profil / offre, conservée sur l'évaluation (tri, débogage).
     """
     profile = get_profile(db, user)
     data = profile_data(profile)
     stats = {"evaluated": 0, "excluded": 0, "kept": 0, "remaining": 0}
     if not profile_is_usable(data) or limit <= 0:
         return stats
-    jobs = jobs_to_assess(db, user, profile, limit=limit, before=before)
-    existing = {a.job_id: a for a in db.scalars(
-        select(JobAssessment).where(JobAssessment.user_id == user.id, JobAssessment.job_id.in_([j.id for j in jobs])))}
+    if job_ids is not None:
+        order = {job_id: i for i, job_id in enumerate(job_ids)}
+        jobs = sorted(jobs_to_assess(db, user, profile, before=before, job_ids=job_ids),
+                      key=lambda j: order.get(j.id, len(order)))[:limit]
+    else:
+        jobs = jobs_to_assess(db, user, profile, limit=limit, before=before)
+    _row = _Rows(db, user, jobs)
 
     def row(job: Job) -> JobAssessment:
-        a = existing.get(job.id)
-        if a is None:
-            a = existing[job.id] = JobAssessment(user_id=user.id, job_id=job.id, criteria={}, skills_have=[],
-                                                 skills_missing=[], verdict="nouveau", profile_version=0,
-                                                 assessed_at=datetime.now(UTC))
-            db.add(a)
+        a = _row(job)
+        if similarity and job.id in similarity:
+            a.similarity = similarity[job.id]
         return a
 
     to_llm = []
@@ -401,16 +441,18 @@ def assess_user(db: Session, user: User, llm, limit: int = 20, models: list[str]
                 stats["evaluated"] += 1
                 stats["excluded" if a.verdict == "ecartee" else "kept"] += 1
             db.commit()
-    stats["remaining"] = len(jobs_to_assess(db, user, profile, before=before))
+    stats["remaining"] = len(jobs_to_assess(db, user, profile, before=before, job_ids=job_ids))
     return stats
 
 
-def assess_within_plan(db: Session, user: User, llm, limit: int, models: list[str] | None = None) -> dict:
+def assess_within_plan(db: Session, user: User, llm, limit: int, models: list[str] | None = None,
+                       job_ids: list[int] | None = None, similarity: dict[int, float] | None = None) -> dict:
     """assess_user dans les limites de l'offre de l'utilisateur (quota hebdomadaire et offres visibles en Free)."""
     scope = scope_of(db, user)
     if scope.budget is not None:
         limit = min(limit, scope.budget)
-    return assess_user(db, user, llm, limit=limit, models=models, before=scope.before)
+    return assess_user(db, user, llm, limit=limit, models=models, before=scope.before, job_ids=job_ids,
+                       similarity=similarity)
 
 
 # --- Tâche de fond -----------------------------------------------------------------------

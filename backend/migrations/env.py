@@ -6,7 +6,7 @@ from app import models  # noqa: F401  (enregistre les tables dans Base.metadata)
 from app.db import Base, engine
 
 if context.config.config_file_name is not None:
-    fileConfig(context.config.config_file_name)
+    fileConfig(context.config.config_file_name, disable_existing_loggers=False)
 
 target_metadata = Base.metadata
 

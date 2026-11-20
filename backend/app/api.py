@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, undefer
 
-from . import assessments, entitlements, logos, services
+from . import entitlements, logos, services, tasks
 from .assessments_api import invalidate_job
 from .db import get_db
 from .entitlements import RequireAdmin
@@ -213,7 +213,7 @@ def get_job(job_id: int, db: DB, user: Me) -> JobDetailOut:
 @router.post("/jobs", status_code=201, dependencies=[RequireAdmin])
 def create_job(body: JobIn, db: DB) -> JobOut:
     out = services.create_job(db, body)
-    assessments.wake()  # évaluer la nouvelle offre pour chaque utilisateur
+    tasks.jobs_changed(db)  # embeddings, présélection et évaluation de la nouvelle offre pour chaque utilisateur
     return out
 
 
@@ -234,7 +234,7 @@ def update_job(job_id: int, body: JobPatch, db: DB, user: Me) -> JobOut:
         setattr(job, field, value)
     invalidate_job(db, job.id)  # contenu modifié : réévaluer chez ceux qui ne l'ont pas traitée
     db.commit()
-    assessments.wake()
+    tasks.jobs_changed(db)
     return services.get_job(db, user, job.id)
 
 

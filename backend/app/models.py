@@ -15,6 +15,7 @@ search_runs                    historique des passages de recherche (agent plani
 
 users ──< subscriptions        offre Pro achetée via Stripe (abonnement mensuel ou Pass 3 mois), voir entitlements.py
 stripe_events                  événements du webhook Stripe déjà traités (idempotence)
+tasks                          file de tâches de fond (collecte, embeddings, présélection, évaluation), voir tasks.py
 
 Règle d'or : l'automatisation (évaluation) n'écrit jamais dans applications (statuts posés par
 l'utilisateur) ni dans job_assessments.manual_score (note corrigée par l'utilisateur).
@@ -41,7 +42,9 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Index,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship, validates
@@ -477,3 +480,34 @@ class SearchRun(Base):
     sources_added: Mapped[int] = mapped_column(Integer, default=0)
     summary: Mapped[str | None] = mapped_column(Text)
     details: Mapped[dict] = mapped_column(JSONType, default=dict)  # ex. ids des offres ajoutées, erreurs
+
+
+class Task(Base):
+    """Tâche de fond en file (voir tasks.py) : prise par un worker avec SELECT … FOR UPDATE SKIP LOCKED.
+
+    status : queued -> running -> done | failed (après MAX_ATTEMPTS échecs ; sinon remise en file avec délai).
+    dedup_key : au plus une tâche EN ATTENTE par clé (ex. « match_user:12 ») ; index unique partiel.
+    """
+
+    __tablename__ = "tasks"
+    __table_args__ = (
+        # Index partiel : seules les tâches en attente sont cherchées (par le worker et par la règle KEDA)
+        Index("ix_tasks_queued_run_after", "run_after", postgresql_where=text("status = 'queued'"),
+              sqlite_where=text("status = 'queued'")),
+        Index("uq_tasks_queued_dedup_key", "dedup_key", unique=True,
+              postgresql_where=text("status = 'queued'"), sqlite_where=text("status = 'queued'")),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[str] = mapped_column(String(40))  # collect | embed_jobs | match_user | assess_user | check_company | daily
+    payload: Mapped[dict] = mapped_column(JSONType, default=dict)
+    status: Mapped[str] = mapped_column(String(20), default="queued")  # queued | running | done | failed
+    attempts: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    run_after: Mapped[datetime] = mapped_column(DateTime(timezone=True))  # pas avant (délai de nouvel essai)
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))  # prise par un worker
+    error: Mapped[str | None] = mapped_column(Text)
+    dedup_key: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

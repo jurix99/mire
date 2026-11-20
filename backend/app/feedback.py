@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from . import assessments, entitlements, rules_synthesis, services
+from . import entitlements, rules_synthesis, services, tasks
 from .db import get_db
 from .entitlements import RequirePro
 from .llm import LLM, get_llm, require_llm
@@ -165,7 +165,7 @@ def give_feedback(job_id: int, body: FeedbackIn, db: DB, user: Me) -> FeedbackRe
                         {"reference_jobs"})
     db.commit()
     db.refresh(fb)
-    assessments.wake()
+    tasks.profile_changed(db, user.id)
     new = new_feedback_count(db, user)
     return FeedbackResult(feedback=feedback_out(fb), job=services.get_job(db, user, job.id), new_feedback=new,
                           suggest_synthesis=new >= SYNTHESIS_THRESHOLD, proposal=proposal)

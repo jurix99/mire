@@ -15,7 +15,7 @@ from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
-from . import assessments, entitlements, linkedin_export, pdf_import
+from . import entitlements, linkedin_export, pdf_import, tasks
 from .analysis import analysis_input, analysis_proposals, compute_years, missing_topics
 from .db import get_db
 from .entitlements import RequirePro
@@ -60,7 +60,7 @@ def update_profile(body: ProfilePatch, db: DB, user: Me) -> ProfileOut:
     data = profile_data(profile).model_copy(update={f: getattr(body, f) for f in fields})
     if save_fields(profile, data, fields):
         db.commit()
-        assessments.wake()  # profil modifié : réévaluer les offres non traitées
+        tasks.profile_changed(db, user.id)  # profil modifié : nouvelle présélection et réévaluation
     return profile_out(profile)
 
 
@@ -195,7 +195,7 @@ def apply_proposal(proposal_id: str, db: DB, user: Me, body: ProposalApply | Non
         add_import_trace(profile, imp.source, imp.filename)
     imp.applied_at = datetime.now(UTC)
     db.commit()
-    assessments.wake()
+    tasks.profile_changed(db, user.id)
     return profile_out(profile)
 
 
