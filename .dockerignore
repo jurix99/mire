@@ -1,0 +1,11 @@
+# Contexte de build du Dockerfile (racine) : liste blanche, rien d'autre n'entre dans les images
+# (pas de .env, pas de .git, pas d'infra/, pas d'agent/).
+*
+!backend/pyproject.toml
+!backend/uv.lock
+!backend/alembic.ini
+!backend/app/
+!backend/migrations/
+!frontend/
+**/__pycache__
+**/*.pyc
