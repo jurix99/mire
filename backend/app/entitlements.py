@@ -66,8 +66,8 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "chat_per_month": 300,  # garde-fou contre les abus
         "digest_email": True,
         # Prix affichés (TTC). Les montants facturés sont ceux des prix Stripe (STRIPE_PRICE_MONTHLY / _PASS_3M).
-        "price_monthly_label": "15 € TTC / mois",
-        "price_pass_3m_label": "39 € TTC pour 3 mois",
+        "price_monthly_label": "10 € TTC / mois",
+        "price_pass_3m_label": "25 € TTC pour 3 mois",
         "pass_days": 90,  # durée d'un Pass (prolongée si un Pass est racheté avant la fin)
     },
 }
