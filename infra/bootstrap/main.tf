@@ -127,9 +127,9 @@ resource "azurerm_user_assigned_identity" "github" {
 
 locals {
   github_subjects = {
-    main         = "repo:${var.github_repository}:ref:refs/heads/main"
-    prod         = "repo:${var.github_repository}:environment:prod" # deploy.yml (environnement GitHub prod)
-    pull-request = "repo:${var.github_repository}:pull_request"     # ci.yml : terraform plan des PR
+    main         = "repo:${var.github_oidc_repository}:ref:refs/heads/main"
+    prod         = "repo:${var.github_oidc_repository}:environment:prod" # deploy.yml (environnement GitHub prod)
+    pull-request = "repo:${var.github_oidc_repository}:pull_request"     # ci.yml : terraform plan des PR
   }
 }
 
