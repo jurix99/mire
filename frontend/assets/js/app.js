@@ -616,7 +616,7 @@ function assessmentSection(a) {
 // --- Barre latérale ---------------------------------------------------------
 
 const NAV = [
-  ["/", "Tableau de bord", null],
+  ["/tableau-de-bord", "Tableau de bord", null],
   ["/entreprises", "Entreprises", "companies"],
   ["/postes", "Postes", "jobs"],
   ["/sources", "Sources", null, true], // réservée aux admins (gestion du radar partagé)
@@ -682,7 +682,7 @@ export async function renderShell() {
   } else {
     aside.dataset.ready = "1";
     aside.innerHTML = html`
-    <a class="brand" href="/" aria-label="Mire, tableau de bord">${raw(LOGO_SVG)}<span>Mire</span></a>
+    <a class="brand" href="/tableau-de-bord" aria-label="Mire, tableau de bord">${raw(LOGO_SVG)}<span>Mire</span></a>
     <nav class="nav" aria-label="Navigation principale">
       ${NAV.map(([href, label, count, adminOnly]) => html`
         <a href="${href}" ${raw(path === href ? 'aria-current="page"' : "")} ${raw(adminOnly ? "data-admin" : "")}>

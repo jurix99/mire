@@ -100,11 +100,14 @@ def _save_user(info: dict) -> int:
         return upsert_user(db, info).id
 
 
+APP_HOME = "/tableau-de-bord"  # « / » est la landing publique
+
+
 def _safe_next(value: str | None) -> str:
-    """N'accepte que des chemins internes (évite les redirections ouvertes)."""
-    if value and value.startswith("/") and not value.startswith("//"):
+    """N'accepte que des chemins internes (évite les redirections ouvertes) ; la landing renvoie à l'app."""
+    if value and value.startswith("/") and not value.startswith("//") and value not in ("/", "/bienvenue"):
         return value
-    return "/"
+    return APP_HOME
 
 
 @app.get("/auth/check")
@@ -183,7 +186,7 @@ async def callback(
     # Crée / met à jour la ligne de la table users (sync : exécuté hors de la boucle d'événements)
     user_id = await run_in_threadpool(_save_user, request.session["user"])
     request.session["user_id"] = user_id
-    return RedirectResponse(request.session.pop("next", "/"), status_code=303)
+    return RedirectResponse(request.session.pop("next", APP_HOME), status_code=303)
 
 
 @app.get("/auth/me")
@@ -197,7 +200,7 @@ def me(request: Request) -> JSONResponse:
 @app.get("/auth/logout")
 def logout(request: Request) -> RedirectResponse:
     request.session.clear()
-    return RedirectResponse("/auth/logged-out", status_code=303)
+    return RedirectResponse("/", status_code=303)  # retour sur la landing
 
 
 @app.get("/auth/logged-out")

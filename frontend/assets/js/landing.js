@@ -14,7 +14,10 @@ const inView = (el) => { const r = el.getBoundingClientRect(); return r.top < in
 // --- Connexion : retour vers la page demandée (?next=/postes), chemins internes seulement ---------------
 
 const next = new URLSearchParams(location.search).get("next");
-const safeNext = next && next.startsWith("/") && !next.startsWith("//") && next !== "/bienvenue" ? next : "/";
+// Par défaut (ou si la page demandée est la landing elle-même) : le tableau de bord
+const APP_HOME = "/tableau-de-bord";
+const safeNext = next && next.startsWith("/") && !next.startsWith("//") && !["/", "/bienvenue"].includes(next)
+  ? next : APP_HOME;
 for (const a of $$("[data-login]")) a.href = `/auth/login?next=${encodeURIComponent(safeNext)}`;
 
 // Déjà connecté : « Ouvrir Mire » à la place des boutons de connexion ; « Passer Pro » ouvre directement l'offre
@@ -22,7 +25,7 @@ fetch("/auth/me", { headers: { Accept: "application/json" } }).then((res) => {
   if (!res.ok) return;
   $$("[data-guest]").forEach((el) => (el.hidden = true));
   $$("[data-member]").forEach((el) => (el.hidden = false));
-  $$("[data-login-pro]").forEach((el) => (el.href = "/?pro=1"));
+  $$("[data-login-pro]").forEach((el) => (el.href = `${APP_HOME}?pro=1`));
 }).catch(() => {});
 
 // --- En-tête : bordure au défilement, menu mobile --------------------------------------------------------

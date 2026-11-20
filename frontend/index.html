@@ -3,54 +3,277 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Tableau de bord · Mire</title>
+  <title>Mire · Rejoignez l'avenir</title>
+  <meta name="description" content="Mire repère les startups françaises qui viennent de lever des fonds, lit leurs offres chaque matin et les note selon votre profil.">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/favicon.png" sizes="32x32">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
-  <link rel="stylesheet" href="/assets/app.css">
-  <script type="module" src="/assets/js/dashboard.js"></script>
+  <link rel="stylesheet" href="/assets/landing.css">
+  <script type="module" src="/assets/js/landing.js"></script>
 </head>
-<body>
-  <div class="layout">
-    <aside id="sidebar" class="sidebar"></aside>
-    <main class="main">
-      <header class="page-head">
-        <div class="intro">
-          <p class="label" id="today"></p>
-          <h1 id="hello">Bonjour</h1>
-          <p class="muted">Les bonnes opportunités, au bon endroit. À vous de jouer.</p>
-        </div>
-        <a class="btn" href="/postes">Lancer une recherche</a>
-      </header>
-
-      <section class="grid-4" id="stats" aria-label="Chiffres clés"></section>
-
-      <section class="section grid-2">
-        <div class="card pad-lg">
-          <div class="section-head">
-            <div class="intro"><p class="label">// Votre prochaine étape</p><h2>À traiter en priorité</h2></div>
-            <span class="score" id="todo-count" hidden></span>
-          </div>
-          <div class="rows" id="priority"></div>
-          <div class="card-foot"><a class="link-more" href="/postes?statut=nouveau">Voir tous les postes</a></div>
-        </div>
-        <div class="card pad-lg">
-          <div class="section-head">
-            <div class="intro"><p class="label">// Garder le rythme</p><h2>Mes process</h2></div>
-          </div>
-          <div class="rows" id="processes"></div>
-          <div class="card-foot"><a class="link-more" href="/mes-process">Tous mes process</a></div>
-        </div>
-      </section>
-
-      <section class="section">
-        <div class="section-head">
-          <h2>Levées récentes à explorer</h2>
-          <a class="link-more" href="/entreprises">Toutes les entreprises</a>
-        </div>
-        <div class="grid-3" id="fundings"></div>
-      </section>
-    </main>
+<body class="landing">
+  <div class="announce">
+    <span class="mono">Paris</span>
+    <span>Les offres des startups financées, lues chaque matin</span>
+    <a href="#processus">Voir comment →</a>
   </div>
+
+  <header class="site-head" id="top">
+    <div class="wrap head-row">
+      <a class="brand" href="#top" aria-label="Mire, haut de page">
+        <svg class="brand-logo" viewBox="0 0 1024 1024" aria-hidden="true"><defs><mask id="mire-gap-l"><rect width="1024" height="1024" fill="#fff"/><circle cx="734" cy="290" r="108" fill="#000"/></mask></defs><circle cx="512" cy="512" r="314" fill="none" stroke="currentColor" stroke-width="92" mask="url(#mire-gap-l)"/><circle cx="512" cy="512" r="84" fill="currentColor"/><circle cx="734" cy="290" r="75" fill="currentColor"/></svg>
+        <span>Mire</span>
+      </a>
+      <nav class="head-nav" id="head-nav" aria-label="Sections">
+        <a href="#processus">Processus</a>
+        <a href="#fonctionnalites">Fonctionnalités</a>
+        <a href="#entreprises">Entreprises</a>
+        <a href="#tarifs">Tarifs</a>
+        <a href="#faq">FAQ</a>
+      </nav>
+      <div class="head-cta">
+        <a class="link" href="/auth/login" data-login data-guest>Se connecter</a>
+        <a class="pill dark" href="/auth/login" data-login data-guest>Commencer</a>
+        <a class="pill dark" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+        <button type="button" class="menu-btn" aria-controls="head-nav" aria-expanded="false" aria-label="Menu">
+          <span></span><span></span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- Hero -->
+    <section class="hero">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="wrap hero-grid">
+        <div class="hero-copy reveal">
+          <p class="mono label">// Radar des startups qui recrutent</p>
+          <h1>Rejoignez l'avenir.<br><span class="soft">Avant tout le monde.</span></h1>
+          <p class="lead">Mire repère les startups françaises qui viennent de lever des fonds, lit leurs offres chaque
+            matin et les note selon votre profil. Vous ne regardez plus que celles qui valent le coup.</p>
+          <div class="cta-row">
+            <a class="pill dark lg" href="/auth/login" data-login data-guest>
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13ZM7.12 20.45H3.56V9h3.56v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0Z"/></svg>
+              Se connecter avec LinkedIn
+            </a>
+            <a class="pill dark lg" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+            <a class="pill ghost lg" href="#tarifs">Voir les tarifs</a>
+          </div>
+          <p class="mono note">Gratuit pour commencer · sans carte bancaire</p>
+        </div>
+
+        <!-- Aperçu de l'app (illustration) -->
+        <div class="mock reveal" aria-hidden="true">
+          <div class="mock-bar"><span></span><span></span><span></span><em class="mono">mire · postes</em></div>
+          <div class="mock-body">
+            <div class="mock-side">
+              <b>Mire</b>
+              <i class="on">Tableau de bord</i><i>Entreprises</i><i>Postes</i><i>Mes process</i><i>Mon profil</i>
+            </div>
+            <div class="mock-main">
+              <p class="mono tiny">// À traiter en priorité</p>
+              <div class="mock-row"><span class="lg-ico" style="--h:210">NO</span><div><b>Founding Backend Engineer</b><small>Nova Orbital · Paris · Série A</small></div><span class="score">9.1</span><span class="st st-a">À regarder</span></div>
+              <div class="mock-row"><span class="lg-ico" style="--h:150">HL</span><div><b>Platform Engineer</b><small>Halo Labs · Hybride · Seed</small></div><span class="score">8.6</span><span class="st st-n">Nouveau</span></div>
+              <div class="mock-row"><span class="lg-ico" style="--h:30">VR</span><div><b>MLOps Engineer</b><small>Vertex Rail · Remote · Série B</small></div><span class="score">8.2</span><span class="st st-p">Postulé</span></div>
+              <div class="mock-row dim"><span class="lg-ico" style="--h:300">QT</span><div><b>Senior Frontend Engineer</b><small>Quanta · Paris</small></div><span class="score low">5.4</span><span class="st st-x">Écartée (auto)</span></div>
+              <div class="mock-why"><span class="mono tiny">Pourquoi</span> Premier ingénieur backend, Python et Kubernetes, 70-85 k€, peu de déplacements.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Logos -->
+    <section class="logos" id="entreprises">
+      <div class="wrap">
+        <p class="mono label center">// Elles recrutent dans le radar</p>
+        <div class="marquee" id="logo-strip" hidden><div class="track" id="logo-track"></div></div>
+        <div class="stats" id="stats">
+          <div><strong data-stat="companies">—</strong><span>startups financées suivies</span></div>
+          <div><strong data-stat="jobs_open">—</strong><span>offres ouvertes</span></div>
+          <div><strong data-stat="jobs_week">—</strong><span>nouvelles offres cette semaine</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Processus -->
+    <section class="section" id="processus">
+      <div class="wrap">
+        <div class="section-intro reveal">
+          <p class="mono label">// Processus</p>
+          <h2>Quatre étapes, toutes automatiques.<br><span class="soft">Vous gardez la dernière décision.</span></h2>
+        </div>
+        <ol class="steps">
+          <li class="step reveal">
+            <span class="mono num">01</span>
+            <div><h3>Découverte</h3>
+              <p>Chaque lundi, un agent repère les startups françaises qui viennent de lever des fonds, de l'amorçage
+                à la Série C, et retrouve leur page carrières.</p></div>
+            <div class="step-art"><span class="chip">Seed · 4 M€</span><span class="chip">Série A · 12 M€</span><span class="chip">Série B · 30 M€</span></div>
+          </li>
+          <li class="step reveal">
+            <span class="mono num">02</span>
+            <div><h3>Collecte</h3>
+              <p>Chaque matin, Mire lit les offres directement dans leurs outils de recrutement, description comprise,
+                et ferme celles qui ont disparu.</p></div>
+            <div class="step-art"><span class="chip">Ashby</span><span class="chip">Lever</span><span class="chip">Greenhouse</span><span class="chip">Recruitee</span><span class="chip">Teamtailor</span></div>
+          </li>
+          <li class="step reveal">
+            <span class="mono num">03</span>
+            <div><h3>Pertinence</h3>
+              <p>Un premier tri écarte les stages, les métiers hors cible et les lieux à l'étranger. L'IA note ensuite
+                chaque offre sur 10, avec votre barème et vos règles.</p></div>
+            <div class="step-art bars">
+              <span><i style="width:90%"></i>Compétences</span><span><i style="width:75%"></i>Stade</span><span><i style="width:60%"></i>Ownership</span>
+            </div>
+          </li>
+          <li class="step reveal">
+            <span class="mono num">04</span>
+            <div><h3>Suivi</h3>
+              <p>Vous postulez, relancez, passez les entretiens. Chaque process garde son historique et sa prochaine
+                étape, jusqu'à l'offre.</p></div>
+            <div class="step-art"><span class="st st-p">Postulé</span><span class="st st-r">Relance</span><span class="st st-e">Entretien</span><span class="st st-o">Offre</span></div>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <!-- Fonctionnalités -->
+    <section class="section" id="fonctionnalites">
+      <div class="wrap">
+        <div class="section-intro reveal">
+          <p class="mono label">// Fonctionnalités</p>
+          <h2>Un radar qui apprend<br><span class="soft">ce que vous cherchez vraiment.</span></h2>
+        </div>
+        <div class="bento">
+          <article class="tile wide reveal">
+            <p class="mono tiny">Notation</p>
+            <h3>Une note sur 10, avec votre barème</h3>
+            <p>Compétences, stade de l'entreprise, ownership, IA concrète, expérience demandée : vous choisissez le poids
+              de chaque critère et le seuil en dessous duquel une offre est écartée.</p>
+            <div class="crit"><span>Compétences</span><i style="--w:88%"></i><b>2,6 / 3</b></div>
+            <div class="crit"><span>Stade</span><i style="--w:70%"></i><b>1,4 / 2</b></div>
+            <div class="crit"><span>Ownership</span><i style="--w:95%"></i><b>1,9 / 2</b></div>
+          </article>
+          <article class="tile reveal">
+            <p class="mono tiny">Profil</p>
+            <h3>Importé depuis LinkedIn</h3>
+            <p>Export de données LinkedIn, PDF ou texte collé. Chaque élément vous est proposé, vous cochez ce que vous
+              gardez.</p>
+          </article>
+          <article class="tile reveal">
+            <p class="mono tiny">Retours</p>
+            <h3>Des règles qui s'affinent</h3>
+            <p>« J'aime », « Pas intéressé » : après quelques retours, Mire propose de nouvelles règles, que vous validez
+              une par une.</p>
+            <div class="fb"><span>♥ J'aime</span><span>Pas intéressé</span></div>
+          </article>
+          <article class="tile reveal">
+            <p class="mono tiny">Assistant</p>
+            <h3>Posez vos questions</h3>
+            <div class="bubble me">Quels postes regarder en priorité ?</div>
+            <div class="bubble">Trois offres dépassent 8,5. La première est un poste de premier ingénieur backend…</div>
+          </article>
+          <article class="tile reveal">
+            <p class="mono tiny">Levées de fonds</p>
+            <h3>Le contexte de chaque startup</h3>
+            <p>Tour, montant, investisseurs, effectif et outil de recrutement, mis à jour par l'agent.</p>
+          </article>
+          <article class="tile dark reveal">
+            <p class="mono tiny">Fiabilité</p>
+            <h3>Des offres vérifiées ouvertes</h3>
+            <p>Une offre retirée de la page carrières est marquée fermée. Vous ne postulez plus dans le vide.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- Tarifs -->
+    <section class="section" id="tarifs">
+      <div class="wrap">
+        <div class="section-intro center reveal">
+          <p class="mono label">// Tarifs</p>
+          <h2>Commencez gratuitement.<br><span class="soft">Passez Pro quand le radar compte.</span></h2>
+        </div>
+        <div class="plans">
+          <article class="plan reveal">
+            <p class="mono tiny">Free</p>
+            <p class="price">0 €</p>
+            <p class="muted">Pour découvrir le radar, avec un temps de retard.</p>
+            <ul id="free-features"></ul>
+            <a class="pill ghost block" href="/auth/login" data-login data-guest>Commencer gratuitement</a>
+            <a class="pill ghost block" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+          </article>
+          <article class="plan pro reveal">
+            <p class="mono tiny">Pro <span class="tag">Radar complet</span></p>
+            <p class="price" data-price="monthly">—</p>
+            <p class="muted">Sans engagement. Ou <strong data-price="pass_3m">—</strong>, sans renouvellement.</p>
+            <ul id="pro-features"></ul>
+            <a class="pill light block" href="/auth/login?next=%2Ftableau-de-bord%3Fpro%3D1" data-login-pro>Passer Pro</a>
+          </article>
+        </div>
+        <p class="mono note center">Prix TTC, TVA française incluse · Paiement sécurisé par Stripe · Résiliable en ligne</p>
+      </div>
+    </section>
+
+    <!-- FAQ -->
+    <section class="section" id="faq">
+      <div class="wrap faq-grid">
+        <div class="section-intro reveal">
+          <p class="mono label">// FAQ</p>
+          <h2>Questions<br><span class="soft">fréquentes.</span></h2>
+        </div>
+        <div class="faq">
+          <details class="reveal"><summary><span class="mono">01</span>Qu'est-ce que Mire ?</summary>
+            <p>Un radar d'offres d'emploi dans les startups qui viennent de lever des fonds, centré sur Paris. Il trouve
+              les entreprises, lit leurs offres et les trie selon votre profil, puis vous aide à suivre vos candidatures.</p></details>
+          <details class="reveal"><summary><span class="mono">02</span>D'où viennent les offres ?</summary>
+            <p>Directement des pages carrières des startups (Ashby, Lever, Greenhouse, Recruitee, Teamtailor…), lues
+              chaque matin. Une offre qui disparaît est marquée fermée.</p></details>
+          <details class="reveal"><summary><span class="mono">03</span>Comment les offres sont-elles notées ?</summary>
+            <p>Un premier tri sans IA écarte ce qui ne vous correspond clairement pas. Gemini note ensuite le reste
+              critère par critère ; la note finale est calculée avec votre barème. Vous pouvez toujours la corriger.</p></details>
+          <details class="reveal"><summary><span class="mono">04</span>Que lit Mire de mon compte LinkedIn ?</summary>
+            <p>La connexion LinkedIn ne donne que votre nom, votre e-mail, votre photo et votre langue. Votre parcours
+              n'est importé que si vous déposez vous-même un export, un PDF ou un texte.</p></details>
+          <details class="reveal"><summary><span class="mono">05</span>Quelle différence entre Free et Pro ?</summary>
+            <p>En Free, les offres récentes, les levées de fonds et la plupart des notes de l'IA sont floutées. Le Pro
+              donne le radar complet et à jour, et lève les limites de l'assistant, des process et des imports.</p></details>
+          <details class="reveal"><summary><span class="mono">06</span>Comment résilier ?</summary>
+            <p>Depuis « Mon profil », en un clic : l'abonnement reste actif jusqu'à la fin de la période payée. Le Pass
+              3 mois ne se renouvelle jamais tout seul.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <!-- Appel final -->
+    <section class="final">
+      <div class="glow" aria-hidden="true"></div>
+      <div class="wrap reveal">
+        <p class="mono label center">// Prêt ?</p>
+        <h2 class="center">Rejoignez l'avenir.</h2>
+        <div class="cta-row center">
+          <a class="pill dark lg" href="/auth/login" data-login data-guest>Se connecter avec LinkedIn</a>
+          <a class="pill dark lg" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <div class="wrap foot-grid">
+      <div>
+        <p class="muted">Le radar des startups financées qui recrutent, à Paris.</p>
+        <p class="mono tiny" id="clock">Paris</p>
+      </div>
+      <nav aria-label="Produit"><p class="mono tiny">Produit</p>
+        <a href="#processus">Processus</a><a href="#fonctionnalites">Fonctionnalités</a><a href="#tarifs">Tarifs</a></nav>
+      <nav aria-label="Compte"><p class="mono tiny">Compte</p>
+        <a href="/auth/login" data-login>Se connecter</a><a href="/tableau-de-bord">Tableau de bord</a><a href="#faq">FAQ</a></nav>
+    </div>
+    <div class="wrap wordmark" aria-hidden="true">Mire</div>
+    <div class="wrap foot-legal"><span>© <span id="year"></span> Mire</span><span class="mono tiny">Rejoignez l'avenir</span></div>
+  </footer>
 </body>
 </html>

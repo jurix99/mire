@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Tableau de bord · Mire</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon.png" sizes="32x32">
+  <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+  <link rel="stylesheet" href="/assets/app.css">
+  <script type="module" src="/assets/js/dashboard.js"></script>
+</head>
+<body>
+  <div class="layout">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main class="main">
+      <header class="page-head">
+        <div class="intro">
+          <p class="label" id="today"></p>
+          <h1 id="hello">Bonjour</h1>
+          <p class="muted">Les bonnes opportunités, au bon endroit. À vous de jouer.</p>
+        </div>
+        <a class="btn" href="/postes">Lancer une recherche</a>
+      </header>
+
+      <section class="grid-4" id="stats" aria-label="Chiffres clés"></section>
+
+      <section class="section grid-2">
+        <div class="card pad-lg">
+          <div class="section-head">
+            <div class="intro"><p class="label">// Votre prochaine étape</p><h2>À traiter en priorité</h2></div>
+            <span class="score" id="todo-count" hidden></span>
+          </div>
+          <div class="rows" id="priority"></div>
+          <div class="card-foot"><a class="link-more" href="/postes?statut=nouveau">Voir tous les postes</a></div>
+        </div>
+        <div class="card pad-lg">
+          <div class="section-head">
+            <div class="intro"><p class="label">// Garder le rythme</p><h2>Mes process</h2></div>
+          </div>
+          <div class="rows" id="processes"></div>
+          <div class="card-foot"><a class="link-more" href="/mes-process">Tous mes process</a></div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <h2>Levées récentes à explorer</h2>
+          <a class="link-more" href="/entreprises">Toutes les entreprises</a>
+        </div>
+        <div class="grid-3" id="fundings"></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

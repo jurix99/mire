@@ -8,8 +8,10 @@ Architecture
               - assets/js/app.js    code partagé : appels API, barre latérale, pastilles, logos, formulaires,
                                     chat flottant de l'assistant
               - assets/js/<page>.js une page = un script
-              - bienvenue.html      landing publique (assets/landing.css, assets/js/landing.js) : un visiteur non
-                                    connecté y est redirigé (nginx), le bouton LinkedIn ramène à la page demandée
+              - index.html          landing publique à la racine « / », connecté ou non (assets/landing.css,
+                                    assets/js/landing.js) ; l'app commence à /tableau-de-bord (tableau-de-bord.html).
+                                    Un visiteur non connecté sur une page de l'app est renvoyé vers « / » (nginx) ;
+                                    le bouton LinkedIn ramène à la page demandée. La déconnexion revient sur « / ».
   backend/    FastAPI (projet uv) : connexion LinkedIn OpenID Connect, session, API JSON /api/...
               - app/models.py       tables (SQLAlchemy)
               - app/services.py     fonctions métier partagées par l'API et les outils du chat
@@ -90,7 +92,7 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
 
 Lancer (dans WSL, depuis ce dossier) :
   docker compose up -d
-  -> http://localhost:8080        site avec connexion LinkedIn (non connecté : landing /bienvenue)
+  -> http://localhost:8080        site avec connexion LinkedIn (landing sur « / », tableau de bord sur /tableau-de-bord)
   -> http://localhost:8081        site sans connexion, avec un utilisateur "dev" (dev local uniquement)
   -> localhost:5432               PostgreSQL (base/utilisateur jobradar, mot de passe POSTGRES_PASSWORD, "jobradar" par défaut)
 

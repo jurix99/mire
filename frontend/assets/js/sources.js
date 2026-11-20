@@ -145,6 +145,6 @@ $("#groups").addEventListener("change", async (e) => {
 // Page réservée aux admins (l'API refuse aussi : 403) : retour au tableau de bord
 boot(async () => {
   const me = await loadMe();
-  if (me.user.is_admin === false) return location.replace("/");
+  if (me.user.is_admin === false) return location.replace("/tableau-de-bord");
   await reload();
 });
