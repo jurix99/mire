@@ -30,7 +30,7 @@ from .profile_api import router as profile_router
 from .public_api import router as public_router
 from .radar_api import router as radar_router
 from .seed import seed_catalog, seed_sources
-from .users import normalize_locale, upsert_user
+from .users import SEED_DEMO, normalize_locale, upsert_user
 
 LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -56,7 +56,8 @@ if not _mire_log.handlers:
 async def lifespan(_: FastAPI):
     # Le schéma est créé par les migrations Alembic (lancées avant uvicorn, voir docker-compose.yml)
     with SessionLocal() as db:
-        seed_catalog(db)
+        if SEED_DEMO:  # données de démo de la maquette (fausses offres) : désactivées par défaut
+            seed_catalog(db)
         seed_sources(db)  # sources de départ (même sans données de démo : ce sont de vraies sources)
     # Évaluation automatique des offres en tâche de fond (seulement si Gemini est configuré)
     if get_llm() is not None and os.environ.get("ASSESSMENT_WORKER", "true").lower() not in ("0", "false", "no"):

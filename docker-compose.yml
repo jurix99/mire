@@ -24,7 +24,7 @@ services:
     environment:
       PUBLIC_URL: http://localhost:8080
       DATABASE_URL: postgresql+psycopg://jobradar:${POSTGRES_PASSWORD:-jobradar}@db:5432/jobradar
-      SEED_DEMO: "true"               # entreprises/postes de démo si la base est vide + process de démo par nouvel utilisateur
+      SEED_DEMO: "false"              # "true" : entreprises/postes de démo si la base est vide + process de démo par nouvel utilisateur
       DEV_LOGIN_BYPASS: "true"        # l'accès sans login du port 8081 utilise un utilisateur "dev"
       UV_PROJECT_ENVIRONMENT: /venv   # venv dans un volume Docker, pas dans le dossier Windows
       UV_NATIVE_TLS: "1"              # uv utilise les certificats système (proxy HTTPS de l'entreprise)

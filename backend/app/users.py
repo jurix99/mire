@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from .db import get_db
 from .models import User
 
-SEED_DEMO = os.environ.get("SEED_DEMO", "true").lower() in ("1", "true", "yes")
+# Données de démo (fausses offres de la maquette, process de démo) : désactivées par défaut
+SEED_DEMO = os.environ.get("SEED_DEMO", "false").lower() in ("1", "true", "yes")
 
 # Accès sans login (port 8081, local uniquement) : nginx ajoute l'en-tête X-Dev-User sur ce port
 # et le supprime sur le port public. Le backend n'en tient compte que si cette variable est activée.

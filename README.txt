@@ -96,8 +96,8 @@ Lancer (dans WSL, depuis ce dossier) :
   -> http://localhost:8081        site sans connexion, avec un utilisateur "dev" (dev local uniquement)
   -> localhost:5432               PostgreSQL (base/utilisateur jobradar, mot de passe POSTGRES_PASSWORD, "jobradar" par défaut)
 
-Au premier démarrage, la base est remplie avec les données de démo de la maquette (6 entreprises, 8 postes),
-et chaque nouvel utilisateur reçoit 3 process de démo. Désactiver : SEED_DEMO: "false" dans docker-compose.yml.
+Données de démo de la maquette (6 entreprises, 8 FAUX postes si la base est vide, 3 process de démo par nouvel
+utilisateur) : désactivées par défaut. Activer pour une démo : SEED_DEMO: "true" dans docker-compose.yml.
 
 Commandes utiles :
   docker compose logs -f backend                         logs de l'API
