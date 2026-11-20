@@ -733,6 +733,13 @@ export async function boot(render) {
   // La page apparaît (fondu léger) une fois ses données affichées, ou au plus tard après 400 ms
   await Promise.race([done, new Promise((r) => setTimeout(r, 400))]);
   main.classList.add("ready");
+  // Arrivée depuis « Passer Pro » de la landing (/?pro=1) : fenêtre Pro, puis on nettoie l'URL
+  const url = new URL(location.href);
+  if (url.searchParams.get("pro") === "1") {
+    url.searchParams.delete("pro");
+    history.replaceState(null, "", url);
+    openProModal();
+  }
   await done;
 }
 

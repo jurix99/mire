@@ -8,6 +8,8 @@ Architecture
               - assets/js/app.js    code partagé : appels API, barre latérale, pastilles, logos, formulaires,
                                     chat flottant de l'assistant
               - assets/js/<page>.js une page = un script
+              - bienvenue.html      landing publique (assets/landing.css, assets/js/landing.js) : un visiteur non
+                                    connecté y est redirigé (nginx), le bouton LinkedIn ramène à la page demandée
   backend/    FastAPI (projet uv) : connexion LinkedIn OpenID Connect, session, API JSON /api/...
               - app/models.py       tables (SQLAlchemy)
               - app/services.py     fonctions métier partagées par l'API et les outils du chat
@@ -88,7 +90,7 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
 
 Lancer (dans WSL, depuis ce dossier) :
   docker compose up -d
-  -> http://localhost:8080        site avec connexion LinkedIn
+  -> http://localhost:8080        site avec connexion LinkedIn (non connecté : landing /bienvenue)
   -> http://localhost:8081        site sans connexion, avec un utilisateur "dev" (dev local uniquement)
   -> localhost:5432               PostgreSQL (base/utilisateur jobradar, mot de passe POSTGRES_PASSWORD, "jobradar" par défaut)
 
@@ -107,6 +109,8 @@ Modifier le modèle (backend/app/models.py), puis générer et vérifier la migr
 Après modif de backend/pyproject.toml : docker compose run --rm --no-deps backend uv lock
 
 Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
+         /api/public/landing, /api/public/logos/{id}   SANS session (landing) : prix et limites (PLAN_LIMITS),
+                                                      chiffres du radar, logos des seules entreprises visibles en Free
          /api/me, /api/dashboard, /api/analytics, /api/statuses
          /api/companies[/{id}[/logo]], /api/jobs[/{id}[/status]], /api/applications[/{id}]
          /api/profile                                 GET, PATCH (champs envoyés remplacés)

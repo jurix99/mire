@@ -351,6 +351,14 @@ def access_for(db: Session, user: User) -> Access:
     return access
 
 
+def public_company_ids(db: Session) -> set[int]:
+    """Entreprises qu'un visiteur non connecté peut voir (landing) : celles qu'un Free voit en clair,
+    c'est-à-dire avec au moins une offre plus ancienne que la fenêtre réservée au Pro."""
+    cutoff = now() - timedelta(days=limits("free")["fresh_delay_days"])
+    return {cid for cid, p, c in db.execute(select(Job.company_id, Job.published_on, Job.created_at)).all()
+            if _ref_date(p, c) <= cutoff}
+
+
 # --- Texte factice ----------------------------------------------------------------------------------
 
 _rng = random.Random()  # jamais initialisé avec la vraie valeur

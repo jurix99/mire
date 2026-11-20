@@ -27,6 +27,7 @@ from .feedback import router as feedback_router
 from .llm import get_llm
 from .net import TLS_CONTEXT
 from .profile_api import router as profile_router
+from .public_api import router as public_router
 from .radar_api import router as radar_router
 from .seed import seed_catalog, seed_sources
 from .users import normalize_locale, upsert_user
@@ -82,6 +83,7 @@ app.include_router(assessments_router)
 app.include_router(feedback_router)
 app.include_router(radar_router)
 app.include_router(agent_router)
+app.include_router(public_router)
 app.include_router(billing_router)  # /api/billing/webhook : sans session (appelé par Stripe)
 app.add_middleware(
     SessionMiddleware,
