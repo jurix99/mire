@@ -150,6 +150,12 @@ variable "pg_subnet_prefix" {
   default = "10.40.1.0/28"
 }
 
+variable "postgres_zone" {
+  description = "Zone de disponibilité du serveur PostgreSQL (1, 2 ou 3) ; en changer si la création échoue (SkuNotAvailable)"
+  type        = string
+  default     = "1"
+}
+
 variable "postgres_private_dns_zone" {
   description = <<-EOT
     Zone DNS privée du serveur PostgreSQL (accès privé par sous-réseau délégué). Elle doit se terminer par

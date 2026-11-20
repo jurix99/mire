@@ -28,16 +28,16 @@ resource "azurerm_postgresql_flexible_server" "main" {
   public_network_access_enabled = false
   administrator_login           = "mireadmin"
   administrator_password        = random_password.pg_admin.result
-  tags                          = local.tags
+  # Zone fixée : sans zone, Azure peut en choisir une sans capacité B1ms (« SkuNotAvailable »)
+  zone = var.postgres_zone
+  tags = local.tags
 
   authentication {
     password_auth_enabled         = true
     active_directory_auth_enabled = false
   }
 
-  # La zone de disponibilité est choisie par Azure à la création
   lifecycle {
-    ignore_changes  = [zone]
     prevent_destroy = true
   }
 
