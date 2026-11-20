@@ -89,12 +89,12 @@ jobs:
       TF_VAR_worker_image_tag: ${{ needs.images.outputs.tag }}
       TF_VAR_apps_enabled: ${{ vars.MIRE_APPS_ENABLED || 'false' }}
       TF_VAR_custom_domain: ${{ vars.MIRE_CUSTOM_DOMAIN }}
-      TF_VAR_budget_alert_email: ${{ vars.BUDGET_ALERT_EMAIL }}
+      TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
       TF_VAR_billing_enabled: ${{ vars.BILLING_ENABLED || 'false' }}
       TF_VAR_stripe_price_monthly: ${{ vars.STRIPE_PRICE_MONTHLY }}
       TF_VAR_stripe_price_pass_3m: ${{ vars.STRIPE_PRICE_PASS_3M }}
-      TF_VAR_pro_user_emails: ${{ vars.PRO_USER_EMAILS }}
-      TF_VAR_admin_emails: ${{ vars.ADMIN_EMAILS }}
+      TF_VAR_pro_user_emails: ${{ secrets.PRO_USER_EMAILS }}
+      TF_VAR_admin_emails: ${{ secrets.ADMIN_EMAILS }}
       RESOURCE_GROUP: rg-mire-prod
       APPS_ENABLED: ${{ vars.MIRE_APPS_ENABLED || 'false' }}
     defaults:

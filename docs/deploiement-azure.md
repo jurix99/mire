@@ -82,15 +82,21 @@ Dans *Settings → Secrets and variables → Actions → Variables* (onglet « R
 | `AZURE_TENANT_ID` | sortie du bootstrap |
 | `AZURE_SUBSCRIPTION_ID` | sortie du bootstrap |
 | `TFSTATE_STORAGE_ACCOUNT` | sortie du bootstrap |
-| `BUDGET_ALERT_EMAIL` | adresse des alertes de budget |
 | `MIRE_APPS_ENABLED` | `false` pour l'instant |
 | `MIRE_CUSTOM_DOMAIN` | vide pour l'instant (étape 6) |
 | `BILLING_ENABLED` | `true` si l'offre Pro / Stripe est active (sinon ne pas créer) |
 | `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_PASS_3M` | identifiants `price_…` (si facturation) |
-| `PRO_USER_EMAILS`, `ADMIN_EMAILS` | adresses séparées par des virgules (facultatif) |
 
-Ce sont des identifiants, pas des secrets : l'authentification passe par OIDC, sans secret client. Les adresses
-e-mail sont des variables Terraform sensibles, donc masquées dans les plans.
+Ce sont des identifiants, pas des secrets : l'authentification passe par OIDC, sans secret client.
+
+Les adresses e-mail vont dans des **secrets** du dépôt (*Secrets* → *Repository secrets*), pas dans des
+variables. Le dépôt est public, et GitHub affiche dans les journaux des Actions l'`env` de chaque étape :
+seuls les secrets y sont masqués.
+
+| Secret | Valeur |
+|---|---|
+| `BUDGET_ALERT_EMAIL` | adresse des alertes de budget |
+| `PRO_USER_EMAILS`, `ADMIN_EMAILS` | adresses séparées par des virgules (facultatif) |
 
 ### 3. Premier apply : l'infrastructure, sans les applications
 
