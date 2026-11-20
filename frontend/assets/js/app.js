@@ -62,7 +62,7 @@ export async function api(path, { method = "GET", body, form } = {}) {
   }
   if (!res.ok) {
     const d = data?.detail;
-    const msg = Array.isArray(d) ? d.map((e) => `${e.loc?.at(-1) ?? ""} : ${e.msg}`).join(" · ") : d;
+    const msg = Array.isArray(d) ? d.map((e) => `${e.loc?.at(-1) ?? ""} : ${e.msg}`).join(" · ") : d?.message ?? d;
     throw new Error(msg || `Erreur ${res.status}`);
   }
   return data;
@@ -539,7 +539,7 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
           <button type="button" class="btn ghost" data-feedback="dislike">${ICONS.thumbDown} Pas intéressé</button>`}
         </div>
         <div class="right">
-          ${onEdit && !job.locked ? html`<button type="button" class="btn ghost" data-edit>Modifier</button>` : ""}
+          ${onEdit && !job.locked ? html`<button type="button" class="btn ghost" data-edit data-admin>Modifier</button>` : ""}
           <button type="button" class="btn" data-close>Fermer</button>
         </div>
       </div>`.s;
@@ -638,6 +638,8 @@ export async function refreshCounts() {
   }
   const plan = $("#plan-box");
   if (plan) plan.hidden = !(me.billing?.enabled && me.billing.plan === "free");
+  // Radar partagé : seuls les admins voient les boutons qui le modifient (l'API refuse aussi : 403)
+  document.body.classList.toggle("not-admin", me.user.is_admin === false);
   refreshWatch();
 }
 

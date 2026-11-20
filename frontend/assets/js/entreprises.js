@@ -79,7 +79,7 @@ const card = (c) => {
         <h2>${renderValue(c.name)}</h2>
         <p class="small muted">${c.sector ?? "Secteur à préciser"}${c.city ? html` · ${renderValue(c.city)}` : ""}</p>
       </div>
-      ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>`}
+      ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>`}
     </div>
     <p class="small">${renderValue(c.description, { block: true })}</p>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -97,9 +97,9 @@ const card = (c) => {
       ${isLocked(c.jobs_count) ? html`<span class="small muted">${renderValue(c.jobs_count)} postes récents</span>`
         : html`<a class="link-more" href="/postes?entreprise=${c.id}">${c.jobs_count} poste${c.jobs_count > 1 ? "s" : ""}</a>`}
       <span style="display:flex;gap:2px">
-        ${AUTO_ATS.has(c.ats) && c.ats_slug ? html`<button class="btn ghost sm" type="button" data-action="check"
+        ${AUTO_ATS.has(c.ats) && c.ats_slug ? html`<button class="btn ghost sm" type="button" data-action="check" data-admin
           title="Vérifier les offres ouvertes dans la liste de l'ATS">Vérifier les offres</button>` : ""}
-        ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="refresh-logo" title="Récupérer à nouveau le logo">${ICONS.image}</button>`}
+        ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="refresh-logo" data-admin title="Récupérer à nouveau le logo">${ICONS.image}</button>`}
         ${c.website && !isLocked(c.website) ? html`<a class="icon-btn" href="${c.website}" target="_blank" rel="noopener" title="Site web">${ICONS.link}</a>` : ""}
       </span>
     </div>

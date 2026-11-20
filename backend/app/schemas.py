@@ -85,6 +85,7 @@ class UserOut(ORM):
     picture: str | None
     locale: str | None = None
     created_at: datetime
+    is_admin: bool = False  # peut modifier le radar partagé (voir entitlements.is_admin)
 
 
 class MeOut(BaseModel):

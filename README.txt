@@ -80,7 +80,7 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
            AGENT_SCHEDULE (texte affiché, défaut « le lundi à 7h43 »). Voir docs/agent.md.
          Collecte : COLLECTOR (true/false), COLLECT_TIME (HH:MM, heure de Paris, défaut 06:30).
          Offre Pro (facultatif, voir « Offres Free / Pro et paiement Stripe ») : BILLING_ENABLED (défaut false :
-           tout le monde est Pro), PRO_USER_EMAILS, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
+           tout le monde est Pro et admin), PRO_USER_EMAILS, ADMIN_EMAILS, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
            STRIPE_PRICE_MONTHLY, STRIPE_PRICE_PASS_3M, PUBLIC_URL (URLs de retour de Checkout).
            Sans clé : chat grisé, import PDF / texte, analyse et évaluation automatique désactivés ;
            le reste fonctionne.
@@ -249,6 +249,14 @@ Quota atteint ou fonction réservée : HTTP 402 {code: "quota", kind, limit, use
 Plan (entitlements.plan_of) : Pro si abonnement actif, impayé (past_due) depuis moins de 3 jours, résilié
 avec une fin de période future, ou Pass en cours ; sinon Free. BILLING_ENABLED=false (défaut) : tout le monde
 est Pro, rien n'est masqué. PRO_USER_EMAILS (liste séparée par des virgules) : comptes toujours Pro.
+
+Radar partagé (entreprises, postes, logos, sources) : seuls les admins le modifient. ADMIN_EMAILS (liste
+séparée par des virgules, e-mails LinkedIn) ; BILLING_ENABLED=false : tout le monde est admin.
+Dépendance RequireAdmin (entitlements.py) -> 403 {code: "admin_required"} sur POST/PATCH/DELETE
+/api/companies, PUT/DELETE /api/companies/{id}/logo, POST/PATCH/DELETE /api/jobs, POST /api/companies/{id}/check
+et /postings/import, POST/PATCH /api/sources, POST /api/collect/run ; l'outil create_job de l'assistant est
+refusé aussi. Le front masque ces boutons (attribut data-admin, classe body.not-admin). L'agent (API à jeton)
+et la collecte continuent d'alimenter le radar. Restent ouverts à tous : statuts, process, retours, notes.
 
 Configuration du tableau de bord Stripe (mode test, puis à refaire en mode live) :
   1. Produits : créer le produit « Mire Pro » avec deux prix, TTC (« Inclure la taxe dans le prix ») :

@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from . import assessments, ats, entitlements, services
 from .db import get_db
-from .entitlements import RequirePro
+from .entitlements import RequireAdmin
 from .models import Company, Job, SearchRun, Source, User
 from .users import current_user
 
@@ -72,7 +72,7 @@ def check_and_commit(db: Session, company: Company, fetch=ats.fetch_postings) ->
 
 # Vérification et import depuis l'ATS : réservés au Pro (la réponse donne l'ATS et les offres les plus récentes,
 # masqués pour un utilisateur Free)
-@router.post("/companies/{company_id}/check", dependencies=[RequirePro()])
+@router.post("/companies/{company_id}/check", dependencies=[RequireAdmin])
 def check_company_postings(company_id: int, db: DB) -> CheckOut:
     """Vérifie les offres de l'entreprise dans la liste actuelle de son ATS (ouvertes / fermées / nouvelles)."""
     return check_and_commit(db, services.get_or_404(db, Company, company_id))
@@ -106,7 +106,7 @@ def import_postings(db: Session, company: Company, ids: list[str], fetch=ats.fet
     return out
 
 
-@router.post("/companies/{company_id}/postings/import", dependencies=[RequirePro()])
+@router.post("/companies/{company_id}/postings/import", dependencies=[RequireAdmin])
 def import_company_postings(company_id: int, body: ImportPostingsIn, db: DB) -> ImportPostingsOut:
     """Ajoute au radar des offres listées par l'ATS de l'entreprise (vérifiées ouvertes, sans doublon)."""
     company = services.get_or_404(db, Company, company_id)
@@ -158,7 +158,7 @@ def list_sources(db: DB) -> list[SourceOut]:
     return [_source_out(s) for s in db.scalars(select(Source).order_by(Source.active.desc(), Source.kind, Source.name))]
 
 
-@router.post("/sources", status_code=201)
+@router.post("/sources", status_code=201, dependencies=[RequireAdmin])
 def create_source(body: SourceIn, db: DB, user: Me) -> SourceOut:
     if db.scalar(select(Source).where(func.lower(Source.name) == body.name.lower())):
         raise HTTPException(409, "Une source porte déjà ce nom")
@@ -168,7 +168,7 @@ def create_source(body: SourceIn, db: DB, user: Me) -> SourceOut:
     return _source_out(source)
 
 
-@router.patch("/sources/{source_id}")
+@router.patch("/sources/{source_id}", dependencies=[RequireAdmin])
 def update_source(source_id: int, body: SourcePatch, db: DB) -> SourceOut:
     """Modifier, désactiver ou réactiver une source (seul un utilisateur peut désactiver)."""
     source = services.get_or_404(db, Source, source_id)
@@ -246,7 +246,7 @@ def collect_status(db: DB) -> CollectStatus:
                          last=RunOut.model_validate(last, from_attributes=True) if last else None)
 
 
-@router.post("/collect/run", status_code=202)
+@router.post("/collect/run", status_code=202, dependencies=[RequireAdmin])
 def collect_run() -> dict:
     """Lance la collecte tout de suite (en tâche de fond)."""
     from . import collector

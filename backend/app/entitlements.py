@@ -107,6 +107,19 @@ def pro_emails() -> set[str]:
     return {e.strip().lower() for e in os.environ.get("PRO_USER_EMAILS", "").split(",") if e.strip()}
 
 
+def admin_emails() -> set[str]:
+    return {e.strip().lower() for e in os.environ.get("ADMIN_EMAILS", "").split(",") if e.strip()}
+
+
+def is_admin(user: User) -> bool:
+    """Seuls les admins modifient le radar partagé (entreprises, postes, logos, sources, vérifications ATS).
+
+    BILLING_ENABLED=false (usage personnel, dev, tests existants) : tout le monde est admin.
+    Sinon : les e-mails de ADMIN_EMAILS. L'agent (jeton) et la collecte alimentent le radar sans passer par ici.
+    """
+    return not billing_enabled() or bool(user.email and user.email.strip().lower() in admin_emails())
+
+
 def now() -> datetime:
     return datetime.now(UTC)
 
@@ -250,6 +263,18 @@ def RequirePro(feature: str | None = None):  # noqa: N802 (dépendance FastAPI, 
             raise pro_required()
 
     return Depends(dependency)
+
+
+ADMIN_MESSAGE = "Modification du radar réservée aux administrateurs"
+
+
+def require_admin(user: Annotated[User, Depends(current_user)]) -> None:
+    if not is_admin(user):
+        raise HTTPException(403, {"code": "admin_required", "message": ADMIN_MESSAGE})
+
+
+# Dépendance FastAPI des routes d'écriture sur les données partagées : 403 {code: admin_required}
+RequireAdmin = Depends(require_admin)
 
 
 # --- Contexte de lecture (masquage) -----------------------------------------------------------------

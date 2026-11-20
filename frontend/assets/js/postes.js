@@ -84,7 +84,7 @@ const row = (j) => html`
       <button class="icon-btn fb-like" type="button" data-action="like" title="J'aime (offre de référence)">${ICONS.heart}</button>
       <button class="icon-btn fb-dislike" type="button" data-action="dislike" title="Pas intéressé">${ICONS.thumbDown}</button>`}
       ${j.url && !isLocked(j.url) ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
-      ${j.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" title="Modifier">${ICONS.edit}</button>`}
+      ${j.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>`}
     </span>
   </div>`;
 

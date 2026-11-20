@@ -59,10 +59,10 @@ const row = (s) => html`
       ${s.notes ? html`<span class="small muted clamp">${s.notes}</span>` : ""}
     </div>
     <span class="small muted source-stats">${s.jobs_found} offre${s.jobs_found > 1 ? "s" : ""}${s.last_used_at ? html`<br>lue le ${fmtDate(s.last_used_at)}` : ""}</span>
-    <label class="switch" title="${s.active ? "Désactiver (l'agent ne l'utilisera plus)" : "Réactiver"}">
+    <label class="switch" data-admin title="${s.active ? "Désactiver (l'agent ne l'utilisera plus)" : "Réactiver"}">
       <input type="checkbox" data-toggle ${s.active ? "checked" : ""} aria-label="Source active"><span></span>
     </label>
-    <button class="icon-btn" type="button" data-edit title="Modifier">${ICONS.edit}</button>
+    <button class="icon-btn" type="button" data-edit data-admin title="Modifier">${ICONS.edit}</button>
   </div>`;
 
 function draw() {
@@ -81,7 +81,7 @@ function draw() {
 
 function drawRuns({ schedule, runs }) {
   $("#schedule").innerHTML = html`<span>${schedule ?? "Aucun passage planifié"}</span>
-    <button type="button" class="btn ghost sm" data-collect title="Lire maintenant les offres de toutes les entreprises (ATS)">Collecter maintenant</button>`.s;
+    <button type="button" class="btn ghost sm" data-collect data-admin title="Lire maintenant les offres de toutes les entreprises (ATS)">Collecter maintenant</button>`.s;
   $("#runs").innerHTML = runs.length ? html`<div class="rows">${runs.map((r) => html`
     <div class="row-item run">
       <div class="grow">

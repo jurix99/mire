@@ -424,6 +424,9 @@ dialog.job-dialog .dialog-body { flex: 1; align-content: start; }
   background: var(--white); color: var(--text); font: inherit; font-size: 13px; font-weight: 600;
 }
 
+/* Radar partagé : contrôles d'édition réservés aux admins (l'API refuse aussi, 403) */
+body.not-admin [data-admin] { display: none !important; }
+
 /* --- Offre Pro : contenus verrouillés -------------------------------------- */
 /* Le serveur n'envoie jamais la vraie valeur : .locked floute un texte FACTICE (placeholder) */
 

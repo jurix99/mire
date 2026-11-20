@@ -428,6 +428,10 @@ def _plan_update_application(db: Session, user: User, args: dict) -> Plan:
 
 
 def _plan_create_job(db: Session, user: User, args: dict) -> Plan:
+    # Le radar est partagé : seul un admin peut y ajouter une offre (vérifié aussi à la confirmation)
+    if not entitlements.is_admin(user):
+        raise ToolError("L'ajout d'offres au radar est réservé aux administrateurs : l'utilisateur ne peut pas "
+                        "ajouter ce poste lui-même.")
     company_name = " ".join((args.get("company_name") or "").split())
     if not company_name:
         raise ToolError("Le nom de l'entreprise est obligatoire.")

@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, selectinload, undefer
 from . import assessments, entitlements, logos, services
 from .assessments_api import invalidate_job
 from .db import get_db
+from .entitlements import RequireAdmin
 from .models import (
     ACTIVE_STATUSES,
     STATUS_LABELS,
@@ -75,7 +76,9 @@ def me(db: DB, user: Me) -> MeOut:
         jobs=db.scalar(select(func.count(Job.id))) or 0,
         processes=processes or 0,
     )
-    return MeOut(user=UserOut.model_validate(user), counts=counts,
+    user_out = UserOut.model_validate(user)
+    user_out.is_admin = entitlements.is_admin(user)
+    return MeOut(user=user_out, counts=counts,
                  billing=BillingOut(**entitlements.billing_summary(db, user)))
 
 
@@ -102,7 +105,7 @@ def list_companies(db: DB, user: Me) -> list[CompanyOut]:
     return [_company_out(c, counts.get(c.id, 0), access) for c in companies]
 
 
-@router.post("/companies", status_code=201)
+@router.post("/companies", status_code=201, dependencies=[RequireAdmin])
 def create_company(body: CompanyIn, db: DB, user: Me) -> CompanyOut:
     company = Company(**body.model_dump(), slug=_slugify(db, body.name))
     db.add(company)
@@ -117,7 +120,7 @@ def get_company(company_id: int, db: DB, user: Me) -> CompanyOut:
     return _company_out(company, _jobs_count_by_company(db, access).get(company_id, 0), access)
 
 
-@router.patch("/companies/{company_id}")
+@router.patch("/companies/{company_id}", dependencies=[RequireAdmin])
 def update_company(company_id: int, body: CompanyPatch, db: DB, user: Me) -> CompanyOut:
     company = _get_or_404(db, Company, company_id)
     changes = body.model_dump(exclude_unset=True)
@@ -134,7 +137,7 @@ def update_company(company_id: int, body: CompanyPatch, db: DB, user: Me) -> Com
     return _company_out(company, _jobs_count_by_company(db, access).get(company_id, 0), access)
 
 
-@router.delete("/companies/{company_id}", status_code=204)
+@router.delete("/companies/{company_id}", status_code=204, dependencies=[RequireAdmin])
 def delete_company(company_id: int, db: DB) -> Response:
     db.delete(_get_or_404(db, Company, company_id))
     db.commit()
@@ -167,7 +170,7 @@ def company_logo(company_id: int, db: DB, user: Me) -> Response:
     return Response(company.logo_data, media_type=company.logo_content_type, headers=LOGO_HEADERS)
 
 
-@router.put("/companies/{company_id}/logo", status_code=204)
+@router.put("/companies/{company_id}/logo", status_code=204, dependencies=[RequireAdmin])
 async def upload_company_logo(company_id: int, file: UploadFile, db: DB) -> Response:
     company = _get_or_404(db, Company, company_id)
     ctype = (file.content_type or "").lower()
@@ -182,7 +185,7 @@ async def upload_company_logo(company_id: int, file: UploadFile, db: DB) -> Resp
     return Response(status_code=204)
 
 
-@router.delete("/companies/{company_id}/logo", status_code=204)
+@router.delete("/companies/{company_id}/logo", status_code=204, dependencies=[RequireAdmin])
 def refresh_company_logo(company_id: int, db: DB) -> Response:
     """Oublie le logo en cache : il sera récupéré à nouveau au prochain affichage."""
     logos.reset_logo(_get_or_404(db, Company, company_id))
@@ -207,14 +210,14 @@ def get_job(job_id: int, db: DB, user: Me) -> JobDetailOut:
     return JobDetailOut(**job.model_dump(), application=application)
 
 
-@router.post("/jobs", status_code=201)
+@router.post("/jobs", status_code=201, dependencies=[RequireAdmin])
 def create_job(body: JobIn, db: DB) -> JobOut:
     out = services.create_job(db, body)
     assessments.wake()  # évaluer la nouvelle offre pour chaque utilisateur
     return out
 
 
-@router.patch("/jobs/{job_id}")
+@router.patch("/jobs/{job_id}", dependencies=[RequireAdmin])
 def update_job(job_id: int, body: JobPatch, db: DB, user: Me) -> JobOut:
     job = _get_or_404(db, Job, job_id)
     changes = body.model_dump(exclude_unset=True)
@@ -235,7 +238,7 @@ def update_job(job_id: int, body: JobPatch, db: DB, user: Me) -> JobOut:
     return services.get_job(db, user, job.id)
 
 
-@router.delete("/jobs/{job_id}", status_code=204)
+@router.delete("/jobs/{job_id}", status_code=204, dependencies=[RequireAdmin])
 def delete_job(job_id: int, db: DB) -> Response:
     db.delete(_get_or_404(db, Job, job_id))
     db.commit()
