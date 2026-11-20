@@ -13,6 +13,7 @@ import logging
 import os
 import secrets
 from contextlib import asynccontextmanager
+from pathlib import Path
 from urllib.parse import urlencode
 
 import httpx
@@ -23,6 +24,7 @@ from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
 from . import assessments, collector, logs, tasks
+from .frontend import BodySizeLimit, mount_frontend
 from .agent_api import router as agent_router
 from .api import router as api_router
 from .assessments_api import router as assessments_router
@@ -118,8 +120,10 @@ app.add_middleware(
     session_cookie="jobradar_session",
     max_age=7 * 24 * 3600,
     same_site="lax",
-    https_only=PUBLIC_URL.startswith("https://"),
+    https_only=PUBLIC_URL.startswith("https://"),  # derrière l'ingress Container Apps : cookie Secure
 )
+# Taille maximale du corps des requêtes (comme client_max_body_size de nginx) : 413 au-delà
+app.add_middleware(BodySizeLimit)
 
 
 def _save_user(info: dict) -> int:
@@ -256,3 +260,9 @@ def logged_out() -> Response:
         "<p>Vous êtes déconnecté.</p><p><a href='/auth/login'>Se reconnecter avec LinkedIn</a></p>"
     )
     return Response(html, media_type="text/html")
+
+
+# Production : le front est servi par l'API (pas de nginx) ; en local, nginx le sert (FRONTEND_DIR vide).
+# En dernier : la route attrape-tout des pages ne doit masquer aucune route de l'API.
+if os.environ.get("FRONTEND_DIR"):
+    mount_frontend(app, Path(os.environ["FRONTEND_DIR"]), os.environ.get("ASSET_VERSION") or None)
