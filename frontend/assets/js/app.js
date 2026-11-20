@@ -619,7 +619,7 @@ const NAV = [
   ["/", "Tableau de bord", null],
   ["/entreprises", "Entreprises", "companies"],
   ["/postes", "Postes", "jobs"],
-  ["/sources", "Sources", null],
+  ["/sources", "Sources", null, true], // réservée aux admins (gestion du radar partagé)
   ["/mes-process", "Mes process", "processes"],
   ["/analytics", "Analytics", null],
   ["/mon-profil", "Mon profil", null],
@@ -639,7 +639,11 @@ export async function refreshCounts() {
   const plan = $("#plan-box");
   if (plan) plan.hidden = !(me.billing?.enabled && me.billing.plan === "free");
   // Radar partagé : seuls les admins voient les boutons qui le modifient (l'API refuse aussi : 403)
-  document.body.classList.toggle("not-admin", me.user.is_admin === false);
+  const notAdmin = me.user.is_admin === false;
+  document.body.classList.toggle("not-admin", notAdmin);
+  // Le bloc « Veille » mène à la page Sources, réservée aux admins
+  const watch = $("#watch");
+  if (watch) notAdmin ? watch.removeAttribute("href") : watch.setAttribute("href", "/sources");
   refreshWatch();
 }
 
@@ -680,8 +684,8 @@ export async function renderShell() {
     aside.innerHTML = html`
     <a class="brand" href="/" aria-label="Mire, tableau de bord">${raw(LOGO_SVG)}<span>Mire</span></a>
     <nav class="nav" aria-label="Navigation principale">
-      ${NAV.map(([href, label, count]) => html`
-        <a href="${href}" ${raw(path === href ? 'aria-current="page"' : "")}>
+      ${NAV.map(([href, label, count, adminOnly]) => html`
+        <a href="${href}" ${raw(path === href ? 'aria-current="page"' : "")} ${raw(adminOnly ? "data-admin" : "")}>
           <span>${label}</span>${count ? html`<span class="count" data-count="${count}"></span>` : ""}
         </a>`)}
     </nav>

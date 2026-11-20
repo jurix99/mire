@@ -1,4 +1,4 @@
-import { $, ICONS, api, attempt, boot, fmtDate, html, openForm, toast } from "./app.js";
+import { $, ICONS, api, attempt, boot, fmtDate, html, loadMe, openForm, toast } from "./app.js";
 
 const KINDS = [
   ["ats", "ATS (logiciels de recrutement)"],
@@ -142,4 +142,9 @@ $("#groups").addEventListener("change", async (e) => {
   await reload();
 });
 
-boot(reload);
+// Page réservée aux admins (l'API refuse aussi : 403) : retour au tableau de bord
+boot(async () => {
+  const me = await loadMe();
+  if (me.user.is_admin === false) return location.replace("/");
+  await reload();
+});

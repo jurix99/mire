@@ -153,7 +153,7 @@ def _source_out(s: Source) -> SourceOut:
     return SourceOut.model_validate(s, from_attributes=True)
 
 
-@router.get("/sources")
+@router.get("/sources", dependencies=[RequireAdmin])
 def list_sources(db: DB) -> list[SourceOut]:
     return [_source_out(s) for s in db.scalars(select(Source).order_by(Source.active.desc(), Source.kind, Source.name))]
 
@@ -236,7 +236,7 @@ class CollectStatus(BaseModel):
     last: RunOut | None
 
 
-@router.get("/collect/status")
+@router.get("/collect/status", dependencies=[RequireAdmin])
 def collect_status(db: DB) -> CollectStatus:
     from . import collector
 

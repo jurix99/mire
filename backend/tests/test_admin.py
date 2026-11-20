@@ -48,6 +48,8 @@ def write_requests(catalog, source) -> list[tuple[str, str, dict | None]]:
         ("post", "/api/sources", {"json": {"name": "Autre", "kind": "autre"}}),
         ("patch", f"/api/sources/{source.id}", {"json": {"active": False}}),
         ("post", "/api/collect/run", None),
+        ("get", "/api/sources", None),  # page Sources : réservée aux admins
+        ("get", "/api/collect/status", None),
     ]
 
 

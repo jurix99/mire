@@ -254,8 +254,8 @@ Radar partagé (entreprises, postes, logos, sources) : seuls les admins le modif
 séparée par des virgules, e-mails LinkedIn) ; BILLING_ENABLED=false : tout le monde est admin.
 Dépendance RequireAdmin (entitlements.py) -> 403 {code: "admin_required"} sur POST/PATCH/DELETE
 /api/companies, PUT/DELETE /api/companies/{id}/logo, POST/PATCH/DELETE /api/jobs, POST /api/companies/{id}/check
-et /postings/import, POST/PATCH /api/sources, POST /api/collect/run ; l'outil create_job de l'assistant est
-refusé aussi. Le front masque ces boutons (attribut data-admin, classe body.not-admin). L'agent (API à jeton)
+et /postings/import, GET/POST/PATCH /api/sources, GET /api/collect/status, POST /api/collect/run ; l'outil create_job de l'assistant est
+refusé aussi. Le front masque ces boutons et la page Sources (attribut data-admin, classe body.not-admin). L'agent (API à jeton)
 et la collecte continuent d'alimenter le radar. Restent ouverts à tous : statuts, process, retours, notes.
 
 Configuration du tableau de bord Stripe (mode test, puis à refaire en mode live) :
