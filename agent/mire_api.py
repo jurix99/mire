@@ -7,8 +7,9 @@ Usage (depuis la racine du dépôt) :
   (chemin SANS « / » initial : sous Git Bash, « /context » serait converti en chemin Windows)
 
 - Seules les routes /api/agent/... sont accessibles (le chemin est relatif à cette base).
-- Jeton : variable MIRE_AGENT_TOKEN, sinon AGENT_TOKEN lu dans le fichier .env à la racine du dépôt.
-- URL : variable MIRE_URL (défaut http://localhost:8080).
+- URL : variable MIRE_URL (défaut http://localhost:8080 ; production : https://<domaine>).
+- Jeton : variable MIRE_AGENT_TOKEN (ou AGENT_TOKEN) ; à défaut, et seulement pour un Mire local, AGENT_TOKEN
+  lu dans le fichier .env à la racine du dépôt (le jeton de production est dans Key Vault : agent-token).
 Affiche la réponse JSON ; code de retour 0 si succès HTTP, 1 sinon (le corps de l'erreur est affiché).
 """
 
@@ -24,10 +25,20 @@ ROOT = Path(__file__).resolve().parents[1]
 METHODS = {"GET", "POST", "PATCH"}
 
 
+def base_url() -> str:
+    return os.environ.get("MIRE_URL", "http://localhost:8080").rstrip("/")
+
+
+def is_local(url: str) -> bool:
+    return re.match(r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$", url) is not None
+
+
 def token() -> str:
-    value = os.environ.get("MIRE_AGENT_TOKEN", "").strip()
+    value = (os.environ.get("MIRE_AGENT_TOKEN") or os.environ.get("AGENT_TOKEN") or "").strip()
     if value:
         return value
+    if not is_local(base_url()):  # le .env contient le jeton LOCAL : jamais envoyé à un autre serveur
+        sys.exit("Jeton introuvable : définissez MIRE_AGENT_TOKEN (jeton agent-token de la production)")
     env = ROOT / ".env"
     if env.exists():
         for line in env.read_text(encoding="utf-8").splitlines():
@@ -59,7 +70,10 @@ def main(argv: list[str]) -> int:
                 return 2
             raw = file.read_text(encoding="utf-8")
         body = json.dumps(json.loads(raw)).encode()
-    base = os.environ.get("MIRE_URL", "http://localhost:8080").rstrip("/")
+    base = base_url()
+    if not base.startswith("https://") and not is_local(base):
+        print(json.dumps({"error": "MIRE_URL distante : https:// obligatoire (le jeton ne circule jamais en clair)"}))
+        return 2
     req = urllib.request.Request(f"{base}/api/agent{path}", data=body, method=method, headers={
         "Authorization": f"Bearer {token()}", "Content-Type": "application/json", "Accept": "application/json",
     })

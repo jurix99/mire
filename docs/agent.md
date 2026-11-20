@@ -20,6 +20,12 @@ données à l'agent sont dans [`agent/prompt.md`](../agent/prompt.md).
 `claude -p` avec des outils limités : recherche web, lecture de pages, écriture de fichiers dans `agent/tmp/`
 et `agent/mire_api.py`. Aucune autre commande n'est autorisée.
 
+**Contre la production** (Azure, voir [deploiement-azure.md](deploiement-azure.md)) : définir `MIRE_URL`
+(`https://<domaine>`) et `MIRE_AGENT_TOKEN` (secret `agent-token` du Key Vault). Avec une URL distante, le
+script ne démarre pas docker compose, et le jeton du `.env` local n'est jamais envoyé. Une URL distante doit
+être en `https://`. La fin de passage (`runs/{id}/finish`) évalue tout de suite les offres ajoutées, en au plus
+`FINISH_BUDGET_S` secondes (90 par défaut). Le reste passe par la file de tâches.
+
 ## Sécurité
 - Jeton `Authorization: Bearer <AGENT_TOKEN>`, comparé en temps constant ; la session LinkedIn ne donne pas
   accès à cette API, et le jeton ne donne pas accès au reste de l'API.

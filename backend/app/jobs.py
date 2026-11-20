@@ -56,9 +56,10 @@ def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
 
 
 def ping_healthcheck(ok: bool) -> None:
-    """Ping healthchecks.io (URL secrète : jamais journalisée)."""
+    """Ping healthchecks.io (URL secrète : jamais journalisée). Valeur vide ou autre qu'une URL (ex. « off ») :
+    pas de ping."""
     url = os.environ.get("HEALTHCHECK_DAILY_URL", "").strip().rstrip("/")
-    if not url:
+    if not url.startswith(("https://", "http://")):
         return
     import httpx
 

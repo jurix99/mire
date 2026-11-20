@@ -181,6 +181,8 @@ def test_healthcheck_ping(monkeypatch):
     jobs.ping_healthcheck(True)
     jobs.ping_healthcheck(False)
     assert calls == ["https://hc-ping.com/abc", "https://hc-ping.com/abc/fail"]
+    monkeypatch.setenv("HEALTHCHECK_DAILY_URL", "off")  # secret Key Vault obligatoire, ping désactivé
+    jobs.ping_healthcheck(False)
     monkeypatch.delenv("HEALTHCHECK_DAILY_URL")
     jobs.ping_healthcheck(False)
     assert len(calls) == 2

@@ -10,7 +10,8 @@ Architecture
               - assets/js/<page>.js une page = un script
               - index.html          landing publique à la racine « / », connecté ou non (assets/landing.css,
                                     assets/js/landing.js) ; l'app commence à /tableau-de-bord (tableau-de-bord.html).
-                                    Un visiteur non connecté sur une page de l'app est renvoyé vers « / » (nginx) ;
+                                    Un visiteur non connecté sur une page de l'app est renvoyé vers « / » (nginx en local,
+                                    app/frontend.py en production) ;
                                     le bouton LinkedIn ramène à la page demandée. La déconnexion revient sur « / ».
   backend/    FastAPI (projet uv) : connexion LinkedIn OpenID Connect, session, API JSON /api/...
               - app/models.py       tables (SQLAlchemy)
@@ -24,13 +25,23 @@ Architecture
               - app/agent_api.py    API de l'agent de recherche (/api/agent, jeton AGENT_TOKEN)
               - app/llm.py          client Gemini (SDK google-genai)
               - app/chat.py         /api/chat ; app/chat_tools.py : outils de l'assistant
-              - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau)
+              - app/tasks.py        file de tâches dans PostgreSQL (table tasks, SKIP LOCKED) ; handlers :
+                                    task_handlers.py ; traitements hors API : python -m app.jobs (jobs.py)
+              - app/matching.py     présélection avant Gemini : exclusions dures + similarité pgvector
+                                    (embeddings.py, modèle multilingue local via fastembed)
+              - app/frontend.py     front servi par FastAPI en production (sans nginx), limites de taille
+              - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau) ; test_postgres.py
+                                    (marqueur postgres) : seulement avec TEST_POSTGRES_URL
               - scripts/eval_reference.py  évaluation de référence avec le vrai Gemini (voir plus bas)
   agent/      agent de recherche local : prompt.md, run-agent.ps1, install-task.ps1, mire_api.py
-  docs/       processus de recherche (processus-recherche.md), API de l'agent (agent.md), exemple de profil
-              - migrations/         migrations Alembic (appliquées automatiquement au démarrage)
+  docs/       processus de recherche (processus-recherche.md), API de l'agent (agent.md), exemple de profil,
+              déploiement sur Azure (deploiement-azure.md)
+              - migrations/         migrations Alembic (local : au démarrage ; production : job mire-migrate)
               - app/seed.py         données de démonstration
-  db          PostgreSQL 17 (volume Docker postgres-data)
+  db          PostgreSQL 17 + pgvector (volume Docker postgres-data)
+  infra/      Terraform : bootstrap/ (une fois, en local) et main/ (appliqué par la CI)
+  Dockerfile  images de production : cibles api et worker (linux/amd64)
+  .github/    CI (tests, terraform plan) et déploiement (deploy.yml)
 
 Tables :
   users                 un compte par identifiant LinkedIn (créé à la première connexion)
@@ -60,6 +71,9 @@ Tables :
                         depuis) ou Pass 3 mois (paid / refunded, fin du Pass) ; renonciation au droit de
                         rétractation horodatée. users.stripe_customer_id relie le compte au client Stripe.
   stripe_events         identifiants des événements Stripe déjà traités (webhook idempotent)
+  tasks                 file des tâches de fond (collect, embed_jobs, match_user, assess_user, check_company,
+                        daily) : statut, tentatives, exécution différée, erreur
+  (pgvector)            jobs.embedding / user_profiles.embedding (384 dimensions), job_assessments.similarity
 
 Statuts posés par l'utilisateur : nouveau, à regarder, postulé, relance, entretien, offre, refusé,
 pas intéressé, abandonné. Statut affiché : celui posé par l'utilisateur, sinon « Offre fermée » si l'offre n'est plus ouverte, sinon le
@@ -83,6 +97,12 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
          Agent de recherche (facultatif) : AGENT_TOKEN (jeton de /api/agent ; vide = API désactivée),
            AGENT_SCHEDULE (texte affiché, défaut « le lundi à 7h43 »). Voir docs/agent.md.
          Collecte : COLLECTOR (true/false), COLLECT_TIME (HH:MM, heure de Paris, défaut 06:30).
+         Tâches de fond : RUN_BACKGROUND_THREADS (défaut true : évaluation, planificateur de collecte et file de
+           tâches tournent dans le processus de l'API, comme avant ; false en production), MATCH_TOP_K (offres
+           présélectionnées par similarité et envoyées à Gemini, défaut 50 ; sans modèle d'embeddings, comme en
+           local, les plus récentes), FINISH_BUDGET_S (fin de passage de l'agent, défaut 90).
+           Embeddings en local (facultatif) : uv sync --group worker et FASTEMBED_CACHE_PATH=<dossier du modèle>.
+         Journaux : LOG_FORMAT (json par défaut ; text dans docker-compose.yml).
          Offre Pro (facultatif, voir « Offres Free / Pro et paiement Stripe ») : BILLING_ENABLED (défaut false :
            tout le monde est Pro et admin), PRO_USER_EMAILS, ADMIN_EMAILS, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
            STRIPE_PRICE_MONTHLY, STRIPE_PRICE_PASS_3M, PUBLIC_URL (URLs de retour de Checkout).
@@ -115,6 +135,7 @@ Modifier le modèle (backend/app/models.py), puis générer et vérifier la migr
 Après modif de backend/pyproject.toml : docker compose run --rm --no-deps backend uv lock
 
 Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
+         /healthz, /readyz                            SANS session : sondes (liveness ; readiness avec SELECT 1)
          /api/public/landing, /api/public/logos/{id}   SANS session (landing) : prix et limites (PLAN_LIMITS),
                                                       chiffres du radar, logos des seules entreprises visibles en Free
          /api/me, /api/dashboard, /api/analytics, /api/statuses
@@ -128,6 +149,7 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/profile/analyze                         POST, déductions sur le profil -> proposition
          /api/profile/rules/synthesize                POST, règles déduites des retours -> proposition
          /api/jobs/{id}/feedback                      POST {sentiment: like|dislike, reasons, text}
+         /api/jobs/{id}/similar                       GET, 5 offres ouvertes les plus proches (pgvector, sans LLM)
          /api/feedback, /api/feedback/reasons         GET, retours récents (nombre de nouveaux), raisons
          /api/jobs/{id}/assessment/manual             PUT {score|null}, correction manuelle de la note
          /api/assessments/status, /api/assessments/run   GET état, POST évaluer tout de suite (10 offres)
@@ -135,7 +157,7 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/companies/{id}/postings/import          POST {ats_job_ids}, ajoute des offres listées par l'ATS
          /api/sources[/{id}]                          GET, POST, PATCH (activer / désactiver)
          /api/runs                                    GET, passages (découverte, collecte) + résumé personnel
-         /api/collect/status, /api/collect/run        GET état, POST collecte immédiate
+         /api/collect/status, /api/collect/run        GET état, POST collecte immédiate (tâche mise en file)
          /api/agent/...                               API de l'agent, par jeton (docs/agent.md)
          /api/chat/status, /api/chat/history          GET
          /api/chat                                    POST {message, mode: normal|onboarding}
@@ -147,6 +169,9 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
 
 Tests (depuis backend/, sans Docker) : uv run pytest
   (sur le réseau de l'entreprise : UV_SYSTEM_CERTS=1 pour que uv accepte le proxy HTTPS)
+  Tests PostgreSQL (SKIP LOCKED, pgvector, migrations), sur une base JETABLE (schéma public recréé) :
+    docker run --rm -d -p 55432:5432 -e POSTGRES_PASSWORD=test pgvector/pgvector:pg17
+    TEST_POSTGRES_URL=postgresql+psycopg://postgres:test@localhost:55432/postgres uv run pytest -m postgres
 Évaluation de référence avec le vrai Gemini (base SQLite temporaire, la base de l'app n'est pas touchée) :
   docker compose exec backend uv run python scripts/eval_reference.py
   -> rejoue les retours de docs/processus-recherche.md (§7), vérifie que les règles proposées couvrent les
@@ -311,3 +336,16 @@ Ancien export Framer
 ------------------------------------------------------------------
 Les fichiers *.html et _fr/ à la racine sont l'ancien export Framer. Ils ne sont plus servis
 (nginx sert uniquement frontend/) et peuvent être supprimés.
+
+------------------------------------------------------------------
+Production (Azure Container Apps)
+------------------------------------------------------------------
+Guide complet : docs/deploiement-azure.md (premier déploiement, secrets, domaine, migration des données,
+exploitation, coûts). En bref :
+  - mire-api (API + front servi par FastAPI, sans nginx), jobs mire-daily (cron), mire-worker (KEDA sur la
+    file de tâches) et mire-migrate ; PostgreSQL Flexible Server privé avec pgvector ; secrets dans Key Vault ;
+  - infra/bootstrap une fois en local, puis tout par GitHub Actions (OIDC) : push sur main = images GHCR,
+    migrations, terraform apply, test de fumée ;
+  - traitements à la main : az containerapp job start -g rg-mire-prod -n mire-daily (ou mire-worker) ;
+  - en local, `python -m app.jobs daily | worker | migrate` fonctionne aussi :
+      docker compose exec backend uv run python -m app.jobs daily

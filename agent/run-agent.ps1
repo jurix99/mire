@@ -31,14 +31,23 @@ function Write-Log($Text) {
     Write-Host $line
 }
 
-# 1. Mire doit être démarré (Docker dans WSL) : sinon on le lance et on attend
+# 1. Mire doit répondre. URL : variable MIRE_URL (défaut http://localhost:8080, docker compose dans WSL).
+#    Production : $env:MIRE_URL = "https://<domaine>" et $env:MIRE_AGENT_TOKEN = "<agent-token de Key Vault>".
+#    Mire local injoignable : on lance docker compose et on attend ; Mire distant injoignable : échec.
+$MireUrl = if ($env:MIRE_URL) { $env:MIRE_URL.TrimEnd('/') } else { "http://localhost:8080" }
+$IsLocal = $MireUrl -match '^https?://(localhost|127\.0\.0\.1)(:\d+)?$'
+Write-Log "Mire : $MireUrl"
 function Test-Mire {
     try {
         $r = & uv run --no-project python agent/mire_api.py GET context 2>$null
         return $LASTEXITCODE -eq 0
     } catch { return $false }
 }
-if (-not (Test-Mire)) {
+if (-not (Test-Mire) -and -not $IsLocal) {
+    # L'API distante peut être à zéro réplique (démarrage à froid) : une deuxième chance
+    Start-Sleep -Seconds 20
+    if (-not (Test-Mire)) { Write-Log "Échec : Mire ne répond pas à $MireUrl (MIRE_AGENT_TOKEN correct ?)"; exit 1 }
+} elseif (-not (Test-Mire)) {
     Write-Log "Mire injoignable : démarrage de docker compose dans WSL"
     $wslPath = (wsl -e wslpath -a ($Root -replace '\\', '/')).Trim()
     wsl -e sh -c "cd '$wslPath' && docker compose up -d" | Out-Null
