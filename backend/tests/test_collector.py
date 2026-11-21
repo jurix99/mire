@@ -315,3 +315,27 @@ def test_bulk_companies(db, monkeypatch):
     assert again["companies"][0]["completed"] == ["city"]
     assert db.scalar(select(Company).where(Company.name == "Alpha")).funding_stage == "Seed"
     assert client.post("/api/agent/companies/bulk", json={"companies": []}).status_code == 422
+
+
+def test_detection_accepts_name_without_generic_suffix():
+    """« Genesis AI » : offres signées « Genesis » ; le tableau ashby/genesis est reconnu."""
+    genesis = Company(name="Genesis AI", slug="genesis-ai", website="https://genesis-ai.company",
+                      careers_url="https://jobs.ashbyhq.com/genesis-ai")
+    fetch = boards({("ashby", "genesis"): [posting("1", "Robotics engineer", desc="At Genesis, we build robots")]})
+    assert ats.detect_ats(genesis, fetch) == ("ashby", "genesis")
+    # Nom court trop générique : pas de rapprochement sur un mot de moins de 4 lettres
+    h = Company(name="H AI", slug="h-ai")
+    assert ats.mentions_company(h, [posting("1", "Engineer", desc="h is great")]) is False
+    # Homonyme : le nom n'apparaît pas -> refusé
+    assert ats.mentions_company(genesis, [posting("1", "Engineer", desc="Join Genesys Cloud")]) is False
+
+
+def test_detection_reads_ats_link_in_careers_page():
+    mistral = Company(name="Mistral", slug="mistral", website="https://mistral.example",
+                      careers_url="https://mistral.example/careers")
+    pages = {"https://mistral.example/careers": '<a href="https://jobs.lever.co/mistral-hq/123">Postuler</a>',
+             "https://mistral.example": ""}
+    fetch = boards({("lever", "mistral-hq"): [posting("1", "Engineer", desc="Join Mistral")]})
+    assert ats.detect_ats(mistral, fetch, get_page=lambda url: pages.get(url, "")) == ("lever", "mistral-hq")
+    embed = '<script src="https://boards.greenhouse.io/embed/job_board/js?for=acmecorp"></script>'
+    assert ats.ats_links(embed) == [("greenhouse", "acmecorp")]

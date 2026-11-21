@@ -257,19 +257,49 @@ def fetch_postings(ats: str, slug: str, client: httpx.Client | None = None) -> l
 URL_PATTERNS = [
     ("ashby", re.compile(r"jobs\.ashbyhq\.com/([A-Za-z0-9._-]+)", re.I)),
     ("lever", re.compile(r"jobs\.(?:eu\.)?lever\.co/([A-Za-z0-9._-]+)", re.I)),
-    ("greenhouse", re.compile(r"(?:job-)?boards\.greenhouse\.io/(?:embed/job_board\?for=)?([A-Za-z0-9._-]+)", re.I)),
+    ("greenhouse", re.compile(
+        r"(?:job-)?boards(?:\.eu)?\.greenhouse\.io/(?:embed/job_board(?:/js)?\?for=)?([A-Za-z0-9._-]+)", re.I)),
     ("recruitee", re.compile(r"//([A-Za-z0-9-]+)\.recruitee\.com", re.I)),
     ("teamtailor", re.compile(r"//([A-Za-z0-9-]+)\.teamtailor\.com", re.I)),
 ]
+ATS_HOSTS = re.compile(r"(ashbyhq\.com|lever\.co|greenhouse\.io|recruitee\.com|teamtailor\.com)$", re.I)
+NOT_SLUGS = {"embed", "api", "js", "jobs", "www"}
+PAGE_BYTES = 2_000_000
+# Suffixes génériques retirés du nom (« Genesis AI » -> « genesis ») pour deviner l'identifiant et pour
+# reconnaître l'entreprise dans ses offres
+GENERIC_WORDS = re.compile(r"\b(sas|sa|inc|ltd|ai|labs?|technologies|tech|hq)\b")
 
 
 def _ascii(text: str) -> str:
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode().lower()
 
 
+def ats_links(text: str) -> list[tuple[str, str]]:
+    """Tableaux d'offres cités dans un texte (URL, page HTML) : [(ats, slug)], dans l'ordre d'apparition."""
+    found = []
+    for ats, pattern in URL_PATTERNS:
+        for m in pattern.finditer(text or ""):
+            if m[1].lower() not in NOT_SLUGS and SLUG.match(m[1]):
+                found.append((m.start(), ats, m[1]))
+    return list(dict.fromkeys((ats, slug) for _, ats, slug in sorted(found)))
+
+
+def fetch_page(url: str) -> str:
+    """HTML d'une page (site, page carrières) pour y chercher un lien vers l'ATS ; '' si illisible."""
+    try:
+        with httpx.Client(verify=TLS_CONTEXT, timeout=TIMEOUT, follow_redirects=True,
+                          headers={"User-Agent": "Mozilla/5.0 (compatible; Mire job tracker)"}) as client:
+            resp = client.get(url)
+            if resp.status_code >= 400 or "html" not in resp.headers.get("content-type", "html"):
+                return ""
+            return resp.text[:PAGE_BYTES]
+    except httpx.HTTPError:
+        return ""
+
+
 def slug_candidates(company: Company) -> list[str]:
     name = _ascii(company.name)
-    base = re.sub(r"\b(sas|sa|inc|ltd|ai|labs?|technologies|tech|hq)\b", " ", name)
+    base = GENERIC_WORDS.sub(" ", name)
     words = re.findall(r"[a-z0-9]+", name)
     core = re.findall(r"[a-z0-9]+", base)
     cands = ["".join(words), "-".join(words), "".join(core), "-".join(core)]
@@ -280,24 +310,44 @@ def slug_candidates(company: Company) -> list[str]:
 
 
 def mentions_company(company: Company, postings: list[Posting]) -> bool:
-    """Le nom de l'entreprise apparaît-il dans ses offres ? (évite d'importer les offres d'une homonyme)"""
-    name = _ascii(company.name).strip()
-    if not postings:
+    """Le nom de l'entreprise apparaît-il dans ses offres ? (évite d'importer les offres d'une homonyme)
+
+    Nom complet, ou nom sans suffixe générique (« Genesis AI » -> « genesis ») en mot entier et d'au moins
+    4 caractères : les offres disent souvent « Genesis » tout court.
+    """
+    name = " ".join(_ascii(company.name).split())
+    if not postings or not name:
         return False
-    for p in postings[:10]:
-        text = _ascii(" ".join(filter(None, [p.title, p.description, p.url])))
-        if name and name in text:
+    core = " ".join(re.findall(r"[a-z0-9]+", GENERIC_WORDS.sub(" ", name)))
+    core_re = (re.compile(rf"(?<![a-z0-9]){re.escape(core)}(?![a-z0-9])")
+               if core and core != name and len(core.replace(" ", "")) >= 4 else None)
+    for p in postings[:50]:
+        text = " ".join(_ascii(" ".join(filter(None, [p.title, p.description, p.url]))).split())
+        if name in text or (core_re and core_re.search(text)):
             return True
     return False
 
 
-def detect_ats(company: Company, fetch=fetch_postings) -> tuple[str, str] | None:
-    """(ats, slug) trouvé et cohérent avec l'entreprise, sinon None."""
+def detect_ats(company: Company, fetch=fetch_postings, get_page=None) -> tuple[str, str] | None:
+    """(ats, slug) trouvé et cohérent avec l'entreprise, sinon None.
+
+    Essais, dans l'ordre : liens d'ATS dans l'URL carrières / le site ; liens d'ATS dans le HTML de ces pages
+    (bouton « Voir les offres », iframe ou script d'un tableau intégré) ; identifiants devinés depuis le nom.
+    get_page : lecture des pages (par défaut la vraie, seulement avec le vrai fetch : un test qui simule les ATS
+    ne fait aucun appel réseau).
+    """
+    if get_page is None and fetch is fetch_postings:
+        get_page = fetch_page
+    urls = [u for u in (company.careers_url, company.website) if u]
     tried: list[tuple[str, str]] = []
-    for url in filter(None, [company.careers_url, company.website]):
-        for ats, pattern in URL_PATTERNS:
-            if m := pattern.search(url):
-                tried.append((ats, m[1]))
+    for url in urls:
+        tried += ats_links(url)
+    if get_page is not None:
+        for url in urls:
+            full = url if "://" in url else f"https://{url}"
+            host = urlsplit(full).hostname or ""
+            if host and not ATS_HOSTS.search(host):  # page d'un ATS : déjà couverte par l'URL elle-même
+                tried += ats_links(get_page(full))
     for slug in slug_candidates(company):
         for ats in SUPPORTED:
             tried.append((ats, slug))
