@@ -677,3 +677,63 @@ def taxonomy_health(db: Session) -> dict:
 
 def now_utc() -> datetime:
     return datetime.now(UTC)
+
+
+# --- Masquage Free / Pro (PLAN_LIMITS : market_*) -------------------------------------------------------------
+# Un utilisateur Free ne reçoit JAMAIS la vraie donnée d'un indicateur réservé : seulement son titre (générique),
+# le nombre d'éléments cachés et un aperçu en texte factice de longueur FIXE (flouté par le front).
+
+_FAKE_ROWS = [("Lorem ipsum", "42 %"), ("Dolor sit amet", "37 %"), ("Consectetur", "31 %"), ("Adipiscing elit", "24 %"),
+              ("Sed do eiusmod", "18 %")]
+
+
+def _locked_preview(n: int) -> list[dict]:
+    return [{"label": {"locked": True, "placeholder": label}, "value": {"locked": True, "placeholder": value}}
+            for label, value in _FAKE_ROWS[:max(1, min(n, len(_FAKE_ROWS)))]]
+
+
+def _locked_indicator(key: str, value: dict) -> dict:
+    hidden = value.get("total")
+    if hidden is None:
+        hidden = len(value.get("items") or [])
+    return {"title": INDICATOR_TITLES.get(key, key), "locked": True, "hidden": hidden,
+            "headline": INDICATOR_TITLES.get(key, key) + " : réservé au Pro", "preview": _locked_preview(hidden)}
+
+
+def mask_market(out: dict, limits: dict) -> dict:
+    """Applique les limites de l'offre (Free) à la réponse de market_overview (copie)."""
+    if limits.get("market_open_indicators") is None:
+        return out
+    top = limits["market_top"]
+    open_keys = set(limits["market_open_indicators"])
+    masked = {}
+    for key, value in out["indicators"].items():
+        if key not in open_keys:
+            masked[key] = _locked_indicator(key, value)
+            continue
+        value = dict(value)
+        if key == "skills":
+            value["top"] = value["top"][:top]
+            value["by_family"] = [{**f, "items": f["items"][:top]} for f in value["by_family"]]
+        if key == "roles":
+            value["families"] = value["families"][:top]
+        value["hidden"] = max(0, (value.get("total") or 0) - top)
+        masked[key] = value
+    return {**out, "indicators": masked}
+
+
+def locked_me() -> dict:
+    """Onglet « Toi face au marché » pour un utilisateur Free : aperçu générique, aucune donnée réelle."""
+    section = {"locked": True, "preview": _locked_preview(5)}
+    return {
+        "locked": True, "family": None, "family_label": None,
+        "missing": {"title": "Compétences qui te manquent le plus souvent",
+                    "headline": "Les compétences qui reviennent dans tes meilleures offres et que tu n'as pas encore",
+                    **section},
+        "coverage": {"title": "Ta couverture des offres de ta famille",
+                     "headline": "La part des offres de ta famille dont tu coches l'essentiel", **section},
+        "strengths": {"title": "Tes points forts recherchés",
+                      "headline": "Ce que tu as et que le marché demande", **section},
+        "salary": {"title": "Salaires de ta famille face à tes attentes",
+                   "headline": "Où se situent les salaires affichés par rapport à tes attentes", **section},
+    }

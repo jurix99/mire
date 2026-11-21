@@ -9,7 +9,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from . import market
+from . import entitlements, market
 from . import taxonomy as tx
 from .db import get_db
 from .entitlements import RequireAdmin
@@ -36,18 +36,32 @@ def _check(period: str, domain: str | None, family: str | None, count_by: str) -
 @router.get("/analytics/market")
 def analytics_market(db: DB, user: Me, period: str = "90j", domain: str | None = None, family: str | None = None,
                      count_by: str = "entreprise") -> dict:
-    """Indicateurs de l'onglet Marché, avec leurs effectifs et le périmètre réel."""
+    """Indicateurs de l'onglet Marché, avec leurs effectifs et le périmètre réel.
+
+    Free (PLAN_LIMITS market_*) : période ramenée à 90 jours, listes courtes, indicateurs réservés floutés."""
     domain, family = domain or None, family or None
     _check(period, domain, family, count_by)
+    plan = entitlements.plan_of(db, user)
+    limits = entitlements.limits(plan)
+    allowed = limits["market_periods"]
+    period_locked = allowed is not None and period not in allowed
+    if period_locked:
+        period = allowed[0]
     out = market.cached(("market", period, domain, family, count_by), lambda: market.market_overview(
         market.load_facts(db), period=period, domain=domain, family=family, count_by=count_by))
-    return {**out, "options": market.options()}
+    out = market.mask_market(out, limits)
+    return {**out, "plan": plan, "period_locked": period_locked, "allowed_periods": allowed,
+            "options": market.options()}
 
 
 @router.get("/analytics/me")
 def analytics_me(db: DB, user: Me) -> dict:
-    """Indicateurs de l'onglet « Toi face au marché »."""
-    return market.me_overview(db, user, market.cached(("facts",), lambda: market.load_facts(db)))
+    """Indicateurs de l'onglet « Toi face au marché » (Pro) ; Free : aperçu générique flouté."""
+    plan = entitlements.plan_of(db, user)
+    if not entitlements.limits(plan)["market_me"]:
+        return {**market.locked_me(), "plan": plan}
+    return {**market.me_overview(db, user, market.cached(("facts",), lambda: market.load_facts(db))), "plan": plan,
+            "locked": False}
 
 
 @router.get("/admin/taxonomy-health", dependencies=[RequireAdmin])
