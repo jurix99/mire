@@ -58,9 +58,9 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "digest_email": False,  # (plus tard) e-mail récapitulatif
         # Analytics « Marché » : période, taille des listes, indicateurs en clair ; le reste est flouté
         # (nombre d'éléments cachés seulement) ; « Toi face au marché » réservé au Pro
-        "market_periods": ("90j",),
+        "market_periods": ["90j"],  # listes (pas de tuples) : identiques une fois passées en JSON (/api/me)
         "market_top": 5,
-        "market_open_indicators": ("skills", "roles"),
+        "market_open_indicators": ["skills", "roles"],
         "market_me": False,
     },
     "pro": {

@@ -90,7 +90,8 @@ def investor_names(value: str | None) -> list[str]:
     out = []
     for part in re.split(r"[,;/&+\n]|\bet\b|\band\b|\(|\)", value or ""):
         key = norm(part).strip(" .-")
-        if len(key) < 2 or key in _NOT_INVESTOR or key.startswith(("avec ", "with ", "aupres ")):
+        if (len(key) < 2 or key in _NOT_INVESTOR or key.startswith(("avec ", "with ", "aupres "))
+                or re.search(r"\bangels?\b", key)):  # « quelques business angels », « angels » : pas un fonds
             continue
         out.append(_ALIAS.get(key, part.strip(" .-")))
     return list(dict.fromkeys(out))

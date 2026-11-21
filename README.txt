@@ -30,6 +30,9 @@ Architecture
               - app/matching.py     présélection avant Gemini : exclusions dures + similarité pgvector
                                     (embeddings.py, modèle multilingue local via fastembed)
               - app/frontend.py     front servi par FastAPI en production (sans nginx), limites de taille
+              - app/taxonomy.py     LISTE FERMÉE des catégories (familles de postes, compétences, secteurs)
+              - app/classify.py     classement de chaque offre sur la liste (règles, puis Gemini à énumérations)
+              - app/market.py       agrégats du marché (page Analytics, baromètre public) ; analytics_api.py
               - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau) ; test_postgres.py
                                     (marqueur postgres) : seulement avec TEST_POSTGRES_URL
               - scripts/eval_reference.py  évaluation de référence avec le vrai Gemini (voir plus bas)
@@ -140,6 +143,10 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
                                                       chiffres du radar, logos des seules entreprises visibles en Free
          /api/me, /api/dashboard, /api/analytics, /api/statuses
          /api/me/export, DELETE /api/me               RGPD : export JSON de toutes vos données, suppression du compte
+         /api/analytics/market?domain=&family=&period=&count_by=   onglet Marché (Free : masqué en partie)
+         /api/analytics/me                            onglet « Toi face au marché » (Pro)
+         /api/admin/taxonomy-health                   admin : part « autre », libellés hors liste, compétences absentes
+         /api/public/barometer                        SANS session : baromètre (agrégats, 24 h de cache)
          /mentions-legales, /cgv, /confidentialite    pages légales, publiques (sans session)
          /api/companies[/{id}[/logo]], /api/jobs[/{id}[/status]], /api/applications[/{id}]
          /api/profile                                 GET, PATCH (champs envoyés remplacés)
@@ -369,3 +376,26 @@ supprimés par le job quotidien. Fichiers importés (CV, export LinkedIn) jamais
 Rétractation : pas de case à cocher ; la mention est affichée au-dessus des boutons de paiement, le clic vaut
 demande d'accès immédiat et renonciation (horodatée : subscriptions.withdrawal_waived_at), rappelée sur la
 page Stripe (custom_text).
+
+------------------------------------------------------------------
+Analytics du marché (onglets Marché et Toi face au marché)
+------------------------------------------------------------------
+Liste fermée (backend/app/taxonomy.py, seule source de vérité) : 6 domaines, 20 familles de postes (+ autre),
+séniorité (4 niveaux), contrat (stage et alternance exclus des statistiques), 114 compétences en 13 familles
+avec synonymes, 16 secteurs du produit. On ne crée JAMAIS de catégorie à partir d'une offre : une valeur hors
+liste devient « autre » et est comptée (table taxonomy_misses, section admin de l'onglet Marché).
+Ajouter / retirer une entrée : modifier taxonomy.py, augmenter TAXONOMY_VERSION, déployer (la liste est
+rechargée par la migration, par `python -m app.jobs taxonomy` et à chaque daily ; les offres d'une version
+antérieure sont reclassées).
+
+Classement (classify.py, une fois par offre, refait si le titre ou la description change) : règles d'abord
+(mots-clés d'intitulé, département de l'ATS, synonymes, salaire, contrat), puis Gemini (GEMINI_EVAL_MODEL) par
+lots de 8 offres, avec un schéma de sortie en énumérations ; tout est revalidé. Plafond : CLASSIFY_MAX_PER_RUN
+(300) par daily, le reste en tâche classify_jobs ; quota Gemini atteint : arrêt propre, reprise 30 min plus tard.
+  python -m app.jobs classify            classe ce qui est en attente
+  python -m app.jobs classify --all      reclasse tout le stock (premier déploiement, changement de la liste)
+
+Agrégats : vue matérialisée mv_market_jobs (une ligne par offre classée), REFRESH CONCURRENTLY à la fin de
+daily ; indicateurs calculés depuis ces faits (market.py), sans LLM à l'affichage. Seuils (market.py) :
+catégorie cachée sous 5 offres, « peu de données » sous 20 ; comptage par entreprise (défaut) ou par offre.
+Free : compétences et postes en clair sur 90 jours (top 5), le reste flouté (PLAN_LIMITS market_*).

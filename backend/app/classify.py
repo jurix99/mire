@@ -98,6 +98,17 @@ CONTRACT_RULES = [
     ("cdd", phrases(["cdd", "fixed-term", "fixed term", "temporary contract", "contrat a duree determinee"])),
     ("cdi", phrases(["cdi", "permanent contract", "full-time permanent", "contrat a duree indeterminee"])),
 ]
+# Dans la DESCRIPTION, seulement des formulations sans ambiguïté : « stage » y désigne souvent le stade de
+# l'entreprise (« early stage », « late-stage ») et « intern » peut viser un autre poste
+TEXT_CONTRACT_RULES = [
+    ("stage", phrases(["internship", "stage de fin d'etudes", "stage de 6 mois", "stage de six mois",
+                       "convention de stage", "offre de stage", "stage de 4 a 6 mois"])),
+    ("alternance", phrases(["alternance", "contrat d'apprentissage", "contrat de professionnalisation",
+                            "work-study program"])),
+    ("freelance", phrases(["mission freelance", "freelance contract", "contrat freelance", "tjm"])),
+    ("cdd", phrases(["cdd", "fixed-term contract", "contrat a duree determinee"])),
+    ("cdi", phrases(["cdi", "permanent contract", "contrat a duree indeterminee"])),
+]
 REGION_RULES = [(rid, phrases(words)) for rid, words in [
     ("dach", ["dach", "germany", "allemagne", "austria", "autriche", "switzerland", "suisse", "deutschland"]),
     ("uk", ["uk", "united kingdom", "royaume-uni", "london", "londres"]),
@@ -183,7 +194,7 @@ def by_rules(job: Job) -> Classification:
         c.role_family = family
     c.seniority = _first(SENIORITY_RULES, title) or "inconnu"
     # Contrat : l'intitulé d'abord (« Stage - Data »), puis le texte pour les contrats explicites
-    c.contract = _first(CONTRACT_RULES, title) or _first(CONTRACT_RULES, text) or "inconnu"
+    c.contract = _first(CONTRACT_RULES, title) or _first(TEXT_CONTRACT_RULES, text) or "inconnu"
     c.skills = {sid: True for sid, rx in SKILL_RULES if rx is not None and rx.search(text)}
     c.salary_min, c.salary_max, c.salary_kind = parse_salary(job.salary or "")
     if c.salary_min is None:
