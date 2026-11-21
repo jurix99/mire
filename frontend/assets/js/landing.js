@@ -1,6 +1,8 @@
 // Mire — landing publique : liens de connexion, état connecté, prix et logos (API publique), animations.
 // Page indépendante : n'importe pas app.js (qui redirige vers la connexion en cas de 401).
 
+import { planFeatures } from "./plans.js";
+
 document.documentElement.classList.add("js");
 
 const $ = (sel, root = document) => root.querySelector(sel);
@@ -71,32 +73,6 @@ function countUp(el, target) {
   requestAnimationFrame(step);
 }
 
-const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
-
-function features(free, pro) {
-  const f = free;
-  return {
-    free: [
-      [true, `${plural(f.visible_jobs, "offre")} en clair parmi les plus pertinentes pour vous`],
-      [false, "La plus pertinente, et toutes les autres offres"],
-      [true, `${plural(f.assessments_per_week, "évaluation")} par semaine`],
-      [true, `${f.active_processes} process actifs`],
-      [true, `${plural(f.imports_total, "import")} de profil, ${plural(f.chat_per_month, "message")} à l'assistant par mois`],
-      [false, "Levées de fonds, investisseurs et ATS"],
-      [false, "Analyse du profil et synthèse des règles"],
-    ],
-    pro: [
-      [true, "Toutes les offres, la plus pertinente comprise"],
-      [true, "Levées de fonds, investisseurs, effectif et ATS"],
-      [true, "Notes et analyses de l'IA sur toutes les offres"],
-      [true, "Évaluations prioritaires, sans plafond"],
-      [true, "Process et imports de profil illimités"],
-      [true, "Analyse du profil et synthèse des règles"],
-      [true, `${pro.chat_per_month} messages à l'assistant par mois`],
-    ],
-  };
-}
-
 const featureList = (items) => items.map(([on, text]) => `<li class="${on ? "" : "off"}">${esc(text)}</li>`).join("");
 
 async function loadPublic() {
@@ -111,7 +87,7 @@ async function loadPublic() {
   }
   // Prix et limites : lus côté serveur (PLAN_LIMITS), jamais écrits en dur ici
   $$("[data-price]").forEach((el) => (el.textContent = data.prices[el.dataset.price] ?? "—"));
-  const list = features(data.limits.free, data.limits.pro);
+  const list = planFeatures(data.limits.free, data.limits.pro);
   $("#free-features").innerHTML = featureList(list.free);
   $("#pro-features").innerHTML = featureList(list.pro);
 

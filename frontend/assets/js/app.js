@@ -1,5 +1,7 @@
 // Mire — code partagé par toutes les pages (API, barre latérale, pastilles, logos, formulaires)
 
+import { planFeatures } from "./plans.js";
+
 // --- Statuts (clés identiques à l'enum process_status du backend) -----------
 
 export const STATUSES = [
@@ -274,42 +276,46 @@ export async function openProModal() {
   const pro = billing?.pro_limits ?? {};
   const prices = billing?.prices ?? {};
   const isPro = billing && billing.plan === "pro";
+  const list = planFeatures(free, pro);
+  const feats = (items) => html`<ul class="plan-feats">${items.map(([on, text]) => html`<li class="${on ? "" : "off"}">${text}</li>`)}</ul>`;
+  // « 10 € TTC / mois » -> montant en grand, le reste en petit (comme sur la landing)
+  const [, amount = prices.monthly ?? "Pro", unit = ""] = (prices.monthly ?? "").match(/^(.*?€)\s*(.*)$/) ?? [];
   const dlg = document.createElement("dialog");
   dlg.className = "pro-dialog";
   dlg.setAttribute("aria-label", "Passer à l'offre Pro");
   dlg.innerHTML = html`
     <div class="dialog-body">
-      <div class="job-head">
-        <div class="grow"><p class="label">// Mire Pro</p><h2>Le radar complet, à jour, et le travail de l'IA</h2></div>
+      <div class="pro-head">
+        <div>
+          <p class="label">// Mire Pro</p>
+          <h2>Le radar complet.</h2>
+          <p class="muted">Toutes les offres, les levées et le travail de l'IA, sans attendre.</p>
+        </div>
         <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
       </div>
-      <ul class="pro-features">
-        <li>Toutes les offres en clair, la plus pertinente comprise${free.visible_jobs ? ` (en Free : ${free.visible_jobs} offres)` : ""}</li>
-        <li>Levées de fonds, montants, investisseurs, effectifs et ATS de chaque entreprise</li>
-        <li>La note de l'IA, son détail et le « pourquoi » sur toutes les offres, évaluées en priorité</li>
-        <li>Process illimités, analyse de votre profil et règles apprises de vos retours</li>
-        <li>Assistant${pro.chat_per_month ? ` : jusqu'à ${pro.chat_per_month} messages par mois` : ""}${free.chat_per_month ? ` (Free : ${free.chat_per_month})` : ""}</li>
-      </ul>
-      ${isPro ? html`<p class="small">Vous avez déjà l'offre Pro.</p>` : html`
-      <div class="pro-prices">
-        <div class="pro-price">
-          <span class="label">// Mensuel</span>
-          <span class="amount">${prices.monthly ?? "Pro mensuel"}</span>
-          <span class="small muted">Sans engagement, résiliable à tout moment depuis votre profil.</span>
-          <button type="button" class="btn" data-checkout="monthly" disabled>Passer Pro</button>
-        </div>
-        <div class="pro-price">
-          <span class="label">// Pass 3 mois</span>
-          <span class="amount">${prices.pass_3m ?? "Pass 3 mois"}</span>
-          <span class="small muted">Paiement unique, sans renouvellement automatique.</span>
-          <button type="button" class="btn ghost" data-checkout="pass_3m" disabled>Acheter le Pass</button>
-        </div>
+      <div class="pro-plans">
+        <article class="plan">
+          <p class="plan-name">Free ${isPro ? "" : html`<span class="plan-current">Votre offre</span>`}</p>
+          <p class="plan-price">0 €</p>
+          <p class="plan-sub">Pour découvrir le radar.</p>
+          ${feats(list.free)}
+        </article>
+        <article class="plan pro">
+          <p class="plan-name">Pro <span class="plan-tag">Radar complet</span></p>
+          <p class="plan-price">${amount} <small>${unit}</small></p>
+          <p class="plan-sub">Sans engagement. Ou <strong>${prices.pass_3m ?? "le Pass 3 mois"}</strong>, sans renouvellement.</p>
+          ${feats(list.pro)}
+          ${isPro ? html`<p class="plan-sub"><strong>Vous avez déjà l'offre Pro.</strong></p>` : html`
+          <label class="pro-waiver"><input type="checkbox" data-waiver>
+            <span>J'accède à Mire Pro dès le paiement et je renonce à mon droit de rétractation de 14 jours.</span></label>
+          <div class="plan-ctas">
+            <button type="button" class="plan-cta" data-checkout="monthly" disabled title="Cochez la case ci-dessus">Passer Pro</button>
+            <button type="button" class="plan-cta ghost" data-checkout="pass_3m" disabled title="Cochez la case ci-dessus">Pass 3 mois</button>
+          </div>
+          <p class="form-error" hidden></p>`}
+        </article>
       </div>
-      <label class="pro-waiver"><input type="checkbox" data-waiver>
-        <span>Je demande l'accès immédiat à Mire Pro et je renonce expressément à mon droit de rétractation de 14 jours
-        (service numérique fourni dès le paiement).</span></label>
-      <p class="small muted">Prix TTC. Paiement sécurisé par Stripe.</p>
-      <p class="form-error" hidden></p>`}
+      <p class="small muted pro-note">Prix TTC · Paiement sécurisé par Stripe · Résiliable en ligne</p>
     </div>`.s;
   document.body.append(dlg);
   dlg.addEventListener("close", () => dlg.remove());

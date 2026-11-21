@@ -503,18 +503,68 @@ body.not-admin [data-admin] { display: none !important; }
 }
 .pro-tag svg { width: 9px; height: 9px; }
 
-dialog.pro-dialog { width: min(600px, calc(100vw - 32px)); }
-.pro-dialog ul.pro-features { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 14px; }
-.pro-prices { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.pro-price {
-  display: grid; gap: 6px; align-content: start; padding: 16px; border: 1px solid var(--border);
-  border-radius: var(--radius-sm); background: var(--white);
+/* Fenêtre « Passer Pro » : mêmes cartes Free / Pro que la section Tarifs de la landing */
+dialog.pro-dialog { width: min(860px, calc(100vw - 32px)); border-radius: 28px; }
+.pro-dialog .dialog-body { padding: 28px; gap: 20px; }
+.pro-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.pro-head h2 { font-size: 30px; font-weight: 500; letter-spacing: -.03em; line-height: 1.1; margin: 6px 0 4px; }
+.pro-plans { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px; }
+.pro-dialog .plan {
+  display: grid; align-content: start; gap: 10px; padding: 26px; border-radius: 22px;
+  background: var(--bg); border: 1px solid var(--border);
 }
-.pro-price .amount { font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
-.pro-price .btn { justify-content: center; margin-top: 6px; }
-.pro-waiver { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); }
-.pro-waiver input { margin-top: 3px; flex: none; }
-@media (max-width: 560px) { .pro-prices { grid-template-columns: 1fr; } }
+.pro-dialog .plan-name {
+  display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 600; letter-spacing: .1em;
+  text-transform: uppercase; color: var(--muted);
+}
+.pro-dialog .plan-current {
+  padding: 3px 8px; border-radius: 100px; background: var(--white); border: 1px solid var(--border);
+  font-size: 10px; letter-spacing: .06em; color: var(--text);
+}
+.pro-dialog .plan-tag {
+  padding: 3px 8px; border-radius: 100px; background: rgba(168, 203, 255, .18); color: #a8cbff;
+  font-size: 10px; letter-spacing: .06em;
+}
+.pro-dialog .plan-price { font-size: 40px; font-weight: 400; letter-spacing: -.045em; line-height: 1.05; margin: 0; }
+.pro-dialog .plan-price small { font-size: 14px; letter-spacing: 0; opacity: .65; }
+.pro-dialog .plan-sub { font-size: 13px; color: var(--muted); margin: 0; }
+.pro-dialog .plan-feats { list-style: none; margin: 6px 0 4px; padding: 0; display: grid; gap: 9px; font-size: 14px; }
+.pro-dialog .plan-feats li { display: grid; grid-template-columns: 18px 1fr; gap: 10px; align-items: start; }
+.pro-dialog .plan-feats li::before {
+  content: ""; width: 18px; height: 18px; margin-top: 1px; border-radius: 50%;
+  background: var(--white) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231a1a1a' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E") center / 11px no-repeat;
+}
+.pro-dialog .plan-feats li.off { color: var(--muted); opacity: .75; }
+.pro-dialog .plan-feats li.off::before { background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='3' stroke-linecap='round'%3E%3Cpath d='M7 12h10'/%3E%3C/svg%3E"); }
+/* Carte Pro : sombre, halo bleu (comme .plan.pro de la landing) */
+.pro-dialog .plan.pro {
+  background: #1a1a1a; color: var(--white); border-color: #1a1a1a;
+  background-image: radial-gradient(80% 60% at 100% 0%, rgba(0, 153, 255, .35), transparent 60%);
+}
+.pro-dialog .plan.pro .plan-name { color: #a8cbff; }
+.pro-dialog .plan.pro .plan-sub { color: rgba(255, 255, 255, .65); }
+.pro-dialog .plan.pro .plan-sub strong { color: var(--white); font-weight: 500; }
+.pro-dialog .plan.pro .plan-feats li::before {
+  background-color: rgba(255, 255, 255, .12); background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a8cbff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 12 4 4 8-8'/%3E%3C/svg%3E");
+}
+.pro-waiver { display: flex; gap: 10px; align-items: flex-start; font-size: 12px; color: rgba(255, 255, 255, .7); cursor: pointer; }
+.pro-waiver input { margin-top: 2px; flex: none; accent-color: #a8cbff; }
+.plan-ctas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.plan-cta {
+  height: 46px; border-radius: 100px; border: 1px solid var(--white); background: var(--white); color: #1a1a1a;
+  font: inherit; font-weight: 600; cursor: pointer; transition: transform .12s, box-shadow .12s, opacity .12s;
+}
+.plan-cta:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 8px 24px rgba(0, 153, 255, .3); }
+.plan-cta.ghost { background: transparent; color: var(--white); border-color: rgba(255, 255, 255, .35); }
+.plan-cta:disabled { opacity: .4; cursor: not-allowed; }
+.plan-cta:focus-visible { outline: 2px solid #a8cbff; outline-offset: 2px; }
+.pro-dialog .plan.pro .form-error { color: #fecaca; }
+.pro-note { text-align: center; margin: 0; }
+@media (max-width: 720px) {
+  .pro-plans { grid-template-columns: 1fr; }
+  .pro-dialog .plan.pro { order: -1; } /* sur mobile : l'offre Pro d'abord */
+  .pro-dialog .dialog-body { padding: 20px; }
+}
 
 /* --- Assistant (chat flottant) --------------------------------------------- */
 
