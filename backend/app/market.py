@@ -34,6 +34,7 @@ log = logging.getLogger("mire.market")
 MIN_JOBS = 5  # une catégorie avec moins de 5 offres n'est pas affichée
 LOW_DATA = 20  # un pourcentage calculé sur moins de 20 offres (ou entreprises) est marqué « peu de données »
 TOP = 10  # éléments par liste à l'écran (« voir tout » au-delà)
+FULL_LIST = 50  # éléments renvoyés pour « voir tout »
 MAX_TRENDS = 5  # compétences en hausse, et autant en baisse
 MAX_STACKS = 5
 STACK_MIN_SUPPORT = 5  # une paire / un trio doit apparaître dans au moins 5 offres
@@ -343,7 +344,7 @@ def stacks(facts: Facts, rows, count_by, family=None) -> dict:
     return {"headline": headline, "items": kept[:MAX_STACKS], "total": len(kept)}
 
 
-def salaries(rows) -> dict:
+def salaries(rows, limit=TOP) -> dict:
     groups = defaultdict(list)
     for r in rows:
         if r.salary_min_keur and r.salary_max_keur and r.salary_kind in ("fixe", "ote"):
@@ -365,11 +366,11 @@ def salaries(rows) -> dict:
                                 f"{'OTE ' if first['kind'] == 'ote' else ''}en {first['family_label'].lower()}"
                                 f"{'' if first['seniority'] == 'inconnu' else ' ' + first['seniority_label'].lower()}")
                 if first else "Trop peu d'offres affichent un salaire pour une médiane")
-    return {"headline": headline, "items": items[:TOP], "total": len(items), "with_salary": with_salary,
+    return {"headline": headline, "items": items[:limit], "total": len(items), "with_salary": with_salary,
             "base": len(rows)}
 
 
-def work_modes(rows) -> dict:
+def work_modes(rows, limit=TOP) -> dict:
     items = []
     for fam, rs in _group(rows, lambda r: r.role_family).items():
         known = [r for r in rs if r.work_mode in WORK_MODES]
@@ -387,7 +388,7 @@ def work_modes(rows) -> dict:
         mode, n = Counter(r.work_mode for r in known_all).most_common(1)[0]
         headline = (f"{_pct(n / len(known_all))} des offres qui le précisent sont en "
                     f"{WORK_MODES[mode].lower()}")
-    return {"headline": headline, "items": items[:TOP], "total": len(items), "known": len(known_all)}
+    return {"headline": headline, "items": items[:limit], "total": len(items), "known": len(known_all)}
 
 
 def after_funding(rows) -> dict:
@@ -430,7 +431,7 @@ def after_funding(rows) -> dict:
             "total": len(by_round) + len(firsts)}
 
 
-def lifetimes(rows) -> dict:
+def lifetimes(rows, limit=TOP) -> dict:
     groups = defaultdict(list)
     for r in rows:
         if r.closed_on and r.closed_on >= r.ref_date:
@@ -441,24 +442,24 @@ def lifetimes(rows) -> dict:
     all_days = [d for v in groups.values() for d in v]
     headline = (f"Une offre reste en ligne {round(statistics.median(all_days))} jours en médiane"
                 if len(all_days) >= MIN_JOBS else "Pas encore assez d'offres fermées pour mesurer leur durée")
-    return {"headline": headline, "items": items[:TOP], "total": len(items), "closed": len(all_days)}
+    return {"headline": headline, "items": items[:limit], "total": len(items), "closed": len(all_days)}
 
 
-def markets(rows, count_by) -> dict:
+def markets(rows, count_by, limit=TOP) -> dict:
     gtm = [r for r in rows if r.domain in tx.GTM_DOMAINS]
     base = base_units(gtm, count_by)
     groups = defaultdict(list)
     for r in gtm:
         for region in r.market_regions or []:
             groups[region].append(r)
-    items, total = ranked(groups, tx.MARKET_REGIONS, base, count_by)
+    items, total = ranked(groups, tx.MARKET_REGIONS, base, count_by, limit)
     first = items[0] if items else None
     headline = (_careful(first, f"{first['label']} : le marché le plus visé par les postes commerciaux et marketing")
                 if first else "Les marchés visés sont rarement précisés")
     return {"headline": headline, "items": items, "total": total, "base": base}
 
 
-def investors(rows) -> dict:
+def investors(rows, limit=TOP) -> dict:
     groups = defaultdict(list)
     for r in rows:
         if r.closed_on is None:
@@ -470,7 +471,7 @@ def investors(rows) -> dict:
     first = items[0] if items else None
     headline = (f"{first['label']} : le portefeuille qui recrute le plus ({first['jobs']} offres ouvertes)"
                 if first else "Pas encore assez d'offres ouvertes par fonds")
-    return {"headline": headline, "items": items[:TOP], "total": len(items)}
+    return {"headline": headline, "items": items[:limit], "total": len(items)}
 
 
 INDICATORS = ("skills", "trends", "roles", "stacks", "salaries", "work_modes", "after_funding", "lifetimes",
@@ -503,13 +504,13 @@ def market_overview(facts: Facts, *, period: str = "90j", domain: str | None = N
         "trends": skill_trends(facts, count_by, domain, family, today),
         "roles": roles(broad, count_by, limit, domain, family),
         "stacks": stacks(facts, rows, count_by, family),
-        "salaries": salaries(rows),
-        "work_modes": work_modes(rows),
+        "salaries": salaries(rows, limit),
+        "work_modes": work_modes(rows, limit),
         # Après la levée : toutes les familles (comparer tech et commercial n'a pas de sens dans une seule famille)
         "after_funding": after_funding(scope(facts, period=period, domain=None, family=None, today=today)),
-        "lifetimes": lifetimes(rows),
-        "markets": markets(broad if not family else rows, count_by),
-        "investors": investors(rows),
+        "lifetimes": lifetimes(rows, limit),
+        "markets": markets(broad if not family else rows, count_by, limit),
+        "investors": investors(rows, limit),
     }
     return {
         "perimeter": perimeter(rows, period, today),

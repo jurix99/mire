@@ -48,7 +48,8 @@ def analytics_market(db: DB, user: Me, period: str = "90j", domain: str | None =
     if period_locked:
         period = allowed[0]
     out = market.cached(("market", period, domain, family, count_by), lambda: market.market_overview(
-        market.load_facts(db), period=period, domain=domain, family=family, count_by=count_by))
+        market.load_facts(db), period=period, domain=domain, family=family, count_by=count_by,
+        limit=market.FULL_LIST))
     out = market.mask_market(out, limits)
     return {**out, "plan": plan, "period_locked": period_locked, "allowed_periods": allowed,
             "options": market.options()}
