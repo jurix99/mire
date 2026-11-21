@@ -148,6 +148,9 @@ def cmd_classify(reclassify_all: bool) -> int:
                 total[k] += stats[k]
             if stats["stopped"] or not stats["remaining"] or not stats["classified"]:
                 break
+        from . import market
+
+        market.refresh_facts(db)  # les analytics voient tout de suite le nouveau classement
     log.info("Classement terminé : %s", total, extra={**total, "remaining": stats["remaining"],
                                                       "stopped": stats["stopped"]})
     return 0

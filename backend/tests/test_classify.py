@@ -166,3 +166,22 @@ def test_early_stage_startup_is_not_an_internship(db, ref):
     real = add(db, "Data Analyst", "Internship of 6 months, convention de stage requise.")
     classify.classify_pending_jobs(db)
     assert job.contract_type == "cdi" and real.contract_type == "stage"
+
+
+def test_refused_request_classifies_nothing(db, ref):
+    """Requête refusée (clé, modèle, schéma) : on ne classe rien par les seules règles, tout reste à classer."""
+    from app.llm import LLMError
+
+    add(db, "Backend Engineer")
+    stats = classify.classify_pending_jobs(db, FakeClassifier(fail=LLMError("Requête refusée par Gemini (400)")))
+    assert stats["stopped"] and stats["classified"] == 0 and stats["remaining"] == 1
+
+
+def test_new_output_format_required_and_preferred_skills(db, ref):
+    job = add(db, "Data Engineer", "SQL et dbt")
+    classify.classify_pending_jobs(db, FakeClassifier({"Data Engineer": {
+        "role_family": "data", "required_skills": ["sql", "spark"], "preferred_skills": ["dbt", "pas_dans_la_liste"],
+        "salary_min_keur": 0, "salary_max_keur": 0}}))
+    assert skills_of(db, job) == {"sql": True, "spark": True, "dbt": False}
+    assert job.salary_min_keur is None  # 0 = pas de salaire affiché
+    assert "pas_dans_la_liste" in {m.label for m in db.scalars(select(TaxonomyMiss))}

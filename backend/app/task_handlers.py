@@ -28,6 +28,11 @@ def collect(db: Session, payload: dict) -> None:
     log.info("%s", run.summary)
     if run.jobs_added or run.jobs_closed:
         tasks.jobs_changed(db)
+    else:
+        from . import classify
+
+        if classify.count_pending(db):  # stock pas encore classé (ex. après une migration de la liste)
+            tasks.enqueue(db, "classify_jobs", dedup_key="classify_jobs")
 
 
 @tasks.handler("check_company")
@@ -91,6 +96,11 @@ def classify_jobs(db: Session, payload: dict) -> None:
     if stats["remaining"]:
         tasks.enqueue(db, "classify_jobs", dedup_key="classify_jobs",
                       delay=CLASSIFY_RETRY_DELAY if stats["stopped"] else None)
+    elif stats["classified"]:
+        # Tout est classé : faits du marché à jour (en local, il n'y a pas de job daily pour le faire)
+        from . import market
+
+        market.refresh_facts(db)
 
 
 @tasks.handler("daily")

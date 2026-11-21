@@ -206,7 +206,8 @@ def test_worker_handlers_chain_without_local_threads(db, monkeypatch, fake_llm, 
     assert stats["failed"] == 0
     kinds = [t.kind for t in db.scalars(select(Task).order_by(Task.id))]
     # Profil modifié (match_user), offre ajoutée (embed_jobs) ; le 2e match_user ne trouve plus rien à évaluer
-    assert kinds == ["match_user", "embed_jobs", "assess_user", "match_user"]
+    assert [k for k in kinds if k != "classify_jobs"] == ["match_user", "embed_jobs", "assess_user", "match_user"]
+    assert "classify_jobs" in kinds  # classement sur la liste fermée (analytics)
     assert db.scalar(select(func.count(JobAssessment.id)).where(JobAssessment.user_id == alice.id)) == 1
     assert all(t.status == "done" for t in db.scalars(select(Task)))
 

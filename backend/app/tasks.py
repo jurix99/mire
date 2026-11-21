@@ -218,8 +218,10 @@ def _wake_local() -> None:
 
 
 def jobs_changed(db: Session) -> None:
-    """Offres ajoutées ou modifiées : embeddings, puis présélection et évaluation pour chaque utilisateur."""
+    """Offres ajoutées ou modifiées : embeddings, puis présélection et évaluation pour chaque utilisateur ;
+    classement sur la liste fermée et faits du marché (analytics)."""
     enqueue(db, "embed_jobs", dedup_key="embed_jobs")
+    enqueue(db, "classify_jobs", dedup_key="classify_jobs")
     _wake_assessor()
 
 

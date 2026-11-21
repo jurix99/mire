@@ -36,6 +36,8 @@ from .models import Job, JobSkill, TaxonomyMiss
 log = logging.getLogger("mire.classify")
 
 CLASSIFY_MAX_PER_RUN = int(os.environ.get("CLASSIFY_MAX_PER_RUN", "300"))
+# Pause entre deux appels Gemini (s) : 0 en production (clé payante) ; ~4 s sur le palier gratuit (15 requêtes / min)
+CLASSIFY_PAUSE_S = float(os.environ.get("CLASSIFY_PAUSE_S", "0"))
 CLASSIFY_BATCH = 8
 SUMMARY_CHARS = 3000
 SALARY_RANGE_KEUR = (15, 500)  # en dehors : salaire mensuel, journalier ou erreur -> ignoré
@@ -216,13 +218,15 @@ Pour chaque offre (job_id identique à celui fourni) :
 - seniority : junior (0-2 ans), confirme (2-5 ans), senior (5 ans et plus), lead (management, staff, principal,
   head of) ; inconnu si rien ne l'indique.
 - contract : cdi, cdd, stage, alternance, freelance ; inconnu si non précisé.
-- skills : les compétences de la liste citées par l'offre, avec required = true si elle est exigée, false si elle
-  est seulement appréciée (« un plus », « nice to have », « idéalement »). N'invente pas : seulement ce que l'offre
-  mentionne. Une langue ne compte que si elle est EXIGÉE : une offre rédigée en anglais n'exige pas l'anglais.
-  Le type de clients (B2B, B2C, PME, grands comptes) compte s'il est indiqué.
+- required_skills : les identifiants (liste plus bas) des compétences EXIGÉES par l'offre ;
+  preferred_skills : celles seulement appréciées (« un plus », « nice to have », « idéalement »). Uniquement des
+  identifiants de la liste, et seulement ce que l'offre mentionne. Une langue ne compte que si elle est EXIGÉE :
+  une offre rédigée en anglais n'exige pas l'anglais. Le type de clients (B2B, B2C, PME, grands comptes) compte
+  s'il est indiqué.
 - other_skills : les compétences importantes de l'offre absentes de la liste (noms courts, 5 au plus).
 - salary_min_keur / salary_max_keur : fourchette brute ANNUELLE en milliers d'euros si un salaire est affiché
   (convertis $ et £ approximativement ; ignore les TJM et salaires mensuels si tu ne peux pas annualiser) ;
+  0 et 0 si aucun salaire n'est affiché ;
   salary_kind = ote si la rémunération inclut une part variable sur objectifs (fréquent en sales), fixe sinon,
   inconnu sans salaire.
 - market_regions : les marchés que le poste adresse (pour un poste commercial ou marketing surtout) ; vide si non
@@ -230,6 +234,16 @@ Pour chaque offre (job_id identique à celui fourni) :
 - product_sector : le secteur du produit de l'entreprise.
 Réponds uniquement avec le JSON demandé.
 """
+
+
+def instruction() -> str:
+    """Consigne + identifiants de compétences autorisés (trop nombreux pour une énumération du schéma : Gemini
+    refuse un schéma trop ramifié ; la validation côté code reste stricte)."""
+    by_family: dict[str, list[str]] = {}
+    for sid, label, fam, _, _ in tx.SKILLS:
+        by_family.setdefault(fam, []).append(f"{sid} ({label})")
+    lines = [f"- {tx.SKILL_FAMILY_LABEL[f]} : {', '.join(items)}" for f, items in by_family.items()]
+    return INSTRUCTION + "\nIdentifiants de compétences autorisés :\n" + "\n".join(lines) + "\n"
 
 
 def llm_schema() -> dict:
@@ -244,10 +258,10 @@ def llm_schema() -> dict:
             "role_family": enum(tx.role_family_ids()),
             "seniority": enum(tx.SENIORITY_LEVELS),
             "contract": enum(tx.CONTRACT_TYPES),
-            "skills": {"type": "array", "items": {
-                "type": "object",
-                "properties": {"id": enum(tx.skill_ids()), "required": {"type": "boolean"}},
-                "required": ["id", "required"]}},
+            # Compétences : identifiants en texte (une énumération de 114 valeurs dans un tableau rend le schéma
+            # trop ramifié pour Gemini, erreur 400) ; listés dans la consigne, validés par merge()
+            "required_skills": {"type": "array", "items": {"type": "string"}},
+            "preferred_skills": {"type": "array", "items": {"type": "string"}},
             "other_skills": {"type": "array", "items": {"type": "string"}},
             "salary_min_keur": {"type": "number"},
             "salary_max_keur": {"type": "number"},
@@ -255,7 +269,9 @@ def llm_schema() -> dict:
             "market_regions": {"type": "array", "items": enum(tx.MARKET_REGIONS)},
             "product_sector": enum(tx.sector_ids()),
         },
-        "required": ["job_id", "role_family", "seniority", "contract", "skills", "salary_kind", "market_regions",
+        # Tout est requis : des propriétés facultatives multiplient les branches du schéma
+        "required": ["job_id", "role_family", "seniority", "contract", "required_skills", "preferred_skills",
+                     "other_skills", "salary_min_keur", "salary_max_keur", "salary_kind", "market_regions",
                      "product_sector"],
     }
     return {"type": "object", "properties": {"jobs": {"type": "array", "items": item}}, "required": ["jobs"]}
@@ -275,7 +291,9 @@ class LLMJob(BaseModel):
     role_family: str = tx.OTHER
     seniority: str = "inconnu"
     contract: str = "inconnu"
-    skills: list[LLMSkill] = Field(default_factory=list)
+    skills: list[LLMSkill] = Field(default_factory=list)  # ancien format (id, required)
+    required_skills: list[str] = Field(default_factory=list)
+    preferred_skills: list[str] = Field(default_factory=list)
     other_skills: list[str] = Field(default_factory=list)
     salary_min_keur: float | None = None
     salary_max_keur: float | None = None
@@ -311,15 +329,18 @@ def merge(rule: Classification, out: LLMJob) -> Classification:
     c.seniority = rule.seniority if rule.seniority != "inconnu" else (llm_seniority or "inconnu")
     llm_contract = _valid(out.contract, tx.CONTRACT_TYPES, "contract", c.misses)
     c.contract = rule.contract if rule.contract in ("stage", "alternance") else (llm_contract or rule.contract)
-    for s in out.skills:
-        if _valid(s.id, tx.SKILL_LABEL, "skill", c.misses):
-            c.skills[s.id] = c.skills.get(s.id, False) or s.required
+    pairs = [(s.id, s.required) for s in out.skills] + [(sid, True) for sid in out.required_skills] + [
+        (sid, False) for sid in out.preferred_skills]
+    for sid, required in pairs:
+        sid = str(sid).strip()
+        if _valid(sid, tx.SKILL_LABEL, "skill", c.misses):
+            c.skills[sid] = c.skills.get(sid, False) or required
     for sid in rule.skills:  # trouvée par synonyme mais pas citée par le modèle : comptée comme appréciée
         c.skills.setdefault(sid, False)
     for label in out.other_skills[:5]:
         if label.strip():
             c.misses.append(("skill", label.strip()[:120]))
-    lo, hi = out.salary_min_keur, out.salary_max_keur
+    lo, hi = out.salary_min_keur or None, out.salary_max_keur or None  # 0 = pas de salaire affiché
     if lo and not hi:
         hi = lo
     if lo and hi and SALARY_RANGE_KEUR[0] <= lo <= hi <= SALARY_RANGE_KEUR[1]:
@@ -381,7 +402,9 @@ def count_pending(db: Session) -> int:
 def classify_pending_jobs(db: Session, llm=None, limit: int | None = None) -> dict:
     """Classe jusqu'à `limit` offres en attente (CLASSIFY_MAX_PER_RUN par défaut). Sur quota Gemini atteint ou
     Gemini indisponible : arrêt propre, la suite au prochain passage. Retourne des compteurs (journalisés)."""
-    from .llm import LLMUnavailable
+    import time
+
+    from .llm import LLMError, LLMUnavailable
 
     limit = CLASSIFY_MAX_PER_RUN if limit is None else limit
     jobs = pending(db, limit)
@@ -393,8 +416,10 @@ def classify_pending_jobs(db: Session, llm=None, limit: int | None = None) -> di
         outputs: dict[int, LLMJob] = {}
         if llm is not None:
             try:
+                if stats["llm_calls"] and CLASSIFY_PAUSE_S:
+                    time.sleep(CLASSIFY_PAUSE_S)
                 stats["llm_calls"] += 1
-                raw = llm.classify_jobs(INSTRUCTION, [payload(j) for j in batch], llm_schema())
+                raw = llm.classify_jobs(instruction(), [payload(j) for j in batch], llm_schema())
                 for item in (raw or {}).get("jobs", []):
                     try:
                         out = LLMJob.model_validate(item)
@@ -404,6 +429,12 @@ def classify_pending_jobs(db: Session, llm=None, limit: int | None = None) -> di
             except LLMUnavailable as exc:
                 stats["stopped"] = str(exc)[:200]
                 log.warning("Classement interrompu (Gemini indisponible ou quota atteint) : %s", exc)
+                break
+            except LLMError as exc:
+                # Requête refusée (clé, modèle, schéma…) : erreur de configuration, on n'enregistre RIEN (les offres
+                # restent à classer) plutôt que de les classer durablement par les seules règles
+                stats["stopped"] = str(getattr(exc, "detail", exc))[:200]
+                log.error("Classement interrompu (requête refusée par Gemini) : %s", stats["stopped"])
                 break
             except Exception as exc:  # noqa: BLE001  (sortie illisible : ce lot est classé par les règles)
                 log.warning("Classement : sortie Gemini inutilisable, lot classé par les règles : %s", exc)
