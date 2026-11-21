@@ -4,14 +4,17 @@
 #   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1                       # 2 dernières semaines
 #   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind rattrapage      # 6 mois, mois par mois
 #   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind rattrapage -Months 12
+#   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind offres            # offres hors ATS lisible
 #
+# offres : l'agent lit les pages d'offres que Mire ne lit pas seul (Welcome to the Jungle, Notion, page
+# carrières…) et enregistre les offres tech ouvertes (consignes : agent/prompt-offres.md).
 # rattrapage : une exécution de l'agent par tranche d'un mois, de la plus récente à la plus ancienne (chaque
 # tranche est un passage distinct : une interruption ne fait pas perdre les précédentes).
 # L'agent n'a accès qu'à la recherche web, à la lecture de pages, à l'écriture de fichiers dans agent/tmp/
 # et au client de l'API de Mire (agent/mire_api.py) : aucune autre commande.
 # Journal : agent\logs\run-AAAAMMJJ-HHmm.log
 param(
-    [ValidateSet("decouverte", "rattrapage")]
+    [ValidateSet("decouverte", "rattrapage", "offres")]
     [string]$Kind = "decouverte",
     [int]$Months = 6,
     [string]$Model = ""
@@ -73,26 +76,35 @@ $ErrorActionPreference = "Continue"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $OutputEncoding = [System.Text.Encoding]::UTF8
 
-function Invoke-Slice([datetime]$From, [datetime]$To, [string]$RunKind) {
-    $period = "du {0} au {1}" -f $From.ToString("d MMMM yyyy"), $To.ToString("d MMMM yyyy")
-    $prompt = $basePrompt + "`n`n## Cette exécution`nPériode à couvrir : $period (dates des annonces de levée).`n" +
-        "TYPE du passage : $RunKind. Date du jour : $(Get-Date -Format 'dddd d MMMM yyyy')."
-    $claudeArgs = @("-p", $prompt, "--allowedTools", $allowed, "--no-session-persistence", "--output-format", "text")
+function Invoke-Claude([string]$Prompt, [string]$Label) {
+    $claudeArgs = @("-p", $Prompt, "--allowedTools", $allowed, "--no-session-persistence", "--output-format", "text")
     if ($Model) { $claudeArgs += @("--model", $Model) }
-    Write-Log "Début : $period ($RunKind)"
+    Write-Log "Début : $Label"
     & claude @claudeArgs 2>&1 | ForEach-Object {
         $line = "$_"
         Add-Content -Path $Log -Value $line -Encoding utf8  # Tee-Object écrirait en UTF-16 sous PowerShell 5.1
         $line
     }
-    Write-Log ("Fin : {0} (code {1})" -f $period, $LASTEXITCODE)
+    Write-Log ("Fin : {0} (code {1})" -f $Label, $LASTEXITCODE)
     return $LASTEXITCODE
+}
+
+function Invoke-Slice([datetime]$From, [datetime]$To, [string]$RunKind) {
+    $period = "du {0} au {1}" -f $From.ToString("d MMMM yyyy"), $To.ToString("d MMMM yyyy")
+    $prompt = $basePrompt + "`n`n## Cette exécution`nPériode à couvrir : $period (dates des annonces de levée).`n" +
+        "TYPE du passage : $RunKind. Date du jour : $(Get-Date -Format 'dddd d MMMM yyyy')."
+    return Invoke-Claude $prompt "$period ($RunKind)"
 }
 
 $today = Get-Date
 $worst = 0
 if ($Kind -eq "decouverte") {
     $worst = Invoke-Slice $today.AddDays(-14) $today "decouverte"
+} elseif ($Kind -eq "offres") {
+    # Offres des entreprises dont Mire ne lit pas l'ATS (Welcome to the Jungle, Notion, page carrières…)
+    $prompt = (Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot "prompt-offres.md")) +
+        "`n`n## Cette exécution`nDate du jour : $(Get-Date -Format 'dddd d MMMM yyyy')."
+    $worst = Invoke-Claude $prompt "offres hors ATS"
 } else {
     for ($i = 0; $i -lt $Months; $i++) {
         $code = Invoke-Slice $today.AddMonths(-($i + 1)) $today.AddMonths(-$i) "approfondi"

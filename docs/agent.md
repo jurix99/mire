@@ -20,6 +20,14 @@ données à l'agent sont dans [`agent/prompt.md`](../agent/prompt.md).
 `claude -p` avec des outils limités : recherche web, lecture de pages, écriture de fichiers dans `agent/tmp/`
 et `agent/mire_api.py`. Aucune autre commande n'est autorisée.
 
+**Passage « offres »** (`-Kind offres`, chaque jeudi avec `install-task.ps1`) : beaucoup d'entreprises publient
+leurs offres ailleurs que sur un ATS que Mire lit seul (Ashby, Lever, Greenhouse, Recruitee, Teamtailor) :
+Welcome to the Jungle, page Notion, page carrières du site, Workable… L'agent lit alors leur page d'offres
+publique, enregistre les offres tech ouvertes (`POST jobs`, `source` = la plateforme), ferme celles qui ont
+disparu et marque l'entreprise vérifiée. Il lit les pages comme un visiteur : jamais d'API privée ni de clé.
+S'il trouve un ATS lisible, il l'enregistre et Mire prend le relais chaque jour. Consignes :
+[`agent/prompt-offres.md`](../agent/prompt-offres.md).
+
 **Contre la production** (Azure, voir [deploiement-azure.md](deploiement-azure.md)) : définir `MIRE_URL`
 (`https://<domaine>`) et `MIRE_AGENT_TOKEN` (secret `agent-token` du Key Vault). Avec une URL distante, le
 script ne démarre pas docker compose, et le jeton du `.env` local n'est jamais envoyé. Une URL distante doit

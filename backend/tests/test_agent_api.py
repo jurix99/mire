@@ -103,3 +103,22 @@ def test_close_job(db, catalog, agent):
     assert agent.post(f"/api/agent/jobs/{job.id}/close").json()["closed_at"]
     db.refresh(job)
     assert job.closed_at is not None
+
+
+def test_offres_run_adds_jobs_for_companies_without_readable_ats(db, agent, catalog):
+    """Passage « offres » : l'agent lit une page Welcome to the Jungle et enregistre les offres, puis les ferme."""
+    acme = catalog["acme"]
+    ctx = agent.get("/api/agent/context").json()
+    assert all("entreprise_id" in j and "source" in j for j in ctx["offres_connues"])
+    assert next(c for c in ctx["entreprises"] if c["id"] == acme.id)["ats_lisible"] is False
+    run_id = agent.post("/api/agent/runs", json={"kind": "offres"}).json()["run_id"]
+    r = agent.post("/api/agent/jobs", json={
+        "run_id": run_id, "company_id": acme.id, "title": "Ingénieur data",
+        "url": "https://www.welcometothejungle.com/fr/companies/acme/jobs/ingenieur-data_paris",
+        "source": "Welcome to the Jungle", "open_verified": True, "summary": "Pipelines Python"})
+    assert r.status_code == 201
+    job_id = r.json()["id"]
+    assert agent.post(f"/api/agent/jobs/{job_id}/close?run_id={run_id}").status_code == 200
+    assert agent.post(f"/api/agent/companies/{acme.id}/checked", json={"no_relevant_jobs": False}).status_code == 200
+    done = agent.post(f"/api/agent/runs/{run_id}/finish", json={"companies_checked": 1, "summary": "WTTJ"}).json()
+    assert "1 ajoutées" in done["summary"] and "1 fermées" in done["summary"]

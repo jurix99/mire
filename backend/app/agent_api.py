@@ -82,7 +82,8 @@ def context(db: DB) -> dict:
             "ats_lisible": c.ats in ats.SUPPORTED and bool(c.ats_slug),
         } for c in companies],
         # Offres déjà vues (jamais à reproposer, quel que soit leur statut)
-        "offres_connues": [{"id": j.id, "entreprise": j.company.name, "titre": j.title, "url": j.url,
+        "offres_connues": [{"id": j.id, "entreprise_id": j.company_id, "entreprise": j.company.name, "titre": j.title,
+                            "url": j.url, "source": j.source,
                             "fermee": j.closed_at is not None} for j in jobs],
         "profils": profiles,
         "derniers_passages": [{"id": r.id, "type": r.kind, "debut": r.started_at, "statut": r.status,
@@ -94,7 +95,8 @@ def context(db: DB) -> dict:
 
 
 class RunIn(BaseModel):
-    kind: Literal["decouverte", "planifie", "manuel", "approfondi"] = "decouverte"
+    # offres : passage qui lit les pages carrières que Mire ne sait pas lire seul (Welcome to the Jungle, Notion…)
+    kind: Literal["decouverte", "planifie", "manuel", "approfondi", "offres"] = "decouverte"
 
 
 class RunFinishIn(BaseModel):
