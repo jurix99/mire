@@ -185,3 +185,22 @@ def test_new_output_format_required_and_preferred_skills(db, ref):
     assert skills_of(db, job) == {"sql": True, "spark": True, "dbt": False}
     assert job.salary_min_keur is None  # 0 = pas de salaire affiché
     assert "pas_dans_la_liste" in {m.label for m in db.scalars(select(TaxonomyMiss))}
+
+
+def test_transient_network_error_is_retried(db, ref, monkeypatch):
+    monkeypatch.setattr(classify, "NETWORK_RETRIES", (0, 0))
+    job = add(db, "Data Engineer", "SQL")
+
+    class Flaky(FakeClassifier):
+        attempts = 0
+
+        def classify_jobs(self, instruction, jobs, schema):
+            self.attempts += 1
+            if self.attempts < 3:  # deux coupures, puis la réponse
+                raise LLMUnavailable("RemoteProtocolError")
+            return super().classify_jobs(instruction, jobs, schema)
+
+    llm = Flaky()
+    stats = classify.classify_pending_jobs(db, llm)
+    assert llm.attempts == 3 and stats["classified"] == 1 and not stats["stopped"]
+    assert job.classified_at is not None

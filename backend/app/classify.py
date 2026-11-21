@@ -399,6 +399,26 @@ def count_pending(db: Session) -> int:
         Job.classified_at.is_(None), Job.taxonomy_version.is_(None), Job.taxonomy_version < tx.TAXONOMY_VERSION))) or 0
 
 
+NETWORK_RETRIES = (10, 20)  # secondes d'attente avant les nouveaux essais d'un lot (coupure réseau, surcharge passagère)
+
+
+def _call_with_retries(llm, batch: list[Job]) -> dict:
+    """Appel de classement ; une coupure ou une surcharge passagère est réessayée avant d'arrêter le passage."""
+    import time
+
+    from .llm import LLMUnavailable
+
+    for wait in (*NETWORK_RETRIES, None):
+        try:
+            return llm.classify_jobs(instruction(), [payload(j) for j in batch], llm_schema())
+        except LLMUnavailable as exc:
+            if wait is None or "429" in str(exc):  # quota : inutile d'insister, reprise au prochain passage
+                raise
+            log.info("Classement : %s, nouvel essai dans %s s", exc, wait)
+            time.sleep(wait)
+    raise AssertionError("inatteignable")
+
+
 def classify_pending_jobs(db: Session, llm=None, limit: int | None = None) -> dict:
     """Classe jusqu'à `limit` offres en attente (CLASSIFY_MAX_PER_RUN par défaut). Sur quota Gemini atteint ou
     Gemini indisponible : arrêt propre, la suite au prochain passage. Retourne des compteurs (journalisés)."""
@@ -419,7 +439,7 @@ def classify_pending_jobs(db: Session, llm=None, limit: int | None = None) -> di
                 if stats["llm_calls"] and CLASSIFY_PAUSE_S:
                     time.sleep(CLASSIFY_PAUSE_S)
                 stats["llm_calls"] += 1
-                raw = llm.classify_jobs(instruction(), [payload(j) for j in batch], llm_schema())
+                raw = _call_with_retries(llm, batch)
                 for item in (raw or {}).get("jobs", []):
                     try:
                         out = LLMJob.model_validate(item)

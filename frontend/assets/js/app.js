@@ -587,8 +587,10 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
           ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Voir l'offre originale ${ICONS.link}</a>`
             : isLocked(job.url) ? html`<button type="button" class="btn ghost" data-pro>Voir l'offre originale ${proTag}</button>` : ""}
           ${job.locked ? "" : html`
-          <button type="button" class="btn ghost" data-feedback="like" title="Offre de référence">${ICONS.heart} J'aime</button>
-          <button type="button" class="btn ghost" data-feedback="dislike">${ICONS.thumbDown} Pas intéressé</button>`}
+          <button type="button" class="btn ghost fb-btn fb-like ${job.feedback === "like" ? "is-on" : ""}" data-feedback="like"
+            aria-pressed="${job.feedback === "like"}" title="Offre de référence">${ICONS.heart} ${job.feedback === "like" ? "Vous aimez" : "J'aime"}</button>
+          <button type="button" class="btn ghost fb-btn fb-dislike ${job.feedback === "dislike" ? "is-on" : ""}" data-feedback="dislike"
+            aria-pressed="${job.feedback === "dislike"}">${ICONS.thumbDown} ${job.feedback === "dislike" ? "Pas intéressé (noté)" : "Pas intéressé"}</button>`}
         </div>
         <div class="right">
           ${onEdit && !job.locked ? html`<button type="button" class="btn ghost" data-edit data-admin>Modifier</button>` : ""}

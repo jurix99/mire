@@ -243,6 +243,8 @@ class JobOut(JobMini):
     # Statut affiché : celui posé par l'utilisateur s'il a un process, sinon le verdict de l'évaluation
     # (« nouveau » ou « ecartee »), sinon « nouveau »
     display_status: str = "nouveau"
+    # Dernier retour de l'utilisateur sur l'offre : like | dislike | None (cœur / pouce remplis dans la liste)
+    feedback: str | None = None
 
 
 class ManualScoreIn(BaseModel):

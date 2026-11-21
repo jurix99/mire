@@ -67,3 +67,17 @@ def test_feedback_validation_and_privacy(db, alice, bob, catalog, as_user):
     as_user(alice).post(f"/api/jobs/{job.id}/feedback", json={"sentiment": "dislike"})
     assert as_user(bob).get("/api/feedback").json()["total"] == 0
     assert db.scalar(select(JobFeedback)).user_id == alice.id
+
+
+def test_feedback_state_is_returned_on_each_job(alice, bob, catalog, as_user):
+    """Le dernier retour de l'utilisateur (cœur / pouce remplis) est renvoyé avec chaque offre, pour lui seul."""
+    job = catalog["jobs"][0]
+    client = as_user(alice)
+    r = client.post(f"/api/jobs/{job.id}/feedback", json={"sentiment": "like"})
+    assert r.json()["job"]["feedback"] == "like"
+    jobs = {j["id"]: j for j in client.get("/api/jobs").json()}
+    assert jobs[job.id]["feedback"] == "like" and jobs[catalog["jobs"][1].id]["feedback"] is None
+    assert client.get(f"/api/jobs/{job.id}").json()["feedback"] == "like"
+    client.post(f"/api/jobs/{job.id}/feedback", json={"sentiment": "dislike", "reasons": []})
+    assert client.get(f"/api/jobs/{job.id}").json()["feedback"] == "dislike"  # le plus récent l'emporte
+    assert as_user(bob).get(f"/api/jobs/{job.id}").json()["feedback"] is None

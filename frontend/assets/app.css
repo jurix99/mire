@@ -688,6 +688,13 @@ dialog.pro-dialog { width: min(860px, calc(100vw - 32px)); border-radius: 28px; 
 /* Retours sur les offres */
 .icon-btn.fb-like:hover { color: #db2777; }
 .icon-btn.fb-dislike:hover { color: #9d174d; }
+/* Retour déjà donné : icône remplie et colorée (aria-pressed, l'état ne repose pas que sur la couleur) */
+.icon-btn.fb-like.is-on { color: #db2777; }
+.icon-btn.fb-dislike.is-on { color: #9d174d; }
+.icon-btn.is-on svg path { fill: currentColor; }
+.btn.fb-btn.fb-like.is-on { color: #db2777; border-color: #f9a8d4; }
+.btn.fb-btn.fb-dislike.is-on { color: #9d174d; border-color: #f0abfc; }
+.btn.fb-btn.is-on svg path { fill: currentColor; }
 .feedback-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .feedback-buttons .btn svg { width: 14px; height: 14px; }
 
