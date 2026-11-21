@@ -17,6 +17,10 @@ users ──< subscriptions        offre Pro achetée via Stripe (abonnement men
 stripe_events                  événements du webhook Stripe déjà traités (idempotence)
 tasks                          file de tâches de fond (collecte, embeddings, présélection, évaluation), voir tasks.py
 
+Liste fermée (taxonomy.py, chargée par taxonomy.sync) : role_families, skill_families, skills ; classement des
+offres (classify.py) : jobs.role_family / seniority_level / contract_type / salaire normalisé / market_regions /
+product_sector, et job_skills (compétences exigées ou appréciées) ; taxonomy_misses : libellés hors liste.
+
 Règle d'or : l'automatisation (évaluation) n'écrit jamais dans applications (statuts posés par
 l'utilisateur) ni dans job_assessments.manual_score (note corrigée par l'utilisateur).
 
@@ -198,6 +202,21 @@ class Job(TimestampMixin, Base):
     verified_open_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # Classement sur la liste fermée (classify.py) : une fois par offre, refait si le titre ou la description
+    # change (classified_at remis à None) ou si taxonomy_version augmente. Les champs libres (stack, role_type,
+    # seniority) restent pour l'affichage et les embeddings.
+    role_family: Mapped[str | None] = mapped_column(
+        ForeignKey("role_families.id", ondelete="SET NULL"), index=True)
+    seniority_level: Mapped[str | None] = mapped_column(String(20))  # junior | confirme | senior | lead | inconnu
+    contract_type: Mapped[str | None] = mapped_column(String(20))  # cdi | cdd | stage | alternance | freelance | inconnu
+    salary_min_keur: Mapped[int | None] = mapped_column(Integer)  # brut annuel, k€
+    salary_max_keur: Mapped[int | None] = mapped_column(Integer)
+    salary_kind: Mapped[str | None] = mapped_column(String(10))  # fixe | ote | inconnu
+    market_regions: Mapped[list | None] = mapped_column(JSONType)  # ["france", "dach", …]
+    product_sector: Mapped[str | None] = mapped_column(String(40))  # secteur du produit (taxonomy.SECTORS)
+    classified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    taxonomy_version: Mapped[int | None] = mapped_column(Integer)
+
     # Présélection par similarité (pgvector) : embedding partagé entre utilisateurs, calculé par le worker ;
     # embedded_at = None -> à (re)calculer (offre nouvelle, ou un champ de JOB_EMBEDDED_FIELDS a changé)
     embedding: Mapped[list[float] | None] = deferred(mapped_column(Vector(EMBEDDING_DIM)))
@@ -230,6 +249,8 @@ class Job(TimestampMixin, Base):
     def _embedded_field_changed(self, key: str, value) -> None:
         if self.__dict__.get(key) != value:
             self.embedded_at = None
+            if key in ("title", "summary"):
+                self.classified_at = None  # à reclasser (classify.py)
 
 
 class Application(TimestampMixin, Base):
@@ -541,3 +562,61 @@ class Task(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+
+
+# --- Liste fermée (taxonomy.py) et classement des offres (classify.py) -----------------------------------------
+
+
+class RoleFamily(Base):
+    """Famille de poste (liste fermée). Lignes écrites uniquement par taxonomy.sync."""
+
+    __tablename__ = "role_families"
+
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    label: Mapped[str] = mapped_column(String(120))
+    domain: Mapped[str] = mapped_column(String(30))
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    title_keywords: Mapped[list] = mapped_column(JSONType, default=list)
+
+
+class SkillFamily(Base):
+    __tablename__ = "skill_families"
+
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    label: Mapped[str] = mapped_column(String(120))
+    group: Mapped[str] = mapped_column(String(20))  # tech | gtm | produit | operations | commun
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class Skill(Base):
+    """Compétence de la liste fermée, avec ses synonymes."""
+
+    __tablename__ = "skills"
+
+    id: Mapped[str] = mapped_column(String(60), primary_key=True)
+    label: Mapped[str] = mapped_column(String(120))
+    family_id: Mapped[str] = mapped_column(ForeignKey("skill_families.id"), index=True)
+    domains: Mapped[list] = mapped_column(JSONType, default=list)
+    synonyms: Mapped[list] = mapped_column(JSONType, default=list)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class JobSkill(Base):
+    """Compétence d'une offre : exigée (required) ou seulement appréciée."""
+
+    __tablename__ = "job_skills"
+
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), primary_key=True)
+    skill_id: Mapped[str] = mapped_column(ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True, index=True)
+    required: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+
+
+class TaxonomyMiss(Base):
+    """Libellés rencontrés hors de la liste fermée (ramenés à « autre ») : pour décider quoi ajouter, à la main."""
+
+    __tablename__ = "taxonomy_misses"
+
+    kind: Mapped[str] = mapped_column(String(20), primary_key=True)  # skill | role_family | sector | …
+    label: Mapped[str] = mapped_column(String(120), primary_key=True)
+    count: Mapped[int] = mapped_column(Integer, default=0)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))

@@ -92,6 +92,10 @@ class LLMError(HTTPException):
         super().__init__(502, detail)
 
 
+class LLMUnavailable(Exception):
+    """Quota atteint ou Gemini surchargé : un traitement de fond s'arrête proprement et reprend plus tard."""
+
+
 def friendly_error(exc: Exception) -> LLMError:
     """Erreur Gemini -> message compréhensible pour l'utilisateur."""
     code = getattr(exc, "code", None)
@@ -269,6 +273,27 @@ class GeminiClient:
         from .rules_synthesis import SYNTHESIZE_INSTRUCTION, RulesSynthesis
 
         return self.structured(SYNTHESIZE_INSTRUCTION, contents, RulesSynthesis, label="synthesize_rules")
+
+    def classify_jobs(self, instruction: str, jobs: list[dict], schema: dict, models: list[str] | None = None) -> dict:
+        """Classement d'offres sur la liste fermée (classify.py) : schéma JSON imposé (énumérations), modèles bon
+        marché. Renvoie le JSON brut, validé ensuite par classify.merge. Quota / surcharge : LLMUnavailable."""
+        t = self.types
+        contents = f"<offres>\n{json.dumps(jobs, ensure_ascii=False)}\n</offres>"
+        try:
+            response = self._generate(
+                {}, rounds=1, models=models or GEMINI_EVAL_MODELS, contents=contents,
+                config=t.GenerateContentConfig(
+                    system_instruction=instruction, response_mime_type="application/json",
+                    response_json_schema=schema, max_output_tokens=12_000,
+                ),
+            )
+        except self.errors.APIError as exc:
+            if getattr(exc, "code", None) in OVERLOAD_CODES:
+                raise LLMUnavailable(f"Gemini {exc.code}") from None
+            raise friendly_error(exc) from None
+        except Exception as exc:  # réseau
+            raise LLMUnavailable(type(exc).__name__) from None
+        return json.loads(response.text or "{}")
 
     def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None):
         import json
