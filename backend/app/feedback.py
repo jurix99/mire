@@ -112,8 +112,8 @@ def feedback_summary(db: DB, user: Me) -> FeedbackSummary:
                       .order_by(JobFeedback.id.desc()).limit(30)).all()
     total = db.scalar(select(func.count(JobFeedback.id)).where(JobFeedback.user_id == user.id)) or 0
     access = entitlements.access_for(db, user)
-    # Retour donné pendant une période Pro sur une offre encore récente : omis en Free (son libellé la révélerait)
-    recent = [feedback_out(f) for f in rows if not access.job_is_fresh(f.job)]
+    # Retour donné pendant une période Pro sur une offre aujourd'hui floutée : omis en Free (son libellé la révélerait)
+    recent = [feedback_out(f) for f in rows if not access.job_is_locked(f.job)]
     return FeedbackSummary(new=new_feedback_count(db, user), total=total, recent=recent)
 
 
@@ -133,9 +133,9 @@ def synthesize_rules(db: DB, user: Me, llm: Gemini) -> ProposalPreview:
 @router.post("/jobs/{job_id}/feedback")
 def give_feedback(job_id: int, body: FeedbackIn, db: DB, user: Me) -> FeedbackResult:
     job = services.get_or_404(db, Job, job_id)
-    if entitlements.access_for(db, user).job_is_fresh(job):
+    if entitlements.access_for(db, user).job_is_locked(job):
         # Offre verrouillée (Free) : la réponse (offre de référence, libellé) révélerait son titre et son entreprise
-        raise entitlements.pro_required("Cette offre récente est réservée à l'offre Pro")
+        raise entitlements.pro_required("Cette offre est réservée à l'offre Pro")
     text = body.text.strip() if body.text and body.text.strip() else None
     fb = JobFeedback(user_id=user.id, job_id=job.id, sentiment=body.sentiment, reasons=list(body.reasons), text=text)
     db.add(fb)

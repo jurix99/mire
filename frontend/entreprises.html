@@ -27,6 +27,13 @@
       <div class="toolbar">
         <input class="input" type="search" id="search" placeholder="Rechercher une entreprise, un secteur…" aria-label="Rechercher" style="flex:1;max-width:360px">
         <select id="sector" aria-label="Secteur"></select>
+        <select id="sort" aria-label="Trier">
+          <option value="name">Nom (A → Z)</option>
+          <option value="recent">Levée la plus récente</option>
+          <option value="amount">Montant levé</option>
+          <option value="jobs">Nombre de postes</option>
+        </select>
+        <span class="small muted" id="count"></span>
       </div>
 
       <div class="cards" id="list"></div>

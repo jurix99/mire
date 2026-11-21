@@ -271,7 +271,9 @@ def list_applications(db: DB, user: Me) -> list[ApplicationOut]:
 
 @router.post("/applications", status_code=201)
 def create_application(body: ApplicationIn, db: DB, user: Me) -> ApplicationOut:
-    _get_or_404(db, Job, body.job_id)
+    job = _get_or_404(db, Job, body.job_id)
+    if entitlements.access_for(db, user).job_is_locked(job):  # Free : offre floutée (voir set_job_status)
+        raise entitlements.pro_required("Offre réservée à l'offre Pro")
     entitlements.check_process_change(db, user, None, body.status)
     app = Application(user_id=user.id, **body.model_dump())
     app.events.append(ApplicationEvent(from_status=None, to_status=body.status))
@@ -322,11 +324,11 @@ def analytics(db: DB, user: Me) -> AnalyticsOut:
         FunnelStep(label="Offres", count=sum(1 for s in reached.values() if ProcessStatus.offre in s)),
     ]
 
-    # Par entreprise : en Free, seulement les offres visibles (une offre récente ne doit pas trahir son entreprise)
+    # Par entreprise : en Free, seulement les offres visibles (une offre floutée ne doit pas trahir son entreprise)
     access = entitlements.access_for(db, user)
     companies: dict[int, CompanyActivity] = {}
     for job in jobs:
-        if access.job_is_fresh(job):
+        if access.job_is_locked(job):
             continue
         row = companies.setdefault(
             job.company_id, CompanyActivity(company=services.company_mini(job.company, access), jobs=0, processes=0)

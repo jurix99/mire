@@ -140,7 +140,7 @@ def company_mini(company: Company, access: Access) -> CompanyMini:
 
 
 def _locked_job_out(job: Job, app: Application | None) -> JobOut:
-    """Offre récente (Free) : rien de réel sauf l'id, les dates et le statut posé par l'utilisateur."""
+    """Offre floutée (Free) : rien de réel sauf l'id, les dates et le statut posé par l'utilisateur."""
     return JobOut(
         id=job.id, locked=True, title=lock(job.title), url=lock(job.url), location=None, category=None,
         seniority=None, stack=None, source=None, summary=lock(job.summary or "x" * 600), salary=lock(job.salary),
@@ -152,7 +152,7 @@ def _locked_job_out(job: Job, app: Application | None) -> JobOut:
 
 def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = None) -> JobOut:
     access = ctx.access if ctx else FULL_ACCESS
-    if access.job_is_fresh(job):
+    if access.job_is_locked(job):
         return _locked_job_out(job, app)
     out = JobOut.model_validate(job)
     if not access.full:
@@ -203,23 +203,23 @@ def company_out(company: Company, jobs_count: int, access: Access, *, hide_ident
 
 
 def jobs_count_by_company(db: Session, access: Access = FULL_ACCESS) -> dict[int, int]:
-    """Nombre d'offres par entreprise ; en Free, les offres récentes (verrouillées) ne sont pas comptées."""
+    """Nombre d'offres par entreprise ; en Free, seules les offres en clair sont comptées."""
     if access.full:
         rows = db.execute(select(Job.company_id, func.count(Job.id)).group_by(Job.company_id))
         return dict(rows.tuples().all())
     counts: dict[int, int] = {}
     for job in db.scalars(select(Job)):
-        if not access.job_is_fresh(job):
+        if not access.job_is_locked(job):
             counts[job.company_id] = counts.get(job.company_id, 0) + 1
     return counts
 
 
 def application_out(app: Application, access: Access) -> ApplicationOut:
-    """Process de l'utilisateur ; en Free, le poste et l'entreprise d'une offre récente restent masqués."""
+    """Process de l'utilisateur ; en Free, le poste et l'entreprise d'une offre floutée restent masqués."""
     out = ApplicationOut.model_validate(app)
     if access.full:
         return out
-    if access.job_is_fresh(app.job):
+    if access.job_is_locked(app.job):
         out.job = JobMini(id=app.job.id, title=lock(app.job.title), url=lock(app.job.url), location=None)
         out.company = _locked_company_mini(app.job.company)
     else:
@@ -339,6 +339,9 @@ def set_job_status(db: Session, user: User, job_id: int, status: ProcessStatus, 
     """Change le statut d'un poste pour l'utilisateur (crée le process si besoin)."""
     job = get_or_404(db, Job, job_id)
     app = user_apps(db, user).get(job_id)
+    # Free : pas de process sur une offre floutée (il la mettrait en clair : voir entitlements.access_for)
+    if app is None and entitlements.access_for(db, user).job_is_locked(job):
+        raise entitlements.pro_required("Offre réservée à l'offre Pro")
     entitlements.check_process_change(db, user, app.status if app else None, status)
     if app is None:
         app = Application(user_id=user.id, job_id=job_id, status=ProcessStatus.nouveau)

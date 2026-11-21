@@ -140,6 +140,52 @@ export function renderValue(v, { fmt, block = false } = {}) {
   return fmt ? fmt(v) : v;
 }
 
+/** Texte factice d'une valeur verrouillée, ou la valeur elle-même (dans un bloc déjà flouté en entier). */
+export const shown = (v) => (isLocked(v) ? v.placeholder : v ?? "");
+
+/**
+ * Bloc entièrement flouté d'un seul tenant (une ligne d'offre, une carte, la partie « levée » d'une carte),
+ * avec un seul badge « Pro » au centre ; clic : fenêtre Pro. content : HTML déjà rendu (texte factice).
+ */
+export const lockedBlock = (content, { cls = "" } = {}) => html`
+  <div class="locked-block ${cls}" data-pro role="button" tabindex="0" title="Réservé à l'offre Pro" aria-label="Réservé à l'offre Pro">
+    <div class="locked-block-content" aria-hidden="true">${content}</div>
+    <span class="pro-badge">${LOCK_ICON} Pro</span>
+  </div>`;
+
+/**
+ * Liste affichée par paquets : les éléments suivants s'ajoutent quand on approche du bas de la page.
+ * keep : garder au moins le nombre d'éléments déjà affichés (rafraîchissement sans perdre sa position).
+ */
+export function renderPaged(container, items, render, { page = 40, empty = "", keep = false } = {}) {
+  const previous = container._paged;
+  previous?.observer?.disconnect();
+  const state = { shown: 0, observer: null };
+  container._paged = state;
+  container.innerHTML = items.length ? "" : String(empty);
+  if (!items.length) return;
+  const sentinel = document.createElement("div");
+  sentinel.className = "list-sentinel";
+  sentinel.setAttribute("aria-hidden", "true");
+  container.append(sentinel);
+  const more = (count) => {
+    const next = items.slice(state.shown, state.shown + count);
+    sentinel.insertAdjacentHTML("beforebegin", html`${next.map(render)}`.s);
+    state.shown += next.length;
+    if (state.shown >= items.length) {
+      state.observer?.disconnect();
+      sentinel.remove();
+    }
+  };
+  more(keep && previous ? Math.max(page, previous.shown) : page);
+  if (state.shown < items.length) {
+    state.observer = new IntersectionObserver((entries) => {
+      if (entries.some((e) => e.isIntersecting)) more(page);
+    }, { rootMargin: "800px 0px" });
+    state.observer.observe(sentinel);
+  }
+}
+
 /** Bandeau d'appel au Pro (chiffres calculés par l'API). */
 export const proBar = (text) => html`<div class="pro-bar" role="note"><span>${LOCK_ICON} ${text}</span>
   <button type="button" class="btn sm" data-pro>Passer Pro</button></div>`;
@@ -238,7 +284,7 @@ export async function openProModal() {
         <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
       </div>
       <ul class="pro-features">
-        <li>Toutes les offres dès leur publication${free.fresh_delay_days ? ` (en Free : après ${free.fresh_delay_days} jours)` : ""}</li>
+        <li>Toutes les offres en clair, la plus pertinente comprise${free.visible_jobs ? ` (en Free : ${free.visible_jobs} offres)` : ""}</li>
         <li>Levées de fonds, montants, investisseurs, effectifs et ATS de chaque entreprise</li>
         <li>La note de l'IA, son détail et le « pourquoi » sur toutes les offres, évaluées en priorité</li>
         <li>Process illimités, analyse de votre profil et règles apprises de vos retours</li>
@@ -297,7 +343,7 @@ document.addEventListener("click", (e) => {
   openProModal();
 }, true);
 document.addEventListener("keydown", (e) => {
-  if ((e.key === "Enter" || e.key === " ") && e.target.closest?.(".locked[data-pro]")) {
+  if ((e.key === "Enter" || e.key === " ") && e.target.closest?.(".locked[data-pro], .locked-block[data-pro]")) {
     e.preventDefault();
     openProModal();
   }
@@ -497,7 +543,7 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
           </div>
           <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
         </div>
-        ${job.locked ? proBar(`Offre publiée ${fmtAgo(job.published_on ?? job.created_at)} : les offres récentes sont réservées au Pro.`) : ""}
+        ${job.locked ? proBar(`Offre publiée ${fmtAgo(job.published_on ?? job.created_at)} : réservée au Pro.`) : ""}
         <div class="meta">
           ${pill(job.display_status)}${score(job.score)}
           ${a?.manual_score != null ? html`<span class="small muted">note corrigée par vous</span>` : ""}

@@ -70,7 +70,7 @@ class BillingOut(BaseModel):
     limits: dict[str, Any]
     pro_limits: dict[str, Any] = {}  # limites du Pro (fenêtre « Passer Pro »)
     usage: dict[str, int]
-    # Chiffres des bandeaux (Free) : offres récentes et levées récentes floutées
+    # Chiffres des bandeaux (Free) : offres floutées et levées récentes floutées
     locked_jobs: int = 0
     locked_fundings: int = 0
     prices: dict[str, str] = {}  # libellés des prix (Pro mensuel, Pass 3 mois)
@@ -120,7 +120,7 @@ class CompanyMini(ORM):
 class CompanyOut(CompanyMini):
     """Les champs « | Locked » sont remplacés par un objet Locked pour un utilisateur Free (services.company_out)."""
 
-    locked: bool = False  # entreprise entièrement floutée (toutes ses offres sont récentes), sauf le secteur
+    locked: bool = False  # entreprise entièrement floutée (aucune offre en clair), sauf le secteur
     website: str | Locked | None
     sector: str | None
     city: str | Locked | None
@@ -217,7 +217,7 @@ class AssessmentOut(BaseModel):
 
 
 class JobOut(JobMini):
-    # Offre récente verrouillée (Free) : titre, entreprise, salaire, lien et contenu factices ; seule la date reste
+    # Offre floutée (Free) : titre, entreprise, salaire, lien et contenu factices ; seule la date reste
     locked: bool = False
     category: str | None
     seniority: str | None

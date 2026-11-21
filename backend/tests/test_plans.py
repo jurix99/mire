@@ -6,6 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 import pytest
 from sqlalchemy import func, select
 
+from app import entitlements
 from app.assessments import Assessor
 from app.chat_tools import ToolRunner
 from app.db import SessionLocal
@@ -17,11 +18,11 @@ PROFILE = {"years_experience": 5, "skills": [{"name": "Python"}], "positioning":
 
 # Valeurs réservées au Pro : elles ne doivent apparaître nulle part dans les réponses faites à un utilisateur Free
 SECRETS = [
-    "Ultra Secret Staff Engineer",  # titre d'une offre récente
+    "Ultra Secret Staff Engineer",  # titre de l'offre la plus pertinente (floutée : aperçu du Pro)
     "123-456 kEUR",  # son salaire
     "Confidential summary of the role",  # sa description
     "jobs.example/secret-777",  # son lien
-    "Hushhushcorp",  # entreprise dont toutes les offres sont récentes
+    "Hushhushcorp",  # entreprise dont aucune offre n'est en clair
     "hushhush.example",
     "Secretville",
     "Sequoia Capital Secret",  # investisseurs
@@ -31,6 +32,7 @@ SECRETS = [
     "stealthy.example/careers",
     "Raison ultra confidentielle",  # « pourquoi » de l'évaluation
     "Rustacean-skill",  # compétences de l'évaluation
+    "Deep Hidden Researcher",  # 4e offre par pertinence : floutée
 ]
 
 
@@ -50,7 +52,8 @@ def pro_and_free(db, alice, bob, billing_on):
 
 @pytest.fixture
 def radar(db):
-    """Une entreprise visible avec une offre ancienne, une entreprise dont l'unique offre est récente."""
+    """Free (classement sans note : les plus récentes d'abord) : « fresh » est la plus pertinente (floutée),
+    « old » et « old2 » sont en clair, « hidden » est floutée ; Hushhushcorp n'a aucune offre en clair."""
     stealthy = Company(name="Stealthy", slug="stealthy", sector="DevTools", funding_stage="Série Z confidentielle",
                        funding_amount_meur=987.6, funding_announced_on=TODAY - timedelta(days=10),
                        investors="Sequoia Capital Secret", headcount="51-200", ats="ashby", ats_slug="stealthyslug",
@@ -58,12 +61,14 @@ def radar(db):
     hush = Company(name="Hushhushcorp", slug="hush", sector="IA", website="https://hushhush.example",
                    city="Secretville", funding_announced_on=TODAY - timedelta(days=3), funding_amount_meur=987.6)
     old = Job(company=stealthy, title="Platform Engineer", published_on=OLD, stack="Python")
+    old2 = Job(company=stealthy, title="Data Engineer", published_on=OLD - timedelta(days=1))
+    hidden = Job(company=hush, title="Deep Hidden Researcher", published_on=OLD - timedelta(days=5))
     fresh = Job(company=hush, title="Ultra Secret Staff Engineer", published_on=TODAY - timedelta(days=1),
                 salary="123-456 kEUR", summary="Confidential summary of the role",
                 url="https://jobs.example/secret-777")
-    db.add_all([stealthy, hush, old, fresh])
+    db.add_all([stealthy, hush, old, old2, hidden, fresh])
     db.commit()
-    return {"stealthy": stealthy, "hush": hush, "old": old, "fresh": fresh}
+    return {"stealthy": stealthy, "hush": hush, "old": old, "old2": old2, "hidden": hidden, "fresh": fresh}
 
 
 def assess(as_user, user, fake_llm):
@@ -84,9 +89,10 @@ def leaks(text: str) -> list[str]:
 
 def test_free_user_never_receives_locked_values(pro_and_free, radar, as_user, fake_llm):
     _, bob = pro_and_free
-    assert assess(as_user, bob, fake_llm) == 1  # Free : seule l'offre ancienne (visible) est évaluée
+    assert assess(as_user, bob, fake_llm) == 4  # Free : toutes les offres sont évaluées (quota hebdomadaire)
     client = as_user(bob)
-    urls = ["/api/jobs", f"/api/jobs/{radar['fresh'].id}", f"/api/jobs/{radar['old'].id}", "/api/companies",
+    urls = ["/api/jobs", f"/api/jobs/{radar['fresh'].id}", f"/api/jobs/{radar['old'].id}",
+            f"/api/jobs/{radar['hidden'].id}", "/api/companies",
             f"/api/companies/{radar['hush'].id}", f"/api/companies/{radar['stealthy'].id}", "/api/dashboard",
             "/api/analytics", "/api/me", "/api/applications"]
     for url in urls:
@@ -100,7 +106,9 @@ def test_free_user_never_receives_locked_values(pro_and_free, radar, as_user, fa
     old = client.get(f"/api/jobs/{radar['old'].id}").json()
     assert old["title"] == "Platform Engineer" and old["company"]["name"] == "Stealthy"
     assert old["assessment"]["why"]["locked"] is True
-    assert isinstance(old["assessment"]["score"], float)  # dans le top de la semaine : note visible
+    assert isinstance(old["assessment"]["score"], float)  # offre en clair : note visible
+    assert client.get(f"/api/jobs/{radar['old2'].id}").json()["locked"] is False
+    assert client.get(f"/api/jobs/{radar['hidden'].id}").json()["locked"] is True
     hush = client.get(f"/api/companies/{radar['hush'].id}").json()
     assert hush["locked"] is True and hush["sector"] == "IA"  # seul le secteur reste en clair
     stealthy = client.get(f"/api/companies/{radar['stealthy'].id}").json()
@@ -108,14 +116,21 @@ def test_free_user_never_receives_locked_values(pro_and_free, radar, as_user, fa
     assert client.get(f"/api/companies/{radar['hush'].id}/logo").status_code == 404
 
     me = client.get("/api/me").json()["billing"]
-    assert me["plan"] == "free" and me["locked_jobs"] == 1 and me["locked_fundings"] == 2
+    assert me["plan"] == "free" and me["locked_jobs"] == 2 and me["locked_fundings"] == 2
 
 
-def test_free_user_status_on_fresh_job_does_not_leak(pro_and_free, radar, as_user):
+def test_free_user_cannot_follow_a_locked_job(pro_and_free, radar, as_user):
     _, bob = pro_and_free
     client = as_user(bob)
+    # Un process mettrait l'offre en clair : réservé au Pro
     r = client.put(f"/api/jobs/{radar['fresh'].id}/status", json={"status": "a_postuler"})
-    assert r.status_code == 200 and leaks(r.text) == []
+    assert r.status_code == 402 and r.json()["detail"]["code"] == "pro_required" and leaks(r.text) == []
+    r = client.post("/api/applications", json={"job_id": radar["hidden"].id, "status": "postule"})
+    assert r.status_code == 402
+    # Une offre en clair suivie reste en clair, et ne libère pas sa place (rien de plus n'est dévoilé)
+    assert client.put(f"/api/jobs/{radar['old'].id}/status", json={"status": "pas_interesse"}).status_code == 200
+    assert client.get(f"/api/jobs/{radar['old'].id}").json()["locked"] is False
+    assert client.get(f"/api/jobs/{radar['hidden'].id}").json()["locked"] is True
     assert leaks(client.get("/api/applications").text) == []
     assert leaks(client.get("/api/dashboard").text) == []
     # Pas de retour (J'aime / Pas intéressé) sur une offre verrouillée
@@ -188,8 +203,11 @@ def test_import_quota_and_pro_only_profile_tools(pro_and_free, as_user, fake_llm
     assert client.post("/api/profile/rules/synthesize").json()["detail"]["code"] == "pro_required"
 
 
-def test_active_processes_quota_terminal_status_always_allowed(db, pro_and_free, as_user):
+def test_active_processes_quota_terminal_status_always_allowed(db, pro_and_free, as_user, monkeypatch):
     _, bob = pro_and_free
+    # Quota de process : il faut plus d'offres en clair que les 2 du plan Free
+    monkeypatch.setitem(entitlements.PLAN_LIMITS["free"], "visible_jobs", 20)
+    monkeypatch.setitem(entitlements.PLAN_LIMITS["free"], "teaser_jobs", 0)
     company = Company(name="Many", slug="many")
     jobs = [Job(company=company, title=f"Poste {i}", published_on=OLD) for i in range(12)]
     db.add_all(jobs)
@@ -228,7 +246,7 @@ def test_background_assessment_serves_pro_first_and_caps_free(db, pro_and_free, 
     for _ in range(4):
         assessor.run_once()
     assert evaluated(alice) == 31 and evaluated(bob) == 0
-    # Puis le Free est servi, dans la limite de 20 par semaine et sans les offres récentes
+    # Puis le Free est servi, dans la limite de 20 par semaine
     while assessor.run_once():
         pass
     assert evaluated(alice) == 31 and evaluated(bob) == 20
@@ -261,3 +279,21 @@ def test_quota_counts_only_this_month(db, pro_and_free, as_user, fake_llm):
             m.created_at = last_month
         s.commit()
     assert client.post("/api/chat", json={"message": "Nouveau mois"}).status_code == 200
+
+
+def test_free_ranking_blurs_the_best_and_shows_the_next_two(db, pro_and_free, as_user, fake_llm):
+    """Avec des notes : la mieux notée est floutée (aperçu du Pro), les deux suivantes en clair."""
+    _, bob = pro_and_free
+    company = Company(name="Ranky", slug="ranky")
+    jobs = [Job(company=company, title=f"Poste {i}", published_on=OLD) for i in range(5)]
+    db.add_all(jobs)
+    db.commit()
+    grades = {j.id: 0.2 * i for i, j in enumerate(jobs)}  # Poste 4 le mieux noté, puis 3, 2…
+    as_user(bob).patch("/api/profile", json=PROFILE)
+    keys = ("competences", "stade", "ownership", "ia_concrete", "xp", "references")
+    fake_llm.grade = lambda j: dict.fromkeys(keys, grades[j["job_id"]])
+    Assessor(SessionLocal, lambda: fake_llm).run_once()
+    out = {j["id"]: j for j in as_user(bob).get("/api/jobs").json()}
+    assert out[jobs[4].id]["locked"] is True
+    assert out[jobs[3].id]["title"] == "Poste 3" and out[jobs[2].id]["title"] == "Poste 2"
+    assert all(out[j.id]["locked"] for j in jobs[:2])

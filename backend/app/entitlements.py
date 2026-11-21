@@ -4,8 +4,8 @@
   Stripe, voir billing.py). Pas d'essai gratuit.
 - PLAN_LIMITS : toutes les limites, à ajuster ici sans toucher au reste.
 - usage / check_quota : quotas calculés sur les tables existantes (pas de table de compteurs).
-- access_for : contexte de lecture (fenêtre des offres récentes, notes visibles…) utilisé par services.job_out
-  et services.company_out pour MASQUER côté serveur. Une donnée réservée au Pro n'est jamais envoyée à un
+- access_for : contexte de lecture (offres en clair, entreprises floutées) utilisé par services.job_out et
+  services.company_out pour MASQUER côté serveur. Une donnée réservée au Pro n'est jamais envoyée à un
   utilisateur Free : elle est remplacée par un objet Locked dont le texte est factice (lock()).
 
 BILLING_ENABLED=false (défaut) : tout le monde est Pro (dev local, tests existants).
@@ -43,8 +43,11 @@ from .users import current_user
 # None = illimité. Booléens = fonction ouverte ou non.
 PLAN_LIMITS: dict[str, dict[str, Any]] = {
     "free": {
-        "fresh_delay_days": 7,  # offres de moins de N jours (publication, sinon ajout) : floutées
-        "top_scores_per_week": 10,  # notes visibles : les N mieux notées parmi les évaluations de la semaine
+        # Offres en clair : parmi les offres ouvertes classées par pertinence pour l'utilisateur, les
+        # « teaser_jobs » premières restent floutées (aperçu du Pro), les « visible_jobs » suivantes sont en
+        # clair, toutes les autres floutées. Les offres où l'utilisateur a un process restent en clair.
+        "visible_jobs": 2,
+        "teaser_jobs": 1,
         "assessments_per_week": 20,  # évaluations Gemini en tâche de fond (7 jours glissants)
         "assessment_priority": 1,  # ordre de passage dans la tâche de fond (0 = en premier)
         "active_processes": 10,  # process « À regarder » + en cours
@@ -55,8 +58,8 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "digest_email": False,  # (plus tard) e-mail récapitulatif
     },
     "pro": {
-        "fresh_delay_days": 0,
-        "top_scores_per_week": None,
+        "visible_jobs": None,
+        "teaser_jobs": 0,
         "assessments_per_week": None,
         "assessment_priority": 0,
         "active_processes": None,
@@ -75,6 +78,7 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
 PAST_DUE_GRACE = timedelta(days=3)  # abonnement impayé : encore Pro pendant ce délai (mise à jour de la carte)
 PASS_DURATION = timedelta(days=PLAN_LIMITS["pro"]["pass_days"])
 RECENT_FUNDING_DAYS = 183  # « levées récentes » du bandeau Entreprises
+PUBLIC_DELAY_DAYS = 7  # landing (visiteur non connecté) : entreprises ayant une offre de plus de N jours
 
 # Statuts qui comptent dans le quota de process (les statuts terminaux restent toujours possibles)
 PROCESS_QUOTA_STATUSES = ACTIVE_STATUSES | {ProcessStatus.a_postuler}
@@ -296,16 +300,20 @@ class Access:
     """Ce que l'utilisateur courant peut voir. full = Pro (rien n'est masqué)."""
 
     plan: str = "pro"
-    fresh_cutoff: datetime | None = None  # offres plus récentes : verrouillées
-    top_ids: set[int] = field(default_factory=set)  # offres dont la note est visible (Free)
+    visible_job_ids: set[int] = field(default_factory=set)  # Free : offres en clair (le reste est flouté)
     locked_company_ids: set[int] = field(default_factory=set)  # entreprises entièrement floutées (Free)
 
     @property
     def full(self) -> bool:
         return self.plan == "pro"
 
-    def job_is_fresh(self, job: Job) -> bool:
-        return self.fresh_cutoff is not None and job_date(job) > self.fresh_cutoff
+    @property
+    def top_ids(self) -> set[int]:
+        """Offres dont la note est visible (Free : les offres en clair)."""
+        return self.visible_job_ids
+
+    def job_is_locked(self, job: Job) -> bool:
+        return not self.full and job.id not in self.visible_job_ids
 
     def company_is_locked(self, company_id: int) -> bool:
         return company_id in self.locked_company_ids
@@ -314,47 +322,45 @@ class Access:
 FULL_ACCESS = Access()
 
 
+def rank_jobs(db: Session, user: User, job_ids: list[int]) -> list[int]:
+    """Offres classées par pertinence pour l'utilisateur : retenues avant écartées, puis note (corrigée, sinon
+    calculée), similarité de la présélection, et enfin les plus récentes. Sans évaluation : après les notées."""
+    assessed = {a.job_id: a for a in db.scalars(select(JobAssessment).where(
+        JobAssessment.user_id == user.id, JobAssessment.job_id.in_(job_ids or [-1])))}
+    dates = {jid: _ref_date(p, c) for jid, p, c in db.execute(
+        select(Job.id, Job.published_on, Job.created_at).where(Job.id.in_(job_ids or [-1])))}
+
+    def key(job_id: int):
+        a = assessed.get(job_id)
+        score = None if a is None else (a.manual_score if a.manual_score is not None else a.score)
+        similarity = a.similarity if a is not None and a.similarity is not None else 0
+        return (a is not None and a.verdict == "ecartee", score is None, -float(score or 0),
+                -float(similarity), -dates[job_id].timestamp(), job_id)
+
+    return sorted(job_ids, key=key)
+
+
 def access_for(db: Session, user: User) -> Access:
     plan = plan_of(db, user)
     if plan == "pro":
         return FULL_ACCESS
     lim = limits(plan)
-    at = now()
-    access = Access(plan=plan, fresh_cutoff=at - timedelta(days=lim["fresh_delay_days"]))
-
-    # Entreprises entièrement floutées : toutes leurs offres sont récentes (ou aucune offre et ajoutée récemment)
-    rows = db.execute(select(Job.company_id, Job.published_on, Job.created_at)).all()
-    visible: set[int] = set()
-    with_jobs: set[int] = set()
-    for company_id, published_on, created_at in rows:
-        with_jobs.add(company_id)
-        if _ref_date(published_on, created_at) <= access.fresh_cutoff:
-            visible.add(company_id)
-    access.locked_company_ids = with_jobs - visible
-    for cid, created_at in db.execute(select(Company.id, Company.created_at)).all():
-        if cid not in with_jobs and (aware(created_at) or at) > access.fresh_cutoff:
-            access.locked_company_ids.add(cid)
-
-    # Notes visibles : les N mieux notées parmi les offres (visibles) évaluées cette semaine
-    n = lim["top_scores_per_week"]
-    if n:
-        scored = db.execute(
-            select(JobAssessment.job_id, JobAssessment.score, Job.published_on, Job.created_at)
-            .join(Job, Job.id == JobAssessment.job_id)
-            .where(JobAssessment.user_id == user.id, JobAssessment.score.is_not(None),
-                   JobAssessment.assessed_at >= week_start(at))
-        ).all()
-        candidates = [(float(score), job_id) for job_id, score, published_on, created_at in scored
-                      if _ref_date(published_on, created_at) <= access.fresh_cutoff]
-        candidates.sort(key=lambda t: (-t[0], t[1]))
-        access.top_ids = {job_id for _, job_id in candidates[:n]}
-    return access
+    own = set(db.scalars(select(Application.job_id).where(Application.user_id == user.id)))
+    # Les offres suivies restent dans le classement : en suivre une (ou la marquer « pas intéressé ») ne libère
+    # pas sa place, sinon on dévoilerait toutes les offres une à une
+    ranked = rank_jobs(db, user, list(db.scalars(select(Job.id).where(Job.closed_at.is_(None)))))
+    teaser, n = lim["teaser_jobs"], lim["visible_jobs"]
+    visible = set(ranked[teaser:teaser + n]) | own
+    # Entreprises : en clair seulement si au moins une de leurs offres l'est
+    visible_companies = set(db.scalars(select(Job.company_id).where(Job.id.in_(visible or {-1}))))
+    locked = set(db.scalars(select(Company.id))) - visible_companies
+    return Access(plan=plan, visible_job_ids=visible, locked_company_ids=locked)
 
 
 def public_company_ids(db: Session) -> set[int]:
-    """Entreprises qu'un visiteur non connecté peut voir (landing) : celles qu'un Free voit en clair,
-    c'est-à-dire avec au moins une offre plus ancienne que la fenêtre réservée au Pro."""
-    cutoff = now() - timedelta(days=limits("free")["fresh_delay_days"])
+    """Entreprises qu'un visiteur non connecté peut voir (landing) : celles qui ont au moins une offre publiée
+    il y a plus de PUBLIC_DELAY_DAYS jours."""
+    cutoff = now() - timedelta(days=PUBLIC_DELAY_DAYS)
     return {cid for cid, p, c in db.execute(select(Job.company_id, Job.published_on, Job.created_at)).all()
             if _ref_date(p, c) <= cutoff}
 
@@ -400,13 +406,13 @@ def lock(value: Any) -> Locked | None:
 # --- Résumé pour /api/me --------------------------------------------------------------------------------
 
 
-def locked_counts(db: Session, plan: str) -> tuple[int, int]:
-    """Bandeaux du plan Free : (offres récentes verrouillées, levées récentes floutées)."""
+def locked_counts(db: Session, user: User, plan: str) -> tuple[int, int]:
+    """Bandeaux du plan Free : (offres ouvertes floutées, levées récentes floutées)."""
     if plan == "pro":
         return 0, 0
     at = now()
-    cutoff = at - timedelta(days=limits(plan)["fresh_delay_days"])
-    jobs = sum(1 for p, c in db.execute(select(Job.published_on, Job.created_at)).all() if _ref_date(p, c) > cutoff)
+    open_ids = set(db.scalars(select(Job.id).where(Job.closed_at.is_(None))))
+    jobs = len(open_ids - access_for(db, user).visible_job_ids)
     fundings = db.scalar(select(func.count(Company.id)).where(
         Company.funding_announced_on >= (at - timedelta(days=RECENT_FUNDING_DAYS)).date())) or 0
     return jobs, fundings
@@ -417,7 +423,7 @@ def billing_summary(db: Session, user: User) -> dict:
     at = now()
     granting = [s for s in _subscriptions(db, user) if grants_pro(s, at)]
     current = max(granting, key=lambda s: aware(s.current_period_end) or at, default=None)
-    locked_jobs, locked_fundings = locked_counts(db, plan)
+    locked_jobs, locked_fundings = locked_counts(db, user, plan)
     pro = PLAN_LIMITS["pro"]
     return {
         "enabled": billing_enabled(),

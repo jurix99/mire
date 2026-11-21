@@ -1,6 +1,6 @@
 import {
-  $, ICONS, api, attempt, boot, confirmDelete, fmtDate, fmtMoney, html, isLocked, loadMe, logo, openForm, plain, proBar, proTag,
-  refreshCounts, renderValue, toast,
+  $, ICONS, api, attempt, boot, confirmDelete, fmtDate, fmtMoney, html, isLocked, loadMe, lockedBlock, logo, openForm, plain,
+  proBar, refreshCounts, renderPaged, renderValue, shown, toast,
 } from "./app.js";
 
 let companies = [];
@@ -68,43 +68,72 @@ async function editCompany(company) {
 
 const atsLabel = (c) => `${Object.fromEntries(ATS_OPTIONS)[c.ats] ?? c.ats}${c.ats_slug && !isLocked(c.ats_slug) ? ` (${c.ats_slug})` : ""}`;
 
-const card = (c) => {
-  // Repère « Pro » unique par carte : valeurs floutées à l'intérieur sans badge propre
-  const hasPro = c.locked || [c.funding_stage, c.funding_amount_meur, c.investors, c.description, c.ats].some(isLocked);
+/** Levée, investisseurs et ATS : en clair (Pro), ou floutés d'un seul tenant avec un seul badge (Free). */
+function fundingSection(c) {
+  const fields = [c.funding_stage, c.funding_amount_meur, c.funding_announced_on, c.investors, c.ats, c.last_checked_at];
+  if (fields.some(isLocked)) {
+    return lockedBlock(html`
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span class="pill plain">${shown(c.funding_stage) || "Série A"}</span>
+        <strong>${shown(c.funding_amount_meur) || "12,5"} M€</strong>
+        <span class="small muted">${shown(c.funding_announced_on) || "12/03/2026"}</span>
+      </div>
+      <p class="small muted">${shown(c.investors) || "Lorem ipsum dolor sit amet"}</p>
+      <p class="small muted">ATS : ${shown(c.ats) || "lorem"} · vérifiée le ${shown(c.last_checked_at) || "02/11/2026"}</p>`,
+    { cls: "funding-lock" });
+  }
   return html`
-  <article class="card ${hasPro ? "pro-quiet" : ""}" style="display:grid;gap:14px;align-content:start" data-id="${c.id}">
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      ${c.funding_stage ? html`<span class="pill plain">${c.funding_stage}</span>` : ""}
+      ${c.funding_amount_meur != null ? html`<strong>${fmtMoney(c.funding_amount_meur)}</strong>` : ""}
+      ${c.funding_announced_on ? html`<span class="small muted">${fmtDate(c.funding_announced_on)}</span>` : ""}
+    </div>
+    ${c.investors ? html`<p class="small muted">${c.investors}</p>` : ""}
+    ${c.ats || c.last_checked_at ? html`<p class="small muted">
+      ${c.ats ? html`ATS : ${atsLabel(c)}` : ""}
+      ${c.last_checked_at ? html` · vérifiée le ${fmtDate(c.last_checked_at)}` : ""}
+      ${c.no_relevant_jobs_at ? " · sans offre pertinente" : ""}</p>` : ""}`;
+}
+
+/** Entreprise réservée au Pro (Free) : la carte entière est floutée d'un seul tenant, un seul badge ; le secteur reste lisible. */
+const lockedCard = (c) => html`
+  <article class="card card-locked" data-id="${c.id}">
+    ${lockedBlock(html`
+      <div style="display:flex;align-items:center;gap:14px">
+        <span class="logo lg is-locked" data-initials="?"></span>
+        <div style="flex:1;min-width:0">
+          <h2>${shown(c.name)}</h2>
+          <p class="small muted">${c.sector ?? "Secteur à préciser"}</p>
+        </div>
+      </div>
+      <p class="small">${shown(c.description) || "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod."}</p>
+      <div style="display:flex;align-items:center;gap:8px"><span class="pill plain">Série A</span><strong>12,5 M€</strong></div>
+      <p class="small muted">Lorem ipsum dolor sit amet</p>
+      <p class="small">${shown(c.jobs_count)} postes</p>`)}
+  </article>`;
+
+const card = (c) => c.locked ? lockedCard(c) : html`
+  <article class="card" style="display:grid;gap:14px;align-content:start" data-id="${c.id}">
     <div style="display:flex;align-items:center;gap:14px">
       ${logo(c, "lg")}
       <div style="flex:1;min-width:0">
-        <h2>${renderValue(c.name)}</h2>
+        <h2>${c.name}</h2>
         <p class="small muted">${c.sector ?? "Secteur à préciser"}${c.city ? html` · ${renderValue(c.city)}` : ""}</p>
       </div>
-      ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>`}
+      <button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>
     </div>
     <p class="small">${renderValue(c.description, { block: true })}</p>
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      ${hasPro ? html`<span data-pro title="Levée réservée à l'offre Pro" style="cursor:pointer">${proTag}</span>` : ""}
-      ${c.funding_stage ? html`<span class="pill plain">${renderValue(c.funding_stage)}</span>` : ""}
-      ${c.funding_amount_meur != null ? html`<strong>${renderValue(c.funding_amount_meur, { fmt: fmtMoney })}</strong>` : ""}
-      ${c.funding_announced_on ? html`<span class="small muted">${renderValue(c.funding_announced_on, { fmt: fmtDate })}</span>` : ""}
-    </div>
-    ${c.investors ? html`<p class="small muted">${renderValue(c.investors)}</p>` : ""}
-    ${c.ats || c.last_checked_at ? html`<p class="small muted">
-      ${c.ats ? html`ATS : ${isLocked(c.ats) ? renderValue(c.ats) : atsLabel(c)}` : ""}
-      ${c.last_checked_at ? html` · vérifiée le ${renderValue(c.last_checked_at, { fmt: fmtDate })}` : ""}
-      ${c.no_relevant_jobs_at && !isLocked(c.no_relevant_jobs_at) ? " · sans offre pertinente" : ""}</p>` : ""}
+    ${fundingSection(c)}
     <div class="card-foot" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto">
-      ${isLocked(c.jobs_count) ? html`<span class="small muted">${renderValue(c.jobs_count)} postes récents</span>`
-        : html`<a class="link-more" href="/postes?entreprise=${c.id}">${c.jobs_count} poste${c.jobs_count > 1 ? "s" : ""}</a>`}
+      <a class="link-more" href="/postes?entreprise=${c.id}">${c.jobs_count} poste${c.jobs_count > 1 ? "s" : ""}</a>
       <span style="display:flex;gap:2px">
         ${AUTO_ATS.has(c.ats) && c.ats_slug ? html`<button class="btn ghost sm" type="button" data-action="check" data-admin
           title="Vérifier les offres ouvertes dans la liste de l'ATS">Vérifier les offres</button>` : ""}
-        ${c.locked ? "" : html`<button class="icon-btn" type="button" data-action="refresh-logo" data-admin title="Récupérer à nouveau le logo">${ICONS.image}</button>`}
+        <button class="icon-btn" type="button" data-action="refresh-logo" data-admin title="Récupérer à nouveau le logo">${ICONS.image}</button>
         ${c.website && !isLocked(c.website) ? html`<a class="icon-btn" href="${c.website}" target="_blank" rel="noopener" title="Site web">${ICONS.link}</a>` : ""}
       </span>
     </div>
   </article>`;
-};
 
 /** Vérifie les offres dans la liste actuelle de l'ATS, puis propose d'ajouter les nouvelles. */
 async function checkCompany(company, btn) {
@@ -150,26 +179,67 @@ async function checkCompany(company, btn) {
   reload();
 }
 
+// --- Secteurs : le champ est libre (« SaaS, IA, finance », « Assurance santé / healthtech »…) : il est découpé en
+// tags (IA, SaaS, Santé…) pour un filtre court et utile
+
+const tagKey = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+function sectorTags(sector) {
+  return (sector ?? "").split(/\s*(?:[,/&·;+]|\set\s)\s*/).map((t) => t.trim()).filter((t) => t.length > 1);
+}
+
+function buildSectorOptions() {
+  const labels = new Map(); // clé normalisée -> {libellé le plus fréquent, nombre d'entreprises}
+  for (const c of companies) {
+    const seen = new Set();
+    for (const tag of sectorTags(c.sector)) {
+      const key = tagKey(tag);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const entry = labels.get(key) ?? { n: 0, forms: new Map() };
+      entry.n += 1;
+      entry.forms.set(tag, (entry.forms.get(tag) ?? 0) + 1);
+      labels.set(key, entry);
+    }
+  }
+  return [...labels.entries()]
+    .filter(([, e]) => e.n >= 2) // un tag porté par une seule entreprise n'aide pas à filtrer
+    .map(([key, e]) => ({ key, n: e.n, label: [...e.forms.entries()].sort((a, b) => b[1] - a[1])[0][0] }))
+    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, "fr"));
+}
+
+// --- Tri : les entreprises floutées (Free) restent toujours à la fin, dans l'ordre de l'API (rien à trahir)
+
+const num = (v) => (isLocked(v) || v == null ? null : Number(v));
+const SORTS = {
+  name: (a, b) => plain(a.name).localeCompare(plain(b.name), "fr", { sensitivity: "base" }),
+  recent: (a, b) => (plain(b.funding_announced_on) || "").localeCompare(plain(a.funding_announced_on) || ""),
+  amount: (a, b) => (num(b.funding_amount_meur) ?? -1) - (num(a.funding_amount_meur) ?? -1),
+  jobs: (a, b) => (num(b.jobs_count) ?? -1) - (num(a.jobs_count) ?? -1),
+};
+
 function draw() {
   const q = $("#search").value.trim().toLowerCase();
   const sector = $("#sector").value;
-  const shown = companies.filter(
+  const sort = SORTS[$("#sort").value] ?? SORTS.name;
+  const filtered = companies.filter(
     (c) =>
-      (!sector || c.sector === sector) &&
+      (!sector || sectorTags(c.sector).some((t) => tagKey(t) === sector)) &&
       (!q || [c.name, c.sector, c.description, c.investors].some((v) => plain(v).toLowerCase().includes(q)))
   );
-  $("#list").innerHTML = shown.length
-    ? html`${shown.map(card)}`.s
-    : html`<p class="empty card">Aucune entreprise ne correspond.</p>`.s;
+  const open = filtered.filter((c) => !c.locked).sort((a, b) => sort(a, b) || SORTS.name(a, b));
+  const locked = filtered.filter((c) => c.locked);
+  $("#count").textContent = `${filtered.length} entreprise${filtered.length > 1 ? "s" : ""}`;
+  renderPaged($("#list"), [...open, ...locked], card, { page: 24, empty: html`<p class="empty card">Aucune entreprise ne correspond.</p>` });
 }
 
 async function reload(message) {
   companies = await api("/companies");
   const v = Date.now(); // force le rechargement des logos modifiés
   companies.forEach((c) => (c._v = v));
-  const sectors = [...new Set(companies.map((c) => c.sector).filter(Boolean))].sort();
   const current = $("#sector").value;
-  $("#sector").innerHTML = html`<option value="">Tous les secteurs</option>${sectors.map((s) => html`<option ${s === current ? "selected" : ""}>${s}</option>`)}`.s;
+  $("#sector").innerHTML = html`<option value="">Tous les secteurs</option>
+    ${buildSectorOptions().map((t) => html`<option value="${t.key}" ${t.key === current ? "selected" : ""}>${t.label} (${t.n})</option>`)}`.s;
   draw();
   drawProBanner().catch(() => {});
   if (message) {
@@ -187,6 +257,7 @@ async function drawProBanner() {
 
 $("#search").addEventListener("input", draw);
 $("#sector").addEventListener("change", draw);
+$("#sort").addEventListener("change", draw);
 $("#add").addEventListener("click", () => editCompany(null));
 $("#list").addEventListener("click", async (e) => {
   const btn = e.target.closest("[data-action]");

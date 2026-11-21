@@ -268,17 +268,22 @@ Prix (TTC, TVA française via Stripe Tax) : Pro mensuel 15 €/mois sans engagem
 de 90 jours à partir de sa fin). Pas d'essai gratuit. Toutes les limites sont dans PLAN_LIMITS
 (backend/app/entitlements.py), nulle part ailleurs.
 
-Free : offres de moins de 7 jours listées mais verrouillées (seuls la ligne et la date relative restent
-visibles) ; levées, investisseurs, effectif, ATS, page carrières verrouillés (entreprise dont toutes les
-offres sont récentes : tout sauf le secteur) ; note visible sur les 10 offres les mieux notées de la
-semaine, « pourquoi » et compétences toujours verrouillés ; 20 évaluations Gemini par semaine, après les
-utilisateurs Pro ; 10 process actifs ; 1 import de profil ; ni analyse du profil ni synthèse des règles ;
-10 messages à l'assistant par mois (Pro : 300).
+Free : les offres ouvertes sont classées par pertinence pour l'utilisateur (retenues avant écartées, note,
+similarité, date ; entitlements.rank_jobs). La plus pertinente reste floutée (aperçu du Pro), les 2
+suivantes sont en clair avec leur note, toutes les autres sont floutées (seule la date relative reste) ;
+une offre suivie (process) reste en clair, et ne libère pas sa place dans le classement ; pas de process
+sur une offre floutée (402). Entreprise sans aucune offre en clair : carte entièrement floutée sauf le
+secteur. Levées, investisseurs, effectif, ATS, page carrières toujours verrouillés ; « pourquoi » et
+compétences toujours verrouillés ; 20 évaluations Gemini par semaine, après les utilisateurs Pro ; 10
+process actifs ; 1 import de profil ; ni analyse du profil ni synthèse des règles ; 10 messages à
+l'assistant par mois (Pro : 300). Landing (visiteur non connecté) : entreprises ayant une offre de plus
+de 7 jours.
 
 Masquage côté serveur : pour un utilisateur Free, l'API remplace chaque valeur réservée par
 {locked: true, placeholder} où placeholder est un texte FACTICE de longueur voisine (services.job_out,
 services.company_out, outils du chat). La vraie valeur ne quitte jamais le serveur ; le front floute le
-texte factice (classe .locked, helper renderValue de app.js) et un clic ouvre la fenêtre « Passer Pro ».
+texte factice (classe .locked, helper renderValue de app.js ; ligne ou carte entière : lockedBlock, un
+seul flou uniforme et un seul badge) et un clic ouvre la fenêtre « Passer Pro ».
 Quota atteint ou fonction réservée : HTTP 402 {code: "quota", kind, limit, used} ou {code: "pro_required"}.
 
 Plan (entitlements.plan_of) : Pro si abonnement actif, impayé (past_due) depuis moins de 3 jours, résilié

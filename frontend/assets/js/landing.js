@@ -77,8 +77,8 @@ function features(free, pro) {
   const f = free;
   return {
     free: [
-      [true, `Offres publiées il y a plus de ${f.fresh_delay_days} jours`],
-      [true, `${plural(f.top_scores_per_week, "note")} de l'IA visibles par semaine`],
+      [true, `${plural(f.visible_jobs, "offre")} en clair parmi les plus pertinentes pour vous`],
+      [false, "La plus pertinente, et toutes les autres offres"],
       [true, `${plural(f.assessments_per_week, "évaluation")} par semaine`],
       [true, `${f.active_processes} process actifs`],
       [true, `${plural(f.imports_total, "import")} de profil, ${plural(f.chat_per_month, "message")} à l'assistant par mois`],
@@ -86,7 +86,7 @@ function features(free, pro) {
       [false, "Analyse du profil et synthèse des règles"],
     ],
     pro: [
-      [true, "Toutes les offres, dès leur publication"],
+      [true, "Toutes les offres, la plus pertinente comprise"],
       [true, "Levées de fonds, investisseurs, effectif et ATS"],
       [true, "Notes et analyses de l'IA sur toutes les offres"],
       [true, "Évaluations prioritaires, sans plafond"],

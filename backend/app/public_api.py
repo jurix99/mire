@@ -23,7 +23,7 @@ router = APIRouter(prefix="/api/public")
 DB = Annotated[Session, Depends(get_db)]
 
 LOGO_STRIP = 18  # logos affichés sur la landing
-PUBLIC_LIMITS = ("fresh_delay_days", "top_scores_per_week", "assessments_per_week", "active_processes",
+PUBLIC_LIMITS = ("visible_jobs", "teaser_jobs", "assessments_per_week", "active_processes",
                  "imports_total", "profile_analysis", "rules_synthesis", "chat_per_month")
 
 

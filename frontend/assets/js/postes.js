@@ -1,6 +1,7 @@
 import {
-  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, fmtAgo, html, isLocked, loadMe, logo, openFeedback, openForm,
-  openJobDialog, plain, proBar, proTag, refreshCounts, renderValue, score, statusSelect, toast,
+  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, fmtAgo, html, isLocked, loadMe, lockedBlock, logo,
+  openFeedback, openForm, openJobDialog, plain, proBar, refreshCounts, renderPaged, renderValue, score, shown, statusSelect,
+  toast,
 } from "./app.js";
 
 let jobs = [];
@@ -60,7 +61,6 @@ async function editJob(job) {
 
 /** Ligne sous le titre : pourquoi c'est intéressant, ou raison d'écart. */
 function subline(j) {
-  if (j.locked) return html`<span class="small muted">Publiée ${fmtAgo(j.published_on ?? j.created_at)} · ${proTag}</span>`;
   const a = j.assessment;
   if (a?.exclusion && j.display_status === "ecartee") return html`<span class="small muted exclusion-line">${renderValue(a.exclusion)}</span>`;
   // « Pourquoi » verrouillé (Free) : flouté dans la fiche, la ligne garde le lieu et la source
@@ -68,23 +68,39 @@ function subline(j) {
   return html`<span class="small muted">${[j.location, j.source].filter(Boolean).join(" · ")}</span>`;
 }
 
-const row = (j) => html`
-  <div class="job-row clickable ${j.display_status === "ecartee" ? "is-excluded" : ""} ${j.locked ? "is-locked pro-quiet" : ""}" data-id="${j.id}">
+/** Offre réservée au Pro (Free) : la ligne entière est floutée d'un seul tenant (texte factice), un seul badge. */
+const lockedRow = (j) => html`
+  <div class="row-lock" data-id="${j.id}">
+    ${lockedBlock(html`<div class="job-row">
+      <span class="logo is-locked" data-initials="?"></span>
+      <div style="min-width:0;display:grid;gap:2px">
+        <span class="title">${shown(j.title)}</span>
+        <span class="small muted">Publiée ${fmtAgo(j.published_on ?? j.created_at)}</span>
+      </div>
+      <span class="col-company">${shown(j.company.name)}</span>
+      <span class="col-salary">${shown(j.salary) || "60-80 k€"}</span>
+      <span class="col-score">7,5</span>
+      <span class="col-status small">Nouveau</span>
+      <span class="actions"></span>
+    </div>`)}
+  </div>`;
+
+const row = (j) => j.locked ? lockedRow(j) : html`
+  <div class="job-row clickable ${j.display_status === "ecartee" ? "is-excluded" : ""}" data-id="${j.id}">
     ${logo(j.company)}
     <div style="min-width:0;display:grid;gap:2px">
-      ${isLocked(j.title) ? renderValue(j.title)
-        : html`<button type="button" class="link-btn title" data-action="view" title="Voir l'offre">${j.title}</button>`}
+      <button type="button" class="link-btn title" data-action="view" title="Voir l'offre">${j.title}</button>
       ${subline(j)}
     </div>
     <span class="col-company">${renderValue(j.company.name)}</span>
+    <span class="col-salary">${j.salary ? renderValue(j.salary) : html`<span class="muted">—</span>`}</span>
     <span class="col-score" title="${j.assessment?.manual_score != null ? "Note corrigée par vous" : "Note calculée selon votre profil"}">${score(j.score)}</span>
     <span class="col-status">${statusSelect(j.display_status, `data-job="${j.id}"`)}</span>
     <span class="actions">
-      ${j.locked ? "" : html`
       <button class="icon-btn fb-like" type="button" data-action="like" title="J'aime (offre de référence)">${ICONS.heart}</button>
-      <button class="icon-btn fb-dislike" type="button" data-action="dislike" title="Pas intéressé">${ICONS.thumbDown}</button>`}
+      <button class="icon-btn fb-dislike" type="button" data-action="dislike" title="Pas intéressé">${ICONS.thumbDown}</button>
       ${j.url && !isLocked(j.url) ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
-      ${j.locked ? "" : html`<button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>`}
+      <button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>
     </span>
   </div>`;
 
@@ -102,17 +118,18 @@ function drawFilters() {
       </button>`)}`.s;
 }
 
-function draw() {
-  drawFilters();
+function matches(j) {
   const q = $("#search").value.trim().toLowerCase();
   const companyId = $("#company").value;
-  const shown = jobs.filter(
-    (j) =>
-      (statusFilter ? j.display_status === statusFilter : j.display_status !== "ecartee") &&
-      (!companyId || String(j.company.id) === companyId) &&
-      (!q || [j.title, j.company.name, j.stack, j.category, j.location].some((v) => plain(v).toLowerCase().includes(q)))
-  );
-  $("#list").innerHTML = shown.length ? html`${shown.map(row)}`.s : html`<p class="empty">Aucun poste ne correspond.</p>`.s;
+  return (statusFilter ? j.display_status === statusFilter : j.display_status !== "ecartee") &&
+    (!companyId || String(j.company.id) === companyId) &&
+    (!q || [j.title, j.company.name, j.stack, j.category, j.location, j.salary].some((v) => plain(v).toLowerCase().includes(q)));
+}
+
+/** keep : rafraîchissement (évaluation en cours…) sans revenir en haut de la liste. */
+function draw({ keep = false } = {}) {
+  drawFilters();
+  renderPaged($("#list"), jobs.filter(matches), row, { keep, empty: html`<p class="empty">Aucun poste ne correspond.</p>` });
 }
 
 // --- Bandeau d'évaluation ---------------------------------------------------------
@@ -165,16 +182,17 @@ async function drawAssessmentStatus() {
 
 async function reloadJobs() {
   jobs = await api("/jobs");
-  draw();
+  draw({ keep: true });
 }
 
-/** Offre Free : nombre d'offres récentes floutées (calculé par l'API). */
+/** Offre Free : nombre d'offres floutées (calculé par l'API). */
 async function drawProBanner() {
   const b = (await loadMe()).billing;
   const n = b?.enabled && b.plan === "free" ? b.locked_jobs : 0;
-  const days = b?.limits?.fresh_delay_days;
+  const visible = b?.limits?.visible_jobs;
   $("#pro-banner").innerHTML = n
-    ? proBar(`${n} offre${n > 1 ? "s" : ""} de moins de ${days} jours ${n > 1 ? "sont réservées" : "est réservée"} au Pro`).s
+    ? proBar(`En Free, ${visible} offres en clair parmi les plus pertinentes pour vous : ${n} autre${n > 1 ? "s" : ""}, `
+      + `dont la plus pertinente, ${n > 1 ? "sont réservées" : "est réservée"} au Pro`).s
     : "";
 }
 
@@ -229,7 +247,12 @@ $("#list").addEventListener("change", async (e) => {
     "Statut mis à jour"
   ).catch(() => null);
   if (updated) jobs = jobs.map((j) => (j.id === updated.id ? updated : j));
-  draw();
+  // Seule la ligne change (la position dans la liste est conservée) ; elle disparaît si elle ne correspond plus au filtre
+  const job = jobs.find((j) => j.id === Number(sel.dataset.job));
+  const el = sel.closest("[data-id]");
+  if (job && matches(job)) el.outerHTML = row(job).s;
+  else el.remove();
+  drawFilters();
   refreshCounts();
 });
 

@@ -243,13 +243,16 @@ img { display: block; }
 
 .table-card { padding: 0; overflow: hidden; }
 .job-row {
-  display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.3fr) 56px 150px 136px;
+  display: grid; grid-template-columns: 40px minmax(0, 2.2fr) minmax(0, 1.2fr) 112px 56px 150px 136px;
   align-items: center; gap: 16px; padding: 14px 20px; border-top: 1px solid var(--border);
 }
 .job-row:first-child { border-top: 0; }
 .job-row.head { background: var(--bg); padding-top: 10px; padding-bottom: 10px; }
 .job-row .title { font-weight: 500; }
 .job-row .actions { display: flex; justify-content: flex-end; gap: 2px; }
+.job-row .col-salary { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* Liste affichée par paquets (renderPaged) : repère invisible qui déclenche la suite */
+.list-sentinel { height: 1px; grid-column: 1 / -1; }
 
 /* --- Kanban (Mes process) -------------------------------------------------- */
 
@@ -458,8 +461,29 @@ body.not-admin [data-admin] { display: none !important; }
 .locked.block { display: block; padding: 4px 0; }
 .locked.block .locked-text { white-space: normal; display: block; }
 .locked.block .pro-badge { top: 50%; }
-/* Ligne de tableau entièrement verrouillée (offre récente) */
-.job-row.is-locked .title, .job-row.is-locked .col-company { color: var(--muted); }
+/* Bloc entièrement flouté d'un seul tenant (ligne d'offre, carte, partie « levée ») : un seul badge au centre */
+.locked-block { position: relative; cursor: pointer; border-radius: 8px; overflow: hidden; }
+.locked-block-content {
+  filter: blur(5px); opacity: .55; user-select: none; -webkit-user-select: none; pointer-events: none;
+}
+.locked-block > .pro-badge {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  display: inline-flex; align-items: center; gap: 4px; padding: 3px 10px; border-radius: 100px;
+  background: var(--text); color: var(--white); font-size: 11px; font-weight: 600; line-height: 16px;
+  white-space: nowrap; pointer-events: none; box-shadow: 0 1px 4px rgba(0, 0, 0, .15); transition: background .12s;
+}
+.locked-block > .pro-badge svg { width: 11px; height: 11px; }
+.locked-block:hover > .pro-badge, .locked-block:focus-visible > .pro-badge { background: var(--accent); }
+.locked-block:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Ligne d'offre floutée : séparée des autres comme une ligne normale */
+.row-lock { border-top: 1px solid var(--border); }
+#list > .row-lock:first-child { border-top: 0; }
+.row-lock .job-row { border-top: 0; }
+.row-lock .locked-block { border-radius: 0; }
+/* Carte d'entreprise floutée en entier : même gabarit que les autres cartes */
+.card.card-locked { padding: 0; }
+.card.card-locked .locked-block { height: 100%; border-radius: inherit; }
+.card.card-locked .locked-block-content { padding: 20px; display: grid; gap: 14px; align-content: start; height: 100%; }
 /* Un conteneur qui porte déjà son repère « Pro » (ligne d'offre, carte d'entreprise, process) : les valeurs
    floutées à l'intérieur n'affichent pas leur propre badge, ni au repos ni au survol */
 .pro-quiet .locked .pro-badge { display: none; }
@@ -580,7 +604,7 @@ dialog.pro-dialog { width: min(600px, calc(100vw - 32px)); }
 @media (max-width: 1100px) {
   .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .grid-3 { grid-template-columns: 1fr; }
-  .job-row { grid-template-columns: 40px minmax(0, 1fr) 56px 150px 136px; }
+  .job-row { grid-template-columns: 40px minmax(0, 1fr) 100px 56px 150px 136px; }
   .job-row > .col-company { display: none; }
 }
 
@@ -605,7 +629,7 @@ dialog.pro-dialog { width: min(600px, calc(100vw - 32px)); }
   .stat .value { font-size: 32px; }
   .job-row { grid-template-columns: 40px minmax(0, 1fr) 136px; row-gap: 8px; }
   .job-row.head { display: none; }
-  .job-row > .col-score { display: none; }
+  .job-row > .col-score, .job-row > .col-salary { display: none; }
   .job-row > .col-status { grid-column: 2 / 3; grid-row: 2; }
   .cards { grid-template-columns: 1fr; }
 }

@@ -24,7 +24,7 @@ import logging
 import re
 import threading
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
@@ -317,14 +317,15 @@ class Scope:
 
     priority: int  # 0 = servi en premier
     budget: int | None  # évaluations Gemini restantes sur 7 jours (None = sans plafond)
-    before: datetime | None  # Free : seulement les offres plus anciennes (les récentes lui sont verrouillées)
+    before: datetime | None = None  # seulement les offres publiées avant cette date (None : toutes)
 
 
 def scope_of(db: Session, user: User) -> Scope:
+    """Free : quota hebdomadaire d'évaluations ; toutes les offres sont évaluables (le classement par note
+    décide ensuite lesquelles sont en clair, voir entitlements.access_for)."""
     plan = entitlements.plan_of(db, user)
     lim = entitlements.limits(plan)
-    before = entitlements.now() - timedelta(days=lim["fresh_delay_days"]) if lim["fresh_delay_days"] else None
-    return Scope(lim["assessment_priority"], entitlements.remaining(db, user, "assessments", plan), before)
+    return Scope(lim["assessment_priority"], entitlements.remaining(db, user, "assessments", plan))
 
 
 def jobs_to_assess(db: Session, user: User, profile: UserProfile, limit: int | None = None,
