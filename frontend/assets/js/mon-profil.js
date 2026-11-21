@@ -780,4 +780,24 @@ async function render() {
   }
 }
 
+// --- Vos données : suppression du compte (droit à l'effacement) ---------------------------------------
+// L'export est un simple lien (/api/me/export, fichier JSON téléchargé).
+
+$("#delete-account").addEventListener("click", async () => {
+  const done = await openForm({
+    title: "Supprimer mon compte",
+    fields: [{ name: "confirm", label: "Tapez SUPPRIMER pour confirmer", required: true, full: true,
+               hint: "Définitif : profil, process, retours, notes, conversations et imports sont effacés immédiatement. "
+                 + "Les offres et entreprises du radar, partagées, restent." }],
+    extra: html`<p class="small muted">Un abonnement en cours doit d'abord être résilié. Pensez à exporter vos données avant.</p>`,
+    submitLabel: "Supprimer définitivement",
+    onSubmit: async ({ confirm }) => {
+      if (confirm.trim().toUpperCase() !== "SUPPRIMER") throw new Error("Tapez SUPPRIMER pour confirmer");
+      await api("/me", { method: "DELETE" });
+      return true;
+    },
+  });
+  if (done) location.href = "/";
+});
+
 boot(render);

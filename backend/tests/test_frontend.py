@@ -120,3 +120,11 @@ def test_main_app_applies_limits(alice, as_user):
     r = as_user(alice).post("/api/chat", content=b"{" + b" " * 70_000 + b"}",
                             headers={"content-type": "application/json"})
     assert r.status_code == 413
+
+
+def test_legal_pages_are_public(site):
+    for path in ("/mentions-legales", "/cgv", "/confidentialite", "/cgv.html"):
+        r = site.get(path)
+        assert r.status_code == 200, path
+    assert "Droit de rétractation" in site.get("/cgv").text
+    assert "Politique de confidentialité" in site.get("/confidentialite").text

@@ -25,6 +25,7 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from . import assessments, collector, logs, tasks
 from .frontend import BodySizeLimit, mount_frontend
+from .account import router as account_router
 from .agent_api import router as agent_router
 from .api import router as api_router
 from .assessments_api import router as assessments_router
@@ -114,6 +115,7 @@ app.include_router(radar_router)
 app.include_router(agent_router)
 app.include_router(public_router)
 app.include_router(billing_router)  # /api/billing/webhook : sans session (appelé par Stripe)
+app.include_router(account_router)  # /api/me/export, DELETE /api/me : droits RGPD
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,

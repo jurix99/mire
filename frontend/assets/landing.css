@@ -277,6 +277,8 @@ a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px soli
   user-select: none;
 }
 .foot-legal { display: flex; justify-content: space-between; gap: 16px; margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 13px; color: var(--ink-60); }
+.foot-legal a { color: inherit; }
+.foot-legal a:hover { color: var(--ink); }
 
 /* --- Apparition au défilement --------------------------------------------------------- */
 

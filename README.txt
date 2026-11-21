@@ -139,6 +139,8 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/public/landing, /api/public/logos/{id}   SANS session (landing) : prix et limites (PLAN_LIMITS),
                                                       chiffres du radar, logos des seules entreprises visibles en Free
          /api/me, /api/dashboard, /api/analytics, /api/statuses
+         /api/me/export, DELETE /api/me               RGPD : export JSON de toutes vos données, suppression du compte
+         /mentions-legales, /cgv, /confidentialite    pages légales, publiques (sans session)
          /api/companies[/{id}[/logo]], /api/jobs[/{id}[/status]], /api/applications[/{id}]
          /api/profile                                 GET, PATCH (champs envoyés remplacés)
          /api/profile/import/linkedin-export          POST, ZIP de l'export de données LinkedIn (20 Mo max)
@@ -354,3 +356,16 @@ exploitation, coûts). En bref :
   - traitements à la main : az containerapp job start -g rg-mire-prod -n mire-daily (ou mire-worker) ;
   - en local, `python -m app.jobs daily | worker | migrate` fonctionne aussi :
       docker compose exec backend uv run python -m app.jobs daily
+
+------------------------------------------------------------------
+Pages légales et RGPD
+------------------------------------------------------------------
+Pages : frontend/mentions-legales.html, cgv.html, confidentialite.html (publiques ; liens dans le pied de la
+landing, la barre latérale et la fenêtre Pro). Les informations sur l'éditeur sont à compléter : repérer
+[À compléter] (identité, SIRET, adresse, contact, directeur de la publication, médiateur de la consommation).
+Droits des utilisateurs (backend/app/account.py, « Mon profil > Vos données ») : export JSON, suppression
+définitive du compte (refusée tant qu'un abonnement se renouvelle) ; comptes sans connexion depuis 3 ans
+supprimés par le job quotidien. Fichiers importés (CV, export LinkedIn) jamais conservés.
+Rétractation : pas de case à cocher ; la mention est affichée au-dessus des boutons de paiement, le clic vaut
+demande d'accès immédiat et renonciation (horodatée : subscriptions.withdrawal_waived_at), rappelée sur la
+page Stripe (custom_text).

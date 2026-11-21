@@ -24,7 +24,9 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
 
-PUBLIC_PAGES = {"/", "/index.html"}
+# Pages publiques : landing et pages légales (accessibles sans compte, comme l'exige la loi)
+LEGAL_PAGES = ("/mentions-legales", "/cgv", "/confidentialite")
+PUBLIC_PAGES = {"/", "/index.html", *LEGAL_PAGES, *(f"{p}.html" for p in LEGAL_PAGES)}
 LONG_CACHE = "public, max-age=31536000, immutable"
 ASSET_URL = re.compile(r'((?:href|src)=")(/assets/[^"?#]+)(")')
 

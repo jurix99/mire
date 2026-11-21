@@ -103,7 +103,8 @@ def _portal_url(client: stripe.StripeClient, customer_id: str) -> str:
 @router.post("/checkout")
 def checkout(body: CheckoutIn, db: DB, user: Me) -> UrlOut:
     if not body.waive_withdrawal:
-        raise HTTPException(422, "Cochez la renonciation au droit de rétractation pour accéder tout de suite au Pro")
+        # Envoyé par le front au clic sur « Passer Pro », sous la mention de renonciation (CGV art. 6)
+        raise HTTPException(422, "Demande d'accès immédiat et renonciation au droit de rétractation requises (CGV, art. 6)")
     price = os.environ.get(PRICE_ENV[body.plan], "")
     if not price:
         raise HTTPException(503, f"Paiement indisponible : {PRICE_ENV[body.plan]} n'est pas configuré sur le serveur")

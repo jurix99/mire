@@ -27,10 +27,14 @@ BACKEND_DIR = Path(__file__).resolve().parents[1]  # contient alembic.ini
 def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
     """Enchaînement quotidien. Lève une exception si la collecte ou les embeddings échouent ; une erreur Gemini
     pour un utilisateur est consignée et son évaluation remise en file (le worker la reprendra)."""
-    from . import ats, collector, embeddings, matching, tasks
+    from . import account, ats, collector, embeddings, matching, tasks
     from .llm import get_llm
 
     llm = llm if llm is not None else get_llm()
+    # Durée de conservation (politique de confidentialité) : comptes inactifs depuis 3 ans supprimés
+    purged = account.purge_inactive(db)
+    if purged:
+        log.info("Comptes inactifs supprimés : %s", purged, extra={"step": "purge", "count": purged})
     run = collector.collect_all(db, fetch=fetch or ats.fetch_postings)
     log.info("%s", run.summary, extra={"step": "collect", "jobs_added": run.jobs_added, "jobs_closed": run.jobs_closed})
     embedded = embeddings.embed_pending_jobs(db, embedder)

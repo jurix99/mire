@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Politique de confidentialité · Mire</title>
+  <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="/assets/favicon.png" sizes="32x32">
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body class="legal-page">
+  <header class="legal-head">
+    <a class="brand" href="/">Mire</a>
+    <nav aria-label="Pages légales">
+      <a href="/mentions-legales">Mentions légales</a>
+      <a href="/cgv">CGV</a>
+      <a href="/confidentialite" aria-current="page">Confidentialité</a>
+    </nav>
+  </header>
+
+  <main class="legal">
+    <p class="label">// Données personnelles</p>
+    <h1>Politique de confidentialité</h1>
+    <p class="muted">Dernière mise à jour : 21 novembre 2026</p>
+
+    <p>Mire traite des données de carrière (profil, CV, préférences, candidatures). Cette page explique, en
+      application du Règlement général sur la protection des données (RGPD) et de la loi Informatique et Libertés,
+      quelles données sont traitées, pourquoi, avec qui, combien de temps, et comment exercer vos droits.</p>
+
+    <h2>1. Responsable du traitement</h2>
+    <p>L'éditeur de Mire, désigné dans les <a href="/mentions-legales">mentions légales</a>. Contact pour toute
+      question ou demande relative à vos données : <mark class="todo">[À compléter : adresse e-mail dédiée]</mark>.</p>
+
+    <h2>2. Données traitées</h2>
+    <ul>
+      <li><strong>Compte</strong> (fournies par LinkedIn à la connexion) : identifiant LinkedIn, nom, prénom, adresse
+        e-mail, photo de profil, langue ; date de dernière connexion.</li>
+      <li><strong>Profil professionnel</strong> (saisi par vous, ou importé à votre demande) : titre, positionnement,
+        expériences, formation, compétences, langues, années d'expérience, préférences de recherche (rôles, lieux,
+        mode de travail, salaire souhaité, secteurs), entreprises exclues, règles « éviter / préférer », barème de
+        notation, offres de référence.</li>
+      <li><strong>Imports</strong> : export de données LinkedIn (ZIP), CV ou profil en PDF, texte collé. Les fichiers
+        ne sont <strong>jamais conservés</strong> : leur contenu est lu le temps de l'import, les éléments extraits vous
+        sont proposés, et seuls ceux que vous validez rejoignent votre profil. Une proposition non validée est
+        supprimée sous 24 heures. Mire garde seulement la trace de l'import (source, nom du fichier, date).</li>
+      <li><strong>Activité</strong> : vos process de candidature (statuts, notes, prochaines étapes, historique), vos
+        retours sur les offres (J'aime / Pas intéressé, raisons, commentaire), les évaluations calculées des offres
+        pour votre profil et vos corrections de note.</li>
+      <li><strong>Assistant</strong> : vos messages et ses réponses, et les actions proposées ou exécutées.</li>
+      <li><strong>Abonnement</strong> : identifiant client et d'abonnement Stripe, statut, dates de période, date de
+        votre demande d'accès immédiat (renonciation au droit de rétractation). Mire ne voit jamais vos données de
+        carte bancaire.</li>
+      <li><strong>Journaux techniques</strong> : requêtes reçues (date, chemin sans paramètres, code de réponse) et
+        erreurs, sans contenu de profil ni secret.</li>
+    </ul>
+    <p>Ne renseignez pas de données sensibles (santé, opinions, origine…) dans votre profil, vos imports ou vos
+      messages : Mire n'en a pas besoin. Mire n'est pas destiné aux mineurs de moins de 15 ans.</p>
+
+    <h2>3. Finalités et bases légales</h2>
+    <table class="legal-table">
+      <thead><tr><th>Finalité</th><th>Base légale</th></tr></thead>
+      <tbody>
+        <tr><td>Créer et gérer votre compte, vous connecter</td><td>Exécution du contrat (conditions d'utilisation, CGV)</td></tr>
+        <tr><td>Construire votre profil, importer un CV ou un export LinkedIn, noter les offres selon votre profil, suivre vos candidatures, répondre via l'assistant</td><td>Exécution du contrat (service que vous demandez)</td></tr>
+        <tr><td>Vendre et gérer l'offre Pro, facturation</td><td>Exécution du contrat ; obligation légale (comptabilité)</td></tr>
+        <tr><td>Sécurité, prévention des abus, diagnostic des incidents (journaux techniques)</td><td>Intérêt légitime à assurer un service sûr et fonctionnel</td></tr>
+      </tbody>
+    </table>
+    <p>Mire ne vend pas vos données, ne fait pas de publicité, n'envoie pas votre profil aux entreprises et ne
+      l'utilise pas pour entraîner un modèle d'IA.</p>
+
+    <h2>4. Notation par intelligence artificielle</h2>
+    <p>Les offres sont d'abord filtrées par des règles fixes (entreprise exclue, stage, expérience demandée…), puis
+      notées par un modèle d'IA (Google Gemini) à partir d'un résumé de votre profil. Ces notes servent uniquement à
+      trier les offres pour vous ; elles ne produisent aucun effet juridique et ne sont transmises à personne. Vous
+      pouvez corriger chaque note, et elles sont recalculées quand votre profil change.</p>
+
+    <h2>5. Destinataires et sous-traitants</h2>
+    <p>Vos données ne sont accessibles qu'à l'éditeur et aux prestataires techniques suivants, liés par contrat et
+      tenus à la confidentialité :</p>
+    <table class="legal-table">
+      <thead><tr><th>Prestataire</th><th>Rôle</th><th>Localisation</th></tr></thead>
+      <tbody>
+        <tr><td>Microsoft (Azure)</td><td>Hébergement de l'application et de la base de données</td><td>Union européenne (Irlande)</td></tr>
+        <tr><td>Google (API Gemini)</td><td>Extraction des imports, notation des offres, assistant : reçoit les textes nécessaires (profil, CV importé, messages)</td><td>Union européenne et États-Unis</td></tr>
+        <tr><td>LinkedIn</td><td>Connexion (vous authentifie et nous transmet votre identité)</td><td>Union européenne (Irlande) et États-Unis</td></tr>
+        <tr><td>Stripe</td><td>Paiement et facturation de l'offre Pro</td><td>Union européenne (Irlande) et États-Unis</td></tr>
+      </tbody>
+    </table>
+    <p>Les transferts vers les États-Unis sont encadrés par le cadre de protection des données UE–États-Unis (Data
+      Privacy Framework) dont ces prestataires sont adhérents, et par les clauses contractuelles types de la
+      Commission européenne. Les données envoyées à l'API Gemini ne sont pas utilisées par Google pour entraîner ses
+      modèles (conditions de l'API payante).</p>
+
+    <h2>6. Durées de conservation</h2>
+    <ul>
+      <li>Compte et données associées : tant que le compte existe. Un compte sans connexion pendant 3 ans est
+        supprimé automatiquement, avec toutes ses données.</li>
+      <li>Fichiers importés : jamais conservés ; propositions d'import non validées : 24 heures.</li>
+      <li>Journaux techniques : 30 jours.</li>
+      <li>Sauvegardes de la base : 7 jours (une donnée supprimée disparaît des sauvegardes sous 7 jours).</li>
+      <li>Données de facturation : conservées par Stripe pendant la durée légale (10 ans pour les pièces comptables).</li>
+    </ul>
+
+    <h2>7. Vos droits</h2>
+    <p>Vous disposez des droits d'accès, de rectification, d'effacement, de limitation, d'opposition et de
+      portabilité de vos données. La plupart s'exercent directement dans « Mon profil » :</p>
+    <ul>
+      <li><strong>Accès et portabilité</strong> : bouton « Exporter mes données » (fichier JSON complet).</li>
+      <li><strong>Rectification</strong> : modifiez votre profil à tout moment.</li>
+      <li><strong>Effacement</strong> : bouton « Supprimer mon compte », définitif et immédiat (après résiliation
+        d'un abonnement en cours).</li>
+    </ul>
+    <p>Pour toute autre demande, écrivez à l'adresse indiquée au point 1 ; une réponse vous est apportée dans un
+      délai d'un mois. Vous pouvez aussi introduire une réclamation auprès de la CNIL (cnil.fr).</p>
+
+    <h2>8. Sécurité</h2>
+    <p>Connexions chiffrées (HTTPS), base de données sans accès public (réseau privé), données chiffrées au repos par
+      l'hébergeur, secrets techniques dans un coffre dédié, accès d'administration restreints et journalisés. Les
+      données de chaque utilisateur (profil, process, notes) ne sont visibles que par lui.</p>
+
+    <h2>9. Cookies</h2>
+    <p>Un seul cookie, strictement nécessaire : <code>jobradar_session</code>, qui maintient votre connexion (7 jours).
+      Aucun cookie publicitaire ni de mesure d'audience : aucun consentement n'est donc demandé.</p>
+
+    <h2>10. Modifications</h2>
+    <p>Cette politique peut évoluer ; la date de mise à jour figure en haut de la page. Un changement important vous
+      est signalé dans l'application.</p>
+  </main>
+
+  <footer class="legal-foot small muted">
+    <a href="/">Accueil</a> · <a href="/mentions-legales">Mentions légales</a> · <a href="/cgv">CGV</a> ·
+    <a href="/confidentialite">Confidentialité</a>
+  </footer>
+</body>
+</html>

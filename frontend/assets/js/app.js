@@ -306,16 +306,17 @@ export async function openProModal() {
           <p class="plan-sub">Sans engagement. Ou <strong>${prices.pass_3m ?? "le Pass 3 mois"}</strong>, sans renouvellement.</p>
           ${feats(list.pro)}
           ${isPro ? html`<p class="plan-sub"><strong>Vous avez déjà l'offre Pro.</strong></p>` : html`
-          <label class="pro-waiver"><input type="checkbox" data-waiver>
-            <span>J'accède à Mire Pro dès le paiement et je renonce à mon droit de rétractation de 14 jours.</span></label>
           <div class="plan-ctas">
-            <button type="button" class="plan-cta" data-checkout="monthly" disabled title="Cochez la case ci-dessus">Passer Pro</button>
-            <button type="button" class="plan-cta ghost" data-checkout="pass_3m" disabled title="Cochez la case ci-dessus">Pass 3 mois</button>
+            <button type="button" class="plan-cta" data-checkout="monthly">Passer Pro</button>
+            <button type="button" class="plan-cta ghost" data-checkout="pass_3m">Pass 3 mois</button>
           </div>
+          <p class="pro-waiver">En cliquant sur « Passer Pro » ou « Pass 3 mois », vous demandez l'accès immédiat à Mire Pro
+            et renoncez à votre droit de rétractation de 14 jours (<a href="/cgv#retractation" target="_blank" rel="noopener">CGV, art. 6</a>).</p>
           <p class="form-error" hidden></p>`}
         </article>
       </div>
-      <p class="small muted pro-note">Prix TTC · Paiement sécurisé par Stripe · Résiliable en ligne</p>
+      <p class="small muted pro-note">Prix TTC · Paiement sécurisé par Stripe · Résiliable en ligne ·
+        <a href="/cgv" target="_blank" rel="noopener">CGV</a> · <a href="/confidentialite" target="_blank" rel="noopener">Confidentialité</a></p>
     </div>`.s;
   document.body.append(dlg);
   dlg.addEventListener("close", () => dlg.remove());
@@ -325,6 +326,8 @@ export async function openProModal() {
     if (!btn) return;
     $$("[data-checkout]", dlg).forEach((b) => (b.disabled = true));
     try {
+      // Le clic sur le bouton, sous la mention affichée juste au-dessus, vaut demande d'accès immédiat et
+      // renonciation au droit de rétractation (CGV art. 6) ; le serveur l'horodate (withdrawal_waived_at)
       const res = await api("/billing/checkout", { method: "POST", body: { plan: btn.dataset.checkout, waive_withdrawal: true } });
       location.href = res.url;
     } catch (err) {
@@ -333,9 +336,6 @@ export async function openProModal() {
       box.hidden = false;
       $$("[data-checkout]", dlg).forEach((b) => (b.disabled = false));
     }
-  });
-  $("[data-waiver]", dlg)?.addEventListener("change", (e) => {
-    $$("[data-checkout]", dlg).forEach((b) => (b.disabled = !e.target.checked));
   });
   dlg.showModal();
 }
@@ -749,9 +749,12 @@ export async function renderShell() {
     </a>
     <div class="watch" id="plan-box" hidden>
       <p class="label">// Offre Free</p>
-      <p class="small muted">Offres récentes, levées de fonds et notes de l'IA réservées au Pro.</p>
+      <p class="small muted">L'offre la plus pertinente, toutes les autres, les levées de fonds et les notes de l'IA : réservées au Pro.</p>
       <button type="button" class="btn sm" data-pro>Passer Pro</button>
-    </div>`.s;
+    </div>
+    <p class="sidebar-legal small muted">
+      <a href="/mentions-legales">Mentions légales</a> · <a href="/cgv">CGV</a> · <a href="/confidentialite">Confidentialité</a>
+    </p>`.s;
     mountChat();
   }
   try {
