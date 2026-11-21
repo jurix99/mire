@@ -737,3 +737,34 @@ def locked_me() -> dict:
         "salary": {"title": "Salaires de ta famille face à tes attentes",
                    "headline": "Où se situent les salaires affichés par rapport à tes attentes", **section},
     }
+
+
+# --- Baromètre public (marque Mire) ------------------------------------------------------------------------------
+
+BAROMETER_TOP = 10
+BAROMETER_RISING = 5
+BAROMETER_PERIOD = "30j"
+BAROMETER_TTL_S = 24 * 3600
+
+
+def barometer(facts: Facts, today: date | None = None) -> dict:
+    """Agrégats publics, au-dessus des seuils d'effectif, sans aucun nom d'entreprise ni lien vers une offre."""
+    today = today or date.today()
+    rows = scope(facts, period=BAROMETER_PERIOD, domain=None, family=None, today=today)
+    skills = top_skills(facts, rows, "entreprise", BAROMETER_TOP)
+    trends = skill_trends(facts, "entreprise", today=today)
+    by_role = roles(rows, "entreprise", BAROMETER_TOP)
+
+    def public(item: dict) -> dict:  # uniquement des agrégats
+        return {k: item[k] for k in ("key", "label", "share", "units", "jobs", "low_data") if k in item}
+
+    return {
+        "month": today.strftime("%m/%Y"), "period_days": PERIODS[BAROMETER_PERIOD],
+        "jobs": len(rows), "companies": len({r.company_id for r in rows}),
+        "top_skills": {"headline": skills["headline"], "items": [public(i) for i in skills["top"]]},
+        "rising": {"headline": trends["headline"],
+                   "items": [{k: i[k] for k in ("key", "label", "pp", "share_recent")} for i in
+                             trends["up"][:BAROMETER_RISING]]},
+        "domains": {"headline": by_role["headline"], "items": [public(i) for i in by_role["domains"]]},
+        "thresholds": {"min_jobs": MIN_JOBS, "low_data": LOW_DATA},
+    }
