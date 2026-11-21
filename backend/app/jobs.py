@@ -71,6 +71,10 @@ def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
             summary["errors"] += 1
             log.warning("Évaluation utilisateur %s en échec : %s", user.id, exc, extra={"user_id": user.id})
             tasks.enqueue(db, "assess_user", {"user_id": user.id, **candidates})
+    # Agrégats du marché (page Analytics, baromètre) : vue matérialisée rafraîchie une fois par jour
+    from . import market
+
+    market.refresh_facts(db)
     log.info("Daily terminé", extra={"step": "daily", **{k: v for k, v in summary.items() if k != "collect"}})
     return summary
 

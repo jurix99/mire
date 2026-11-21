@@ -620,3 +620,33 @@ class TaxonomyMiss(Base):
     label: Mapped[str] = mapped_column(String(120), primary_key=True)
     count: Mapped[int] = mapped_column(Integer, default=0)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class MarketJob(Base):
+    """Faits par offre pour les analyses du marché (market.py) : une ligne par offre classée.
+
+    PostgreSQL : VUE MATÉRIALISÉE mv_market_jobs (migration), rafraîchie à la fin de daily
+    (REFRESH MATERIALIZED VIEW CONCURRENTLY). SQLite (tests) : table du même nom, remplie par market.refresh_facts
+    avec la même logique. info["is_view"] : ignorée par l'autogénération Alembic (migrations/env.py).
+    """
+
+    __tablename__ = "mv_market_jobs"
+    __table_args__ = {"info": {"is_view": True}}
+
+    job_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    company_id: Mapped[int] = mapped_column(Integer, index=True)
+    ref_date: Mapped[date] = mapped_column(Date)  # publication, sinon ajout dans Mire
+    closed_on: Mapped[date | None] = mapped_column(Date)
+    role_family: Mapped[str | None] = mapped_column(String(60))
+    domain: Mapped[str | None] = mapped_column(String(30))
+    seniority_level: Mapped[str | None] = mapped_column(String(20))
+    contract_type: Mapped[str | None] = mapped_column(String(20))
+    salary_min_keur: Mapped[int | None] = mapped_column(Integer)
+    salary_max_keur: Mapped[int | None] = mapped_column(Integer)
+    salary_kind: Mapped[str | None] = mapped_column(String(10))
+    work_mode: Mapped[str | None] = mapped_column(String(20))
+    market_regions: Mapped[list | None] = mapped_column(JSONType)
+    product_sector: Mapped[str | None] = mapped_column(String(40))
+    funding_stage: Mapped[str | None] = mapped_column(String(200))
+    funding_announced_on: Mapped[date | None] = mapped_column(Date)
+    investors: Mapped[str | None] = mapped_column(Text)
