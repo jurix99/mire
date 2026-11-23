@@ -56,6 +56,12 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "rules_synthesis": False,  # /api/profile/rules/synthesize
         "chat_per_month": 10,  # messages à l'assistant par mois civil
         "digest_email": False,  # (plus tard) e-mail récapitulatif
+        # Analytics « Marché » : période, taille des listes, indicateurs en clair ; le reste est flouté
+        # (nombre d'éléments cachés seulement) ; « Toi face au marché » réservé au Pro
+        "market_periods": ["90j"],  # listes (pas de tuples) : identiques une fois passées en JSON (/api/me)
+        "market_top": 5,
+        "market_open_indicators": ["skills", "roles"],
+        "market_me": False,
     },
     "pro": {
         "visible_jobs": None,
@@ -68,6 +74,10 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "rules_synthesis": True,
         "chat_per_month": 300,  # garde-fou contre les abus
         "digest_email": True,
+        "market_periods": None,  # toutes
+        "market_top": 10,
+        "market_open_indicators": None,  # tous
+        "market_me": True,
         # Prix affichés (TTC). Les montants facturés sont ceux des prix Stripe (STRIPE_PRICE_MONTHLY / _PASS_3M).
         "price_monthly_label": "10 € TTC / mois",
         "price_pass_3m_label": "25 € TTC pour 3 mois",

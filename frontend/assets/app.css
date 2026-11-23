@@ -688,6 +688,13 @@ dialog.pro-dialog { width: min(860px, calc(100vw - 32px)); border-radius: 28px; 
 /* Retours sur les offres */
 .icon-btn.fb-like:hover { color: #db2777; }
 .icon-btn.fb-dislike:hover { color: #9d174d; }
+/* Retour déjà donné : icône remplie et colorée (aria-pressed, l'état ne repose pas que sur la couleur) */
+.icon-btn.fb-like.is-on { color: #db2777; }
+.icon-btn.fb-dislike.is-on { color: #9d174d; }
+.icon-btn.is-on svg path { fill: currentColor; }
+.btn.fb-btn.fb-like.is-on { color: #db2777; border-color: #f9a8d4; }
+.btn.fb-btn.fb-dislike.is-on { color: #9d174d; border-color: #f0abfc; }
+.btn.fb-btn.is-on svg path { fill: currentColor; }
 .feedback-buttons { display: flex; gap: 8px; flex-wrap: wrap; }
 .feedback-buttons .btn svg { width: 14px; height: 14px; }
 
@@ -759,3 +766,53 @@ code.source-query { color: var(--text); background: var(--bg); border-radius: 4p
 .sidebar-legal a:hover { color: var(--text); text-decoration: underline; }
 .data-rights { display: grid; gap: 8px; padding-top: 16px; border-top: 1px solid var(--border); }
 .data-rights a:not(.btn) { color: inherit; }
+
+/* --- Analytics : onglets, filtres et indicateurs du marché ------------------------------------------------ */
+
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 24px; overflow-x: auto; }
+.tabs [role="tab"] {
+  border: 0; background: none; padding: 10px 14px; font: inherit; font-weight: 500; color: var(--muted);
+  border-bottom: 2px solid transparent; margin-bottom: -1px; cursor: pointer; white-space: nowrap;
+}
+.tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--text); }
+.tabs [role="tab"]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.market-filters { display: grid; gap: 8px; margin-bottom: 12px; }
+.market-filters .toolbar { flex-wrap: wrap; margin-bottom: 0; }
+.seg { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; }
+.seg button { border: 0; background: var(--white); padding: 8px 12px; font: inherit; font-size: 13px; cursor: pointer; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--text); color: var(--white); }
+.perimeter { margin: 4px 0 16px; }
+.market-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.mcard { display: grid; gap: 12px; align-content: start; min-width: 0; }
+.mcard.wide { grid-column: 1 / -1; }
+.mcard-head { font-size: 18px; line-height: 1.3; font-weight: 600; margin: 0; }
+.mlist { display: grid; gap: 8px; }
+.mbar { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(60px, 1fr) auto; align-items: center; gap: 12px; font-size: 14px; }
+.mbar-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mbar-track { height: 8px; border-radius: 100px; background: var(--bg); overflow: hidden; }
+.mbar-fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.mbar-value { font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; text-align: right; }
+.is-low { opacity: .55; }
+.low-note { margin-left: 6px; font-size: 11px; color: var(--muted); border: 1px dashed var(--border); border-radius: 100px; padding: 0 6px; }
+.strong { font-weight: 600; margin: 6px 0 2px; }
+.see-all summary { cursor: pointer; font-size: 13px; color: var(--accent); margin: 4px 0; }
+.trends { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.trend { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 6px 0; border-top: 1px solid var(--border); font-size: 14px; }
+.trend .small { grid-column: 1 / -1; }
+.trend-pp { font-weight: 600; font-variant-numeric: tabular-nums; }
+.trend.up .trend-pp { color: #15803d; }
+.trend.down .trend-pp { color: #b91c1c; }
+.wm-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(80px, 1.2fr) auto; align-items: center; gap: 12px; font-size: 14px; }
+.wm-stack { display: flex; height: 10px; border-radius: 100px; overflow: hidden; background: var(--bg); }
+.wm-remote { background: var(--accent); }
+.wm-hybride { background: #93b4ff; }
+.wm-sur_site { background: #d6dcf0; }
+.wm-legend span { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin: 0 4px 0 10px; vertical-align: -1px; }
+.big-number { font-size: 40px; font-weight: 400; letter-spacing: -.03em; line-height: 1.1; margin: 0; }
+.big-number span { font-size: 16px; color: var(--muted); }
+@media (max-width: 860px) {
+  .market-grid { grid-template-columns: minmax(0, 1fr); }
+  .trends { grid-template-columns: 1fr; }
+  .mbar, .wm-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .mbar-track, .wm-stack { grid-column: 1 / -1; grid-row: 2; }
+}

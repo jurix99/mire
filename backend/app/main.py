@@ -27,6 +27,7 @@ from . import assessments, collector, logs, tasks
 from .frontend import BodySizeLimit, mount_frontend
 from .account import router as account_router
 from .agent_api import router as agent_router
+from .analytics_api import router as analytics_router
 from .api import router as api_router
 from .assessments_api import router as assessments_router
 from .billing import router as billing_router
@@ -116,6 +117,7 @@ app.include_router(agent_router)
 app.include_router(public_router)
 app.include_router(billing_router)  # /api/billing/webhook : sans session (appelé par Stripe)
 app.include_router(account_router)  # /api/me/export, DELETE /api/me : droits RGPD
+app.include_router(analytics_router)  # /api/analytics/market, /api/analytics/me, /api/admin/taxonomy-health
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,

@@ -150,3 +150,34 @@ const tick = () => (clock.textContent = `Paris · ${fmtTime.format(new Date())}`
 tick();
 setInterval(tick, 30_000);
 $("#year").textContent = new Date().getFullYear();
+
+// --- Baromètre : agrégats publics (aucun nom d'entreprise), masqué s'il n'y a pas assez de données ----------
+
+const pct = (x) => `${Math.round(x * 100)} %`;
+const bars = (items) => items.map((i) => `<div class="baro-bar"><span>${esc(i.label)}</span>
+  <span class="track"><span class="fill" style="width:${Math.max(4, i.share * 100)}%"></span></span>
+  <span class="pct">${pct(i.share)}</span></div>`).join("");
+
+async function loadBarometer() {
+  let b;
+  try {
+    const res = await fetch("/api/public/barometer", { headers: { Accept: "application/json" } });
+    if (!res.ok) return;
+    b = await res.json();
+  } catch {
+    return;
+  }
+  if (!b.top_skills.items.length) return;
+  $("#baro-scope").textContent = `${fmtInt(b.jobs)} offres de ${fmtInt(b.companies)} startups, ${b.period_days} derniers jours.`;
+  $("#baro-skills-head").textContent = b.top_skills.headline;
+  $("#baro-skills").innerHTML = bars(b.top_skills.items);
+  $("#baro-rising-head").textContent = b.rising.headline;
+  $("#baro-rising").innerHTML = b.rising.items.length
+    ? b.rising.items.map((i) => `<li><span>${esc(i.label)}</span><span class="up">▲ +${i.pp} pts</span></li>`).join("")
+    : `<li class="muted">Pas de hausse nette ce mois-ci</li>`;
+  $("#baro-domains-head").textContent = b.domains.headline;
+  $("#baro-domains").innerHTML = bars(b.domains.items);
+  $("#barometre").hidden = false;
+}
+
+loadBarometer();

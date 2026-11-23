@@ -42,7 +42,7 @@ def pg():
 @pytest.fixture
 def pgdb(pg):
     with pg() as s:
-        s.execute(text("TRUNCATE tasks, jobs, companies RESTART IDENTITY CASCADE"))
+        s.execute(text("TRUNCATE tasks, jobs, companies, taxonomy_misses RESTART IDENTITY CASCADE"))
         s.commit()
         yield s
 
@@ -76,6 +76,8 @@ def test_parallel_workers_run_each_task_once(pg, pgdb):
         time.sleep(0.05)
         with lock:
             runs.append(payload["n"])
+
+    from app import task_handlers  # noqa: F401  (handlers enregistrés AVANT la sauvegarde, sinon on restaure un registre vide)
 
     saved = dict(tasks.HANDLERS)
     try:
@@ -124,3 +126,22 @@ def test_cosine_ordering_with_pgvector(pgdb):
     plan = "\n".join(pgdb.scalars(text(
         "EXPLAIN SELECT id FROM jobs ORDER BY embedding <=> CAST(:v AS vector) LIMIT 5"), {"v": str(unit(0))}))
     assert "jobs" in plan  # requête valide (l'index HNSW n'est choisi que sur une table assez grande)
+
+
+def test_taxonomy_loaded_and_market_view_refreshes(pg, pgdb):
+    """Migrations : liste fermée chargée, vue matérialisée créée ; REFRESH CONCURRENTLY après classement."""
+    from app import classify, market
+    from app import taxonomy as tx
+
+    assert pgdb.scalar(text("SELECT count(*) FROM skills")) == len(tx.SKILLS)
+    assert pgdb.scalar(text("SELECT count(*) FROM role_families")) == len(tx.ROLE_FAMILIES) + 1
+    company = Company(name="Acme", slug="acme")
+    pgdb.add_all([Job(company=company, title="Account Executive", summary="HubSpot, closing. OTE 80-100 k€"),
+                  Job(company=company, title="SRE", summary="k8s, Terraform")])
+    pgdb.commit()
+    classify.classify_pending_jobs(pgdb)
+    market.refresh_facts(pgdb)
+    rows = pgdb.execute(text("SELECT role_family, domain, salary_kind FROM mv_market_jobs ORDER BY job_id")).all()
+    assert [tuple(r) for r in rows] == [("sales", "gtm_ventes", "ote"), ("platform_devops_sre", "tech", "inconnu")]
+    facts = market.load_facts(pgdb)
+    assert {s for skills in facts.skills.values() for s in skills} >= {"hubspot", "kubernetes", "terraform"}

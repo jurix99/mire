@@ -89,3 +89,21 @@ def public_logo(company_id: int, db: DB) -> Response:
                     headers={"Cache-Control": "public, max-age=86400",
                              "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
                              "X-Content-Type-Options": "nosniff"})
+
+
+@router.get("/barometer")
+def barometer(db: DB) -> dict:
+    """Baromètre du marché (contenu de la marque Mire) : agrégats seulement, au-dessus des seuils d'effectif,
+    sans nom d'entreprise ; recalculé au plus une fois par 24 h."""
+    import time
+
+    from . import market
+
+    hit = _BAROMETER.get("value")
+    if hit is None or time.monotonic() - _BAROMETER["at"] > market.BAROMETER_TTL_S:
+        hit = market.barometer(market.load_facts(db))
+        _BAROMETER.update(value=hit, at=time.monotonic())
+    return hit
+
+
+_BAROMETER: dict = {"value": None, "at": 0.0}

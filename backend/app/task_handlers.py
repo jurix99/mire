@@ -6,6 +6,8 @@ check_company  collecte d'une seule entreprise {company_id} (ex. ATS renseigné 
 embed_jobs     embeddings des offres nouvelles ou modifiées, puis match_user pour chaque utilisateur
 match_user     présélection {user_id} (exclusions dures + similarité), puis assess_user
 assess_user    évaluation Gemini {user_id, job_ids?, similarity?}
+classify_jobs  classement sur la liste fermée des offres en attente (CLASSIFY_MAX_PER_RUN), relancée tant
+               qu'il en reste ; sur quota Gemini, reprise 30 min plus tard
 daily          enchaînement complet (comme `python -m app.jobs daily`)
 """
 
@@ -26,6 +28,11 @@ def collect(db: Session, payload: dict) -> None:
     log.info("%s", run.summary)
     if run.jobs_added or run.jobs_closed:
         tasks.jobs_changed(db)
+    else:
+        from . import classify
+
+        if classify.count_pending(db):  # stock pas encore classé (ex. après une migration de la liste)
+            tasks.enqueue(db, "classify_jobs", dedup_key="classify_jobs")
 
 
 @tasks.handler("check_company")
@@ -78,6 +85,22 @@ def assess_user(db: Session, payload: dict) -> None:
     else:
         stats = matching.assess_candidates(db, user, llm, payload)
     log.info("Évaluation utilisateur %s : %s", user.id, stats)
+
+
+@tasks.handler("classify_jobs")
+def classify_jobs(db: Session, payload: dict) -> None:
+    from . import classify
+    from .jobs import CLASSIFY_RETRY_DELAY
+
+    stats = classify.classify_pending_jobs(db, get_llm())
+    if stats["remaining"]:
+        tasks.enqueue(db, "classify_jobs", dedup_key="classify_jobs",
+                      delay=CLASSIFY_RETRY_DELAY if stats["stopped"] else None)
+    elif stats["classified"]:
+        # Tout est classé : faits du marché à jour (en local, il n'y a pas de job daily pour le faire)
+        from . import market
+
+        market.refresh_facts(db)
 
 
 @tasks.handler("daily")

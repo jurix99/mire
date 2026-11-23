@@ -1,10 +1,14 @@
 """Traitements de fond hors de l'API : `python -m app.jobs <commande>` (jobs Container Apps en production).
 
-  daily              collecte sur les ATS, embeddings des nouvelles offres, présélection (match_user) pour
-                     chaque utilisateur, puis évaluation Gemini (Pro d'abord). Ping HEALTHCHECK_DAILY_URL
-                     (healthchecks.io) à la fin s'il est défini, /fail en cas d'échec.
+  daily              collecte sur les ATS, embeddings des nouvelles offres, classement sur la liste fermée
+                     (CLASSIFY_MAX_PER_RUN offres, le reste en tâche classify_jobs), présélection (match_user) pour
+                     chaque utilisateur, évaluation Gemini (Pro d'abord), puis rafraîchissement des agrégats du
+                     marché. Ping HEALTHCHECK_DAILY_URL (healthchecks.io) à la fin s'il est défini, /fail sinon.
   worker             traite la file de tâches (table tasks) jusqu'à ce qu'elle soit vide, ou --max-seconds.
   migrate            alembic upgrade head (lancé par la CI avant chaque mise à jour de l'API).
+  taxonomy           charge la liste fermée (taxonomy.py) dans les tables de référence.
+  classify [--all]   classe les offres en attente, par lots, jusqu'au bout ou au quota Gemini ; --all : reclasse
+                     tout le stock (premier déploiement, changement de la liste).
 
 Code de retour : 0 si succès, 1 sinon (le job Container Apps est alors réessayé selon sa configuration).
 """
@@ -13,6 +17,7 @@ import argparse
 import logging
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -24,10 +29,13 @@ log = logging.getLogger("mire.jobs")
 BACKEND_DIR = Path(__file__).resolve().parents[1]  # contient alembic.ini
 
 
+CLASSIFY_RETRY_DELAY = timedelta(minutes=30)  # classement interrompu (quota Gemini) : reprise plus tard
+
+
 def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
     """Enchaînement quotidien. Lève une exception si la collecte ou les embeddings échouent ; une erreur Gemini
     pour un utilisateur est consignée et son évaluation remise en file (le worker la reprendra)."""
-    from . import account, ats, collector, embeddings, matching, tasks
+    from . import account, ats, classify, collector, embeddings, matching, taxonomy, tasks
     from .llm import get_llm
 
     llm = llm if llm is not None else get_llm()
@@ -39,8 +47,16 @@ def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
     log.info("%s", run.summary, extra={"step": "collect", "jobs_added": run.jobs_added, "jobs_closed": run.jobs_closed})
     embedded = embeddings.embed_pending_jobs(db, embedder)
     log.info("Embeddings : %s offres", embedded, extra={"step": "embed_jobs", "count": embedded})
+    # Classement sur la liste fermée : plafonné par passage, le reste en tâche de fond (file)
+    taxonomy.sync(db)
+    db.commit()
+    classified = classify.classify_pending_jobs(db, llm)
+    if classified["remaining"]:
+        tasks.enqueue(db, "classify_jobs", dedup_key="classify_jobs",
+                      delay=CLASSIFY_RETRY_DELAY if classified["stopped"] else None)
 
-    summary = {"collect": run.summary, "embedded": embedded, "users": 0, "evaluated": 0, "errors": 0}
+    summary = {"collect": run.summary, "embedded": embedded, "classified": classified["classified"], "users": 0,
+               "evaluated": 0, "errors": 0}
     for user, _scope in matching.users_by_priority(db):  # Pro d'abord
         summary["users"] += 1
         candidates = matching.match_user(db, user)
@@ -55,6 +71,10 @@ def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
             summary["errors"] += 1
             log.warning("Évaluation utilisateur %s en échec : %s", user.id, exc, extra={"user_id": user.id})
             tasks.enqueue(db, "assess_user", {"user_id": user.id, **candidates})
+    # Agrégats du marché (page Analytics, baromètre) : vue matérialisée rafraîchie une fois par jour
+    from . import market
+
+    market.refresh_facts(db)
     log.info("Daily terminé", extra={"step": "daily", **{k: v for k, v in summary.items() if k != "collect"}})
     return summary
 
@@ -97,6 +117,45 @@ def cmd_worker(max_seconds: float | None) -> int:
     return 0
 
 
+def cmd_taxonomy() -> int:
+    from . import taxonomy
+    from .db import SessionLocal
+
+    with SessionLocal() as db:
+        counts = taxonomy.sync(db)
+        db.commit()
+    log.info("Liste fermée chargée (version %s) : %s", taxonomy.TAXONOMY_VERSION, counts, extra=counts)
+    return 0
+
+
+def cmd_classify(reclassify_all: bool) -> int:
+    """Classe tout ce qui est en attente, lot par lot ; s'arrête proprement sur quota (reprise au prochain
+    passage : les offres restantes sont toujours « en attente »)."""
+    from . import classify, taxonomy
+    from .db import SessionLocal
+    from .llm import get_llm
+
+    llm = get_llm()
+    total = {"classified": 0, "llm_calls": 0, "autre": 0}
+    with SessionLocal() as db:
+        taxonomy.sync(db)
+        db.commit()
+        if reclassify_all:
+            log.info("Reclassement complet : %s offres remises en attente", classify.reset_all(db))
+        while True:
+            stats = classify.classify_pending_jobs(db, llm)
+            for k in total:
+                total[k] += stats[k]
+            if stats["stopped"] or not stats["remaining"] or not stats["classified"]:
+                break
+        from . import market
+
+        market.refresh_facts(db)  # les analytics voient tout de suite le nouveau classement
+    log.info("Classement terminé : %s", total, extra={**total, "remaining": stats["remaining"],
+                                                      "stopped": stats["stopped"]})
+    return 0
+
+
 def cmd_migrate() -> int:
     from alembic.config import main as alembic_main
 
@@ -114,11 +173,18 @@ def main(argv: list[str] | None = None) -> int:
     worker = sub.add_parser("worker", help="traite la file de tâches jusqu'à ce qu'elle soit vide")
     worker.add_argument("--max-seconds", type=float, default=None, help="budget de temps (défaut : illimité)")
     sub.add_parser("migrate", help="alembic upgrade head")
+    sub.add_parser("taxonomy", help="charge la liste fermée dans les tables de référence")
+    cls = sub.add_parser("classify", help="classe les offres en attente sur la liste fermée")
+    cls.add_argument("--all", action="store_true", help="reclasse tout le stock")
     args = parser.parse_args(argv)
     if args.command == "daily":
         return cmd_daily()
     if args.command == "worker":
         return cmd_worker(args.max_seconds)
+    if args.command == "taxonomy":
+        return cmd_taxonomy()
+    if args.command == "classify":
+        return cmd_classify(args.all)
     return cmd_migrate()
 
 

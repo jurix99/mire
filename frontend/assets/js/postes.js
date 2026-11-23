@@ -97,8 +97,10 @@ const row = (j) => j.locked ? lockedRow(j) : html`
     <span class="col-score" title="${j.assessment?.manual_score != null ? "Note corrigée par vous" : "Note calculée selon votre profil"}">${score(j.score)}</span>
     <span class="col-status">${statusSelect(j.display_status, `data-job="${j.id}"`)}</span>
     <span class="actions">
-      <button class="icon-btn fb-like" type="button" data-action="like" title="J'aime (offre de référence)">${ICONS.heart}</button>
-      <button class="icon-btn fb-dislike" type="button" data-action="dislike" title="Pas intéressé">${ICONS.thumbDown}</button>
+      <button class="icon-btn fb-like ${j.feedback === "like" ? "is-on" : ""}" type="button" data-action="like"
+        aria-pressed="${j.feedback === "like"}" title="${j.feedback === "like" ? "Vous aimez cette offre (offre de référence)" : "J'aime (offre de référence)"}">${ICONS.heart}</button>
+      <button class="icon-btn fb-dislike ${j.feedback === "dislike" ? "is-on" : ""}" type="button" data-action="dislike"
+        aria-pressed="${j.feedback === "dislike"}" title="${j.feedback === "dislike" ? "Marquée « pas intéressé »" : "Pas intéressé"}">${ICONS.thumbDown}</button>
       ${j.url && !isLocked(j.url) ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
       <button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>
     </span>
@@ -201,7 +203,7 @@ async function reload() {
   const current = $("#company").value || params.get("entreprise") || "";
   $("#company").innerHTML = html`<option value="">Toutes les entreprises</option>
     ${companies.filter((c) => !c.locked).map((c) => html`<option value="${c.id}" ${String(c.id) === current ? "selected" : ""}>${c.name}</option>`)}`.s;
-  draw();
+  draw({ keep: true });
   drawAssessmentStatus();
   drawProBanner().catch(() => {});
 }

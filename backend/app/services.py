@@ -28,6 +28,7 @@ from .models import (
     Company,
     Job,
     JobAssessment,
+    JobFeedback,
     ProcessStatus,
     User,
 )
@@ -90,6 +91,7 @@ class AssessmentContext:
     weights: dict[str, float] = dc_field(default_factory=dict)
     version: int = 1
     access: Access = dc_field(default_factory=Access)  # ce que l'utilisateur peut voir (Free : masquage)
+    feedback: dict[int, str] = dc_field(default_factory=dict)  # job_id -> dernier retour (like | dislike)
 
 
 def assessment_context(db: Session, user: User) -> AssessmentContext:
@@ -97,8 +99,10 @@ def assessment_context(db: Session, user: User) -> AssessmentContext:
 
     profile = get_profile(db, user)
     rows = db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id))
+    feedback = dict(db.execute(select(JobFeedback.job_id, JobFeedback.sentiment)
+                               .where(JobFeedback.user_id == user.id).order_by(JobFeedback.id)).all())
     return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, profile.version,
-                             entitlements.access_for(db, user))
+                             entitlements.access_for(db, user), feedback)
 
 
 def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = False) -> AssessmentOut:
@@ -161,6 +165,8 @@ def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = N
     if app is not None:
         out.status = app.status
         out.application_id = app.id
+    if ctx:
+        out.feedback = ctx.feedback.get(job.id)  # le plus récent l'emporte (dict construit par ordre d'id)
     a = ctx.assessments.get(job.id) if ctx else None
     if a is not None:
         out.assessment = assessment_out(a, ctx, treated=app is not None)
