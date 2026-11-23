@@ -45,6 +45,7 @@ ME_MIN_JOBS = 3  # « Toi face au marché » : sur tes offres, effectifs plus pe
 COVERAGE_THRESHOLD = 0.7
 STRENGTH_MIN_SHARE = 0.15
 GOOD_SCORE = 7
+CONTEXT_SKILL_FAMILIES = ("langues", "type_client")  # hors du classement général des compétences
 
 PERIODS = {"30j": 30, "90j": 90, "6m": 182}
 PERIOD_LABELS = {"30j": "30 derniers jours", "90j": "90 derniers jours", "6m": "6 derniers mois"}
@@ -225,7 +226,8 @@ def _where(domain: str | None, family: str | None) -> str:
 
 def _careful(item: dict | None, sentence: str) -> str:
     """Formulation prudente quand l'effectif est faible."""
-    return f"Sur peu de données : {sentence[0].lower()}{sentence[1:]}" if item and item.get("low_data") else sentence
+    # Sans changer la casse : la phrase commence souvent par un nom propre (HubSpot, Python…)
+    return f"Sur peu de données : {sentence}" if item and item.get("low_data") else sentence
 
 
 # --- Indicateurs de l'onglet Marché ------------------------------------------------------------------------------
@@ -238,7 +240,10 @@ def top_skills(facts: Facts, rows, count_by, limit=TOP, domain=None, family=None
         for sid, required in facts.skills.get(r.job_id, {}).items():
             if required:
                 groups[sid].append(r)
-    top, total = ranked(groups, tx.SKILL_LABEL, base, count_by, limit)
+    # Classement général : les savoir-faire seulement. Langues exigées et type de clients (B2B, grands comptes…)
+    # restent visibles dans leur famille, mais ne sont pas « la compétence la plus demandée »
+    core = {sid: g for sid, g in groups.items() if tx.SKILL_FAMILY.get(sid) not in CONTEXT_SKILL_FAMILIES}
+    top, total = ranked(core, tx.SKILL_LABEL, base, count_by, limit)
     by_family: dict[str, list] = {}
     for fam in tx.SKILL_FAMILY_LABEL:
         fam_groups = {sid: g for sid, g in groups.items() if tx.SKILL_FAMILY.get(sid) == fam}

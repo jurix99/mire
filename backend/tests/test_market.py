@@ -234,3 +234,14 @@ def client_anon():
 def test_tracking_tab_unchanged(alice, as_user, catalog):
     data = as_user(alice).get("/api/analytics").json()
     assert {"by_status", "funnel", "weekly", "by_company"} <= set(data)
+
+
+def test_client_type_and_languages_stay_out_of_the_overall_top(db):
+    for n in range(6):
+        job(db, company(db, f"B2B {n}"), "sales", ["b2b", "anglais", "hubspot"] if n < 5 else ["b2b", "anglais"])
+    db.commit()
+    skills = overview(db, count_by="offre")["indicators"]["skills"]
+    assert [i["key"] for i in skills["top"]] == ["hubspot"]
+    assert "HubSpot" in skills["headline"]
+    families = {f["family"]: [i["key"] for i in f["items"]] for f in skills["by_family"]}
+    assert families["type_client"] == ["b2b"] and families["langues"] == ["anglais"]
