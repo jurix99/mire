@@ -77,6 +77,8 @@ def test_parallel_workers_run_each_task_once(pg, pgdb):
         with lock:
             runs.append(payload["n"])
 
+    from app import task_handlers  # noqa: F401  (handlers enregistrés AVANT la sauvegarde, sinon on restaure un registre vide)
+
     saved = dict(tasks.HANDLERS)
     try:
         tasks.handler("slow")(slow)
