@@ -141,7 +141,7 @@ def synthesize(db: Session, user: User, data: ProfileData, llm, reason_labels: d
     if not rows:
         return [], 0
     labels = {fb.job.id: f"{fb.job.company.name} – {fb.job.title}" for fb in rows}
-    context = profile_summary(user, data, {**job_labels(db, data), **labels})
+    context = profile_summary(user, data, {**job_labels(db, data), **labels}, include_name=False)
     contents = (f"<profil>\n{context}\n</profil>\n"
                 f"<retours>\n{feedback_payload(rows, reason_labels)}\n</retours>")
     synthesis = llm.synthesize_rules(contents)
