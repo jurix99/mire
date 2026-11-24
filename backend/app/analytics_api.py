@@ -76,3 +76,9 @@ def engine_health_report(db: DB) -> dict:
     """Santé du moteur sur 14 jours : offres, évaluations (bascule de modèle, délai), file, retours, passages,
     alertes (engine_health.py)."""
     return engine_health.engine_health(db)
+
+
+@router.get("/admin/beta", dependencies=[RequireAdmin])
+def beta_report(db: DB) -> dict:
+    """Pertinence par utilisateur (bêta) : précision sur ses offres les mieux notées qu'il a jugées."""
+    return engine_health.beta_report(db)

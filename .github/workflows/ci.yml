@@ -87,6 +87,8 @@ jobs:
       TF_VAR_stripe_price_pass_3m: ${{ vars.STRIPE_PRICE_PASS_3M }}
       TF_VAR_pro_user_emails: ${{ secrets.PRO_USER_EMAILS }}
       TF_VAR_admin_emails: ${{ secrets.ADMIN_EMAILS }}
+      TF_VAR_beta_emails: ${{ secrets.BETA_EMAILS }}
+      TF_VAR_beta_invite_code: ${{ secrets.BETA_INVITE_CODE }}
     defaults:
       run:
         working-directory: infra/main

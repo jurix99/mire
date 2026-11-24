@@ -22,6 +22,13 @@ Les emplacements sont marqués `[À compléter]` (surlignés en jaune sur les pa
 - [ ] URL de redirection LinkedIn de production (`…/auth/callback`).
 - [ ] Remplacer le secret `ghcr-pat` par un PAT limité à `read:packages`.
 
+## Bêta privée (10 à 20 profils variés, pas seulement platform en startup IA)
+
+- [ ] Secrets GitHub `BETA_INVITE_CODE` (et/ou `BETA_EMAILS`), puis *Deploy* ; envoyer le lien
+      `https://<domaine>/?invitation=<code>` aux testeurs.
+- [ ] Demander à chaque testeur de remplir ses critères personnels (barème du profil) et de juger ses offres
+      (J'aime / Pas intéressé) ; suivre « Pertinence par profil » sur la page Analytics (administrateurs).
+
 ## Essai Pro (TRIAL_DAYS, désactivé par défaut)
 
 - [ ] Choisir la durée (7 ou 14 jours), l'ajouter aux CGV (essai gratuit, sans carte, retour automatique au Free),

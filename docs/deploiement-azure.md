@@ -113,6 +113,7 @@ seuls les secrets y sont masqués.
 |---|---|
 | `BUDGET_ALERT_EMAIL` | adresse des alertes de budget |
 | `PRO_USER_EMAILS`, `ADMIN_EMAILS` | adresses séparées par des virgules (facultatif) |
+| `BETA_EMAILS`, `BETA_INVITE_CODE` | facultatif, bêta privée : adresses autorisées à créer un compte, et code du lien d'invitation `https://<domaine>/?invitation=<code>` (par exemple `openssl rand -hex 12`). Les deux vides : inscription ouverte. Les comptes existants gardent toujours l'accès. |
 
 ### 3. Premier apply : l'infrastructure, sans les applications
 

@@ -819,6 +819,13 @@ code.source-query { color: var(--text); background: var(--bg); border-radius: 4p
 .daybars span.zero { background: var(--border); }
 .engine-alerts { display: grid; gap: 6px; margin: 8px 0 0; padding: 0; list-style: none; }
 .engine-alerts li { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--st-refuse-bg); color: var(--st-refuse-fg); }
+.beta-table { display: grid; margin: 12px 0 8px; font-size: 14px; }
+.beta-row { display: grid; grid-template-columns: minmax(0, 3fr) repeat(5, minmax(56px, 1fr)); gap: 8px;
+  padding: 8px 0; border-top: 1px solid var(--border); align-items: center; }
+.beta-row.head { border-top: 0; color: var(--muted); font-size: 12px; }
+.beta-row .grow { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.beta-row .low { color: var(--st-refuse-fg); font-weight: 600; }
+@media (max-width: 560px) { .beta-row { grid-template-columns: minmax(0, 2fr) repeat(5, minmax(40px, 1fr)); font-size: 12px; } }
 .engine-ok { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--st-offre-bg); color: var(--st-offre-fg); }
 @media (max-width: 860px) {
   .market-grid { grid-template-columns: minmax(0, 1fr); }

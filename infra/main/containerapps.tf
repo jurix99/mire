@@ -157,6 +157,14 @@ resource "azurerm_container_app" "api" {
         value = var.pro_user_emails
       }
       env {
+        name  = "BETA_EMAILS" # bêta privée (users.py) : vide avec BETA_INVITE_CODE = inscription ouverte
+        value = var.beta_emails
+      }
+      env {
+        name  = "BETA_INVITE_CODE"
+        value = var.beta_invite_code
+      }
+      env {
         name  = "ADMIN_EMAILS"
         value = var.admin_emails
       }

@@ -117,6 +117,10 @@ run "applications" {
     error_message = "secrets : uniquement des références Key Vault, sans valeur"
   }
   assert {
+    condition     = length(setsubtract(toset(["BETA_EMAILS", "BETA_INVITE_CODE"]), toset([for e in azurerm_container_app.api[0].template[0].container[0].env : e.name]))) == 0
+    error_message = "bêta privée : configuration transmise à l'API (création des comptes)"
+  }
+  assert {
     condition     = contains([for s in azurerm_container_app.api[0].secret : s.name], "stripe-webhook-secret")
     error_message = "billing_enabled : secrets Stripe attendus"
   }

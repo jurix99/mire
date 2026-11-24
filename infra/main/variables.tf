@@ -136,6 +136,20 @@ variable "stripe_price_pass_3m" {
   default = ""
 }
 
+variable "beta_emails" {
+  description = "Bêta privée : adresses autorisées à créer un compte (secret GitHub BETA_EMAILS ; vide = pas de liste)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
+variable "beta_invite_code" {
+  description = "Bêta privée : code du lien d'invitation /?invitation=<code> (secret GitHub ; vide = pas de lien)"
+  type        = string
+  sensitive   = true
+  default     = ""
+}
+
 variable "pro_user_emails" {
   description = "Comptes toujours Pro (variable GitHub, jamais dans le dépôt)"
   type        = string

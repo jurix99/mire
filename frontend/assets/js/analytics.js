@@ -211,10 +211,34 @@ async function renderEngine() {
     <p class="small muted">Modèles : ${Object.entries(ev.par_modele).map(([m, n]) => `${m} ${n}`).join(" · ") || "–"} (nominal : ${ev.modele_nominal ?? "–"})</p>`.s;
 }
 
+async function renderBeta() {
+  const b = await api("/admin/beta").catch(() => null);
+  if (!b || !b.utilisateurs.length) return;
+  const box = $("#m-beta");
+  box.hidden = false;
+  const p = (x) => (x == null ? "–" : pct(x));
+  box.innerHTML = html`
+    <div class="section-head"><h2>Pertinence par profil</h2><span class="small muted">bêta · administrateurs</span></div>
+    <p class="small">Précision : part d'offres aimées ou retenues parmi les ${b.top} mieux notées que la personne a jugées
+      (mesurée à partir de ${b.min_jugees} jugées). Médiane : <strong>${p(b.precision_mediane)}</strong> sur ${b.mesures} profil(s)
+      ${b.sous_50 ? html` · <strong>${b.sous_50}</strong> sous 50 %` : ""}.</p>
+    <div class="beta-table" role="table">
+      <div class="beta-row head" role="row"><span>Profil</span><span>Notées</span><span>Retenues</span><span>Jugées</span>
+        <span>Précision</span><span>Critères</span></div>
+      ${b.utilisateurs.map((u) => html`
+      <div class="beta-row" role="row"><span class="grow">#${u.user_id} · ${u.profil}</span><span>${u.notees}</span>
+        <span>${u.retenues}</span><span>${u.positives}/${u.jugees}</span>
+        <span class="${u.precision_top != null && u.precision_top < 0.5 ? "low" : ""}">${p(u.precision_top)}</span>
+        <span>${u.criteres_definis}/3</span></div>`)}
+    </div>
+    <p class="small muted">« Critères » : définitions personnelles remplies (stade, type de rôle, produit), utilisées par la notation v2.</p>`.s;
+}
+
 async function renderHealth() {
   const me = await loadMe().catch(() => null);
   if (!me?.user?.is_admin) return;
   renderEngine();
+  renderBeta();
   const h = await api("/admin/taxonomy-health").catch(() => null);
   if (!h) return;
   const box = $("#m-health");

@@ -161,3 +161,57 @@ def alerts(db: Session, h: dict, now: datetime) -> list[str]:
     if sum(h["offres"]["ajoutees"][-NO_NEW_JOBS_DAYS:]) == 0:
         out.append(f"Aucune offre ajoutée depuis {NO_NEW_JOBS_DAYS} jours")
     return out
+
+
+# --- Bêta : la pertinence tient-elle d'un profil à l'autre ? --------------------------------------------------
+
+BETA_TOP = 10  # « sur ses 10 offres les mieux notées… »
+BETA_MIN_JUDGED = 3  # en dessous, la précision d'un utilisateur n'est pas significative
+
+
+def beta_report(db: Session) -> dict:
+    """Par utilisateur (identifiant, rôles visés ; jamais le nom ni l'e-mail) : évaluations, retours, et précision
+    « en conditions réelles » : parmi ses BETA_TOP offres les mieux notées qu'il a JUGÉES (J'aime, Pas intéressé,
+    process), la part de positives (même règle que la mesure hors ligne, relevance_eval.label_for)."""
+    from .models import Application, User
+    from .profile import PERSONAL_CRITERIA, get_profile, profile_data
+    from .relevance_eval import label_for
+
+    rows = []
+    for user in db.scalars(select(User).order_by(User.id)):
+        data = profile_data(get_profile(db, user))
+        if not (data.skills or data.experiences or data.positioning):
+            continue  # profil vide : pas encore évalué
+        statuses = dict(db.execute(select(Application.job_id, Application.status)
+                                   .where(Application.user_id == user.id)).all())
+        sentiments: dict[int, list[str]] = {}
+        for job_id, sentiment in db.execute(select(JobFeedback.job_id, JobFeedback.sentiment)
+                                            .where(JobFeedback.user_id == user.id).order_by(JobFeedback.id)):
+            sentiments.setdefault(job_id, []).append(sentiment)
+        assessed = db.execute(select(JobAssessment.job_id, JobAssessment.score, JobAssessment.verdict)
+                              .where(JobAssessment.user_id == user.id)).all()
+        scored = sorted((a for a in assessed if a.score is not None), key=lambda a: (-float(a.score), a.job_id))
+        labels = {j: label_for(statuses.get(j), sentiments.get(j, []))[0] for j in set(statuses) | set(sentiments)}
+        judged_top = [labels[a.job_id] for a in scored if labels.get(a.job_id) in ("positive", "negative")][:BETA_TOP]
+        judged = [lab for lab in labels.values() if lab in ("positive", "negative")]
+        rows.append({
+            "user_id": user.id,
+            "profil": ", ".join(data.preferences.roles[:2]) or data.headline or "—",
+            "inscrit_le": _aware(user.created_at),
+            "derniere_connexion": _aware(user.last_login_at),
+            "notees": len(scored),  # évaluées par le modèle (les exclusions par règles n'ont pas de note)
+            "retenues": sum(1 for a in assessed if a.verdict == "nouveau"),
+            "jugees": len(judged),
+            "positives": sum(lab == "positive" for lab in judged),
+            "precision_top": (round(sum(lab == "positive" for lab in judged_top) / len(judged_top), 2)
+                              if len(judged_top) >= BETA_MIN_JUDGED else None),
+            "jugees_top": len(judged_top),
+            "criteres_definis": sum(1 for k in PERSONAL_CRITERIA if data.scoring.definitions.get(k)),
+        })
+    measured = [r["precision_top"] for r in rows if r["precision_top"] is not None]
+    return {
+        "top": BETA_TOP, "min_jugees": BETA_MIN_JUDGED, "utilisateurs": rows,
+        "precision_mediane": median(measured) if measured else None,
+        "mesures": len(measured),
+        "sous_50": sum(1 for p in measured if p < 0.5),  # profils pour qui la pertinence ne tient pas
+    }
