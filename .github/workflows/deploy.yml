@@ -1,5 +1,5 @@
 # Déploiement en production (Azure Container Apps), à chaque push sur main :
-# 1. images mire-api et mire-worker (linux/amd64) poussées sur GHCR, tag = SHA court + latest ;
+# 1. images mire-api, mire-worker et mire-agent (linux/amd64) poussées sur GHCR, tag = SHA court + latest ;
 # 2. connexion à Azure en OIDC (aucun secret) ;
 # 3. terraform apply en deux temps : d'abord le job mire-migrate seul (nouvelle image), exécution des
 #    migrations et attente du succès, puis l'apply complet (mire-api, mire-daily, mire-worker) ;
@@ -70,6 +70,18 @@ jobs:
             ghcr.io/${{ steps.meta.outputs.owner }}/mire-worker:latest
           cache-from: type=gha,scope=mire-worker
           cache-to: type=gha,mode=max,scope=mire-worker
+      - name: mire-agent
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          target: agent
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ghcr.io/${{ steps.meta.outputs.owner }}/mire-agent:${{ steps.meta.outputs.tag }}
+            ghcr.io/${{ steps.meta.outputs.owner }}/mire-agent:latest
+          cache-from: type=gha,scope=mire-agent
+          cache-to: type=gha,mode=max,scope=mire-agent
 
   deploy:
     name: Terraform apply + migrations
@@ -87,10 +99,15 @@ jobs:
       TF_IN_AUTOMATION: "true"
       TF_VAR_api_image_tag: ${{ needs.images.outputs.tag }}
       TF_VAR_worker_image_tag: ${{ needs.images.outputs.tag }}
+      TF_VAR_agent_image_tag: ${{ needs.images.outputs.tag }}
+      TF_VAR_agent_enabled: ${{ vars.MIRE_AGENT_ENABLED || 'false' }}
+      TF_VAR_agent_model: ${{ vars.MIRE_AGENT_MODEL }}
       TF_VAR_apps_enabled: ${{ vars.MIRE_APPS_ENABLED || 'false' }}
       TF_VAR_custom_domain: ${{ vars.MIRE_CUSTOM_DOMAIN }}
       TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
       TF_VAR_billing_enabled: ${{ vars.BILLING_ENABLED || 'false' }}
+      TF_VAR_trial_days: ${{ vars.MIRE_TRIAL_DAYS || '0' }}
+      TF_VAR_api_min_replicas: ${{ vars.MIRE_API_MIN_REPLICAS || '0' }}
       TF_VAR_stripe_price_monthly: ${{ vars.STRIPE_PRICE_MONTHLY }}
       TF_VAR_stripe_price_pass_3m: ${{ vars.STRIPE_PRICE_PASS_3M }}
       TF_VAR_pro_user_emails: ${{ secrets.PRO_USER_EMAILS }}

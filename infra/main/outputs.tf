@@ -23,6 +23,11 @@ output "postgres_fqdn" {
   value       = azurerm_postgresql_flexible_server.main.fqdn
 }
 
+output "postgres_restore_test_name" {
+  description = "Nom du serveur temporaire du test de restauration (créé puis supprimé par restore-test.yml)"
+  value       = local.pg_restore_test_name
+}
+
 output "container_app_environment" {
   value = azurerm_container_app_environment.main.name
 }

@@ -99,6 +99,9 @@ Dans *Settings → Secrets and variables → Actions → Variables* (onglet « R
 | `MIRE_CUSTOM_DOMAIN` | vide pour l'instant (étape 6) |
 | `BILLING_ENABLED` | `true` si l'offre Pro / Stripe est active (sinon ne pas créer) |
 | `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_PASS_3M` | identifiants `price_…` (si facturation) |
+| `MIRE_TRIAL_DAYS` | facultatif : essai Pro offert à l'inscription, sans carte, en jours (défaut 0 = aucun) ; à annoncer dans les CGV |
+| `MIRE_API_MIN_REPLICAS` | facultatif : `1` supprime le démarrage à froid de l'API, mais sort du quota gratuit (défaut 0) |
+| `MIRE_AGENT_ENABLED`, `MIRE_AGENT_MODEL` | facultatif : agent de recherche côté serveur (voir « Agent de recherche planifié ») |
 
 Ce sont des identifiants, pas des secrets : l'authentification passe par OIDC, sans secret client.
 
@@ -139,6 +142,8 @@ az keyvault secret set --vault-name $KV -n healthcheck-daily-url   --value "http
 # Seulement si BILLING_ENABLED=true :
 az keyvault secret set --vault-name $KV -n stripe-secret-key       --value "sk_live_…"
 az keyvault secret set --vault-name $KV -n stripe-webhook-secret   --value "whsec_…"
+# Seulement si MIRE_AGENT_ENABLED=true (agent de recherche côté serveur, voir « Exploitation ») :
+az keyvault secret set --vault-name $KV -n anthropic-api-key       --value "sk-ant-…"
 ```
 
 Ne réutilisez pas le `session-secret` ni l'`agent-token` du `.env` local. Pour éviter que la valeur reste dans
@@ -283,6 +288,84 @@ ContainerAppConsoleLogs_CL
 La file elle-même se consulte en SQL (table `tasks` : `status`, `attempts`, `error`, `run_after`). Une tâche en
 échec est réessayée deux fois (après 1 min, puis 4 min), puis marquée `failed`.
 
+### Santé du moteur
+
+Page *Analytics* (onglet Marché, administrateurs) : bloc « Santé du moteur » sur 14 jours (`GET
+/api/admin/engine-health`, `backend/app/engine_health.py`) : offres ajoutées et fermées par jour, évaluations
+par jour et par modèle, part de **bascule sur un modèle de secours** de `GEMINI_EVAL_MODEL`, délai médian entre
+l'arrivée d'une offre et sa première évaluation, file de tâches (plus ancienne, échecs), offres sans embedding ou à
+classer, « J'aime » contre « Pas intéressé », dernier passage de chaque processus (collecte, découverte, recherche,
+offres hors ATS).
+
+Des alertes à seuils fixes (collecte arrêtée depuis 36 h, découverte arrêtée depuis 8 jours, file bloquée depuis
+1 h, tâches en échec, embeddings en retard, bascule au-delà de 30 %, aucune offre nouvelle depuis 3 jours) sont
+affichées en tête du bloc et écrites par `mire-daily` dans ses journaux, une ligne `Alerte moteur : …` par alerte :
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where ContainerJobName_s == "mire-daily"
+| extend j = parse_json(Log_s)
+| where tostring(j.message) startswith "Alerte moteur"
+| project TimeGenerated, message = tostring(j.message)
+```
+
+### Test de restauration de la sauvegarde
+
+Workflow *Restore test* (`.github/workflows/restore-test.yml`), le 1er de chaque mois et à la demande (*Run
+workflow*) : restauration à un instant donné (il y a 15 min) vers un serveur temporaire `psql-mire-restore-…`
+(sortie Terraform `postgres_restore_test_name`, même sous-réseau privé), vérification par le job
+`mire-restore-check` (dans le VNet, en lecture seule : révision du schéma, extension `vector`, tables lisibles et
+non vides, dernière offre de moins de 72 h), puis suppression du serveur temporaire, même en cas d'échec. La base
+de production n'est jamais modifiée ; coût : quelques centimes. Si l'environnement GitHub `prod` exige une
+approbation, l'exécution mensuelle l'attend.
+
+En cas d'échec, les journaux de la vérification sont dans le résumé du workflow, ou :
+
+```sh
+az containerapp job execution list -g rg-mire-prod -n mire-restore-check -o table
+az containerapp job logs show -g rg-mire-prod -n mire-restore-check --execution <execution> --container restore-check
+```
+
+Pour une VRAIE restauration (incident), même commande `az postgres flexible-server restore` vers un nouveau
+serveur, puis `database-url` et `keda-postgres-connection` à repointer dans Key Vault (ou import du serveur dans le
+state Terraform) : à préparer à froid, pas pendant l'incident.
+
+### Agent de recherche planifié (côté serveur)
+
+Sans lui, la découverte des entreprises et le passage « offres » dépendent d'un PC allumé. Les jobs
+`mire-agent-decouverte` (lundi 07:43, par les levées), `mire-agent-recherche` (mercredi 06:00, par les offres qui
+correspondent aux profils) et `mire-agent-offres` (jeudi 06:00, offres hors ATS) lancent Claude Code dans l'image
+`mire-agent` (cible `agent` du Dockerfile, construite par *Deploy*) via `agent/run_agent.py`. Les consignes
+(`agent/prompt.md`, `agent/prompt-recherche.md`, `agent/prompt-offres.md`) et les outils autorisés sont ceux du lancement local : recherche
+web, lecture de pages, `agent/tmp/` et l'API de l'agent. Le job n'a ni la base ni la clé Gemini : il écrit dans
+Mire par l'URL publique avec le jeton `agent-token`.
+
+Mise en route :
+
+1. Une clé de l'API Anthropic dédiée à Mire, avec une **limite de dépense mensuelle** posée dans la console
+   Anthropic : c'est le plafond qui ne dépend pas du code.
+2. `az keyvault secret set --vault-name $KV -n anthropic-api-key --value "sk-ant-…"`.
+3. Variables GitHub : `MIRE_AGENT_ENABLED=true` et, si besoin, `MIRE_AGENT_MODEL` (vide : modèle par défaut de
+   Claude Code), puis *Deploy* (*Run workflow*).
+4. Désactivez la tâche planifiée Windows (`agent/install-task.ps1`) pour ne pas faire deux passages.
+
+Plafonds (variables Terraform) : `agent_max_budget_usd` (5 $ par passage, appliqué par Claude Code avec
+`--max-budget-usd`) et `agent_total_budget_usd` (20 $ par exécution, utile pour un rattrapage de plusieurs mois).
+Avec la planification par défaut, cela fait au plus 3 passages × 5 $ par semaine, soit environ 65 $ par mois.
+Pour réduire : un modèle moins cher (`MIRE_AGENT_MODEL`), un plafond plus bas, ou moins de passages
+(`agent_schedules`). Le
+coût de chaque passage figure dans ses journaux (`Fin : … (code 0, success, 42 tours, 3.12 $, 1840 s)`). Un job
+n'est jamais relancé automatiquement : une nouvelle tentative paierait le passage une deuxième fois.
+
+```sh
+az containerapp job start -g rg-mire-prod -n mire-agent-decouverte   # passage à la demande
+az containerapp job execution list -g rg-mire-prod -n mire-agent-decouverte -o table
+az containerapp job logs show -g rg-mire-prod -n mire-agent-decouverte --execution <execution> --container agent
+```
+
+Un rattrapage de plusieurs mois se lance depuis un poste (ci-dessous) : `python agent/run_agent.py rattrapage
+--months 6`, avec les mêmes plafonds (`AGENT_MAX_BUDGET_USD`, `AGENT_TOTAL_BUDGET_USD`).
+
 ### Agent de découverte local contre la prod
 
 ```powershell
@@ -307,6 +390,7 @@ pour l'utilisateur.
 | Log Analytics | **0 €** | Plafond de 0,1 Go/jour (≤ 3 Go/mois), sous les 5 Go gratuits mensuels. Au-delà du plafond, les journaux du jour sont perdus. |
 | Stockage du state | quelques centimes | Quelques Ko en LRS, versions comprises. |
 | VNet, IP de sortie | 0 € | Pas de NAT Gateway. Les 100 premiers Go sortants par mois sont gratuits. |
+| Agent de recherche (si activé) | **au plus ~65 $/mois** | Facturé par Anthropic, pas par Azure : 3 passages par semaine plafonnés à 5 $ chacun (voir « Agent de recherche planifié »). Le calcul Container Apps (1 vCPU, une heure environ par passage) reste dans le quota gratuit. |
 | GHCR (images) | 0 € à ce jour | GitHub ne facture pas encore le stockage ni le transfert du Container registry, avec un mois de préavis promis. À surveiller : chaque exécution d'un job tire l'image worker (~400 Mo compressés). |
 
 Total : moins de 1 € par mois pendant la première année, puis 17 à 20 € par mois si l'on garde le B1MS. Le

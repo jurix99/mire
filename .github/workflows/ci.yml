@@ -77,8 +77,12 @@ jobs:
       TF_IN_AUTOMATION: "true"
       TF_VAR_apps_enabled: ${{ vars.MIRE_APPS_ENABLED || 'false' }}
       TF_VAR_custom_domain: ${{ vars.MIRE_CUSTOM_DOMAIN }}
+      TF_VAR_agent_enabled: ${{ vars.MIRE_AGENT_ENABLED || 'false' }}
+      TF_VAR_agent_model: ${{ vars.MIRE_AGENT_MODEL }}
       TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
       TF_VAR_billing_enabled: ${{ vars.BILLING_ENABLED || 'false' }}
+      TF_VAR_trial_days: ${{ vars.MIRE_TRIAL_DAYS || '0' }}
+      TF_VAR_api_min_replicas: ${{ vars.MIRE_API_MIN_REPLICAS || '0' }}
       TF_VAR_stripe_price_monthly: ${{ vars.STRIPE_PRICE_MONTHLY }}
       TF_VAR_stripe_price_pass_3m: ${{ vars.STRIPE_PRICE_PASS_3M }}
       TF_VAR_pro_user_emails: ${{ secrets.PRO_USER_EMAILS }}
@@ -105,6 +109,8 @@ jobs:
           worker=$(az containerapp job show -n mire-worker -g rg-mire-prod --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)
           if [ -n "$api" ]; then echo "TF_VAR_api_image_tag=${api##*:}" >> "$GITHUB_ENV"; fi
           if [ -n "$worker" ]; then echo "TF_VAR_worker_image_tag=${worker##*:}" >> "$GITHUB_ENV"; fi
+          agent=$(az containerapp job show -n mire-agent-decouverte -g rg-mire-prod --query "properties.template.containers[0].image" -o tsv 2>/dev/null || true)
+          if [ -n "$agent" ]; then echo "TF_VAR_agent_image_tag=${agent##*:}" >> "$GITHUB_ENV"; fi
       - name: init
         run: terraform init -input=false -backend-config="storage_account_name=${{ vars.TFSTATE_STORAGE_ACCOUNT }}"
       - name: plan

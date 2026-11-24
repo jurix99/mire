@@ -96,6 +96,30 @@ variable "gemini_eval_model" {
   default = "gemini-3.5-flash-lite,gemini-3.1-flash-lite"
 }
 
+variable "api_min_replicas" {
+  description = <<-EOT
+    Répliques de l'API toujours allumées. 0 (défaut) : l'API s'arrête quand personne ne s'en sert (quota gratuit),
+    la première visite attend son démarrage (une dizaine de secondes). 1 : pas d'attente, mais une réplique
+    allumée en permanence sort du quota gratuit de Container Apps (coût mensuel à vérifier dans le portail).
+  EOT
+  type        = number
+  default     = 0
+  validation {
+    condition     = contains([0, 1], var.api_min_replicas)
+    error_message = "api_min_replicas : 0 ou 1"
+  }
+}
+
+variable "trial_days" {
+  description = "Essai Pro offert à la création du compte, sans carte bancaire, en jours (0 = pas d'essai)"
+  type        = number
+  default     = 0
+  validation {
+    condition     = var.trial_days >= 0 && var.trial_days <= 60
+    error_message = "trial_days : entre 0 et 60"
+  }
+}
+
 variable "billing_enabled" {
   description = "Offre Free / Pro avec Stripe : exige les secrets stripe-secret-key et stripe-webhook-secret"
   type        = bool
@@ -130,6 +154,61 @@ variable "match_top_k" {
   description = "Nombre d'offres présélectionnées par similarité et envoyées à Gemini, par utilisateur"
   type        = number
   default     = 50
+}
+
+# --- Agent de recherche --------------------------------------------------------------------------
+
+variable "agent_enabled" {
+  description = <<-EOT
+    Crée les jobs planifiés de l'agent de recherche (Claude Code dans l'image mire-agent) : la découverte ne
+    dépend plus d'un poste allumé. Exige le secret anthropic-api-key dans Key Vault (posé à la main, voir
+    docs/deploiement-azure.md). false : l'agent ne tourne que depuis un poste (agent/run-agent.ps1).
+  EOT
+  type        = bool
+  default     = false
+}
+
+variable "agent_image_tag" {
+  description = "Tag de l'image mire-agent (SHA court du commit, passé par la CI)"
+  type        = string
+  default     = "latest"
+}
+
+variable "agent_model" {
+  description = "Modèle de l'agent (ex. claude-sonnet-5-5) ; vide : modèle par défaut de Claude Code"
+  type        = string
+  default     = ""
+}
+
+variable "agent_max_budget_usd" {
+  description = "Plafond de dépense d'UN passage de l'agent, en dollars (--max-budget-usd de Claude Code)"
+  type        = number
+  default     = 5
+}
+
+variable "agent_total_budget_usd" {
+  description = "Plafond d'une exécution complète d'un job de l'agent (plusieurs passages en rattrapage), en dollars"
+  type        = number
+  default     = 20
+}
+
+variable "agent_schedules" {
+  description = <<-EOT
+    Jobs planifiés de l'agent : type de passage (decouverte | offres | recherche | rattrapage) -> cron, en UTC.
+    Défaut (heure de Paris en hiver) : découverte par les levées le lundi 07:43, recherche partant des offres le
+    mercredi 06:00, offres hors ATS le jeudi 06:00.
+    Coût maximal par semaine : nombre de passages x agent_max_budget_usd.
+  EOT
+  type        = map(string)
+  default = {
+    decouverte = "43 6 * * 1"
+    recherche  = "0 5 * * 3"
+    offres     = "0 5 * * 4"
+  }
+  validation {
+    condition     = alltrue([for k in keys(var.agent_schedules) : contains(["decouverte", "offres", "recherche", "rattrapage"], k)])
+    error_message = "agent_schedules : clés possibles decouverte, offres, recherche, rattrapage"
+  }
 }
 
 # --- Réseau --------------------------------------------------------------------------------------
