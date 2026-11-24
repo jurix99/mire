@@ -1,0 +1,101 @@
+# Test de restauration de la sauvegarde PostgreSQL, chaque mois et à la demande (Run workflow) :
+# 1. restauration à un instant donné (il y a 15 min) de la base de production vers un serveur TEMPORAIRE au nom
+#    fixe (sortie Terraform postgres_restore_test_name), dans le même sous-réseau privé et la même zone DNS ;
+# 2. job mire-restore-check (dans le VNet : la base n'a pas d'accès public) : vérification en lecture seule du
+#    schéma, des tables et de la fraîcheur des données (backend/app/restore_check.py) ;
+# 3. suppression du serveur temporaire, QUOI QU'IL ARRIVE.
+# La base de production n'est jamais modifiée. Coût : un serveur B1ms pendant 20 à 40 minutes (quelques
+# centimes). Durée totale : 30 à 60 minutes, surtout la restauration.
+name: Restore test
+
+on:
+  schedule:
+    - cron: "17 3 1 * *" # le 1er de chaque mois, 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: restore-test
+  cancel-in-progress: false
+
+jobs:
+  restore:
+    name: Restauration + vérification
+    runs-on: ubuntu-24.04
+    environment: prod # identifiant fédéré repo:<dépôt>:environment:prod (rôle Contributor sur rg-mire-prod)
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      id-token: write # OIDC
+    env:
+      RG: rg-mire-prod
+    steps:
+      - uses: azure/login@a641126d1b8aa4d1fa005f4f92df94a3a4c4c906 # v3.1.0
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: serveur source et serveur temporaire
+        run: |
+          az extension add --name containerapp --upgrade --yes --only-show-errors
+          src=$(az postgres flexible-server list -g "$RG" --query "[?starts_with(name, 'psql-mire-prod-')].name | [0]" -o tsv)
+          host=$(az containerapp job show -n mire-restore-check -g "$RG" \
+            --query "properties.template.containers[0].env[?name=='RESTORE_HOST'].value | [0]" -o tsv)
+          target="${host%%.*}"
+          if [ -z "$src" ] || [ -z "$target" ]; then
+            echo "::error::Serveur source ou job mire-restore-check introuvable (MIRE_APPS_ENABLED ?)"; exit 1
+          fi
+          # Garde-fou : le serveur temporaire (supprimé à la fin) ne peut jamais être celui de la production
+          case "$target" in psql-mire-restore-*) ;; *) echo "::error::Nom de serveur temporaire inattendu : $target"; exit 1 ;; esac
+          {
+            echo "SRC=$src"
+            echo "TARGET=$target"
+            echo "SUBNET=$(az postgres flexible-server show -g "$RG" -n "$src" --query network.delegatedSubnetResourceId -o tsv)"
+            echo "DNS_ZONE=$(az postgres flexible-server show -g "$RG" -n "$src" --query network.privateDnsZoneArmResourceId -o tsv)"
+            echo "PG_ZONE=$(az postgres flexible-server show -g "$RG" -n "$src" --query availabilityZone -o tsv)"
+          } >> "$GITHUB_ENV"
+          echo "Source : $src ; serveur temporaire : $target"
+
+      - name: ménage d'un test précédent interrompu
+        run: |
+          if az postgres flexible-server show -g "$RG" -n "$TARGET" > /dev/null 2>&1; then
+            echo "Serveur temporaire restant d'un test précédent : suppression"
+            az postgres flexible-server delete -g "$RG" -n "$TARGET" --yes
+          fi
+
+      - name: restauration (il y a 15 minutes)
+        run: |
+          echo "CLEANUP=true" >> "$GITHUB_ENV" # même une restauration interrompue doit être supprimée
+          when=$(date -u -d '15 minutes ago' +%Y-%m-%dT%H:%M:%SZ)
+          echo "Point de restauration : $when"
+          az postgres flexible-server restore -g "$RG" -n "$TARGET" --source-server "$SRC" \
+            --restore-time "$when" --subnet "$SUBNET" --private-dns-zone "$DNS_ZONE" \
+            ${PG_ZONE:+--zone "$PG_ZONE"} --only-show-errors -o none
+
+      - name: vérification (job mire-restore-check)
+        run: |
+          execution=$(az containerapp job start -n mire-restore-check -g "$RG" --query name -o tsv)
+          echo "Exécution : $execution"
+          for i in $(seq 1 60); do
+            status=$(az containerapp job execution show -n mire-restore-check -g "$RG" \
+              --job-execution-name "$execution" --query properties.status -o tsv)
+            echo "Statut : $status"
+            case "$status" in
+              Succeeded) exit 0 ;;
+              Failed|Stopped|Degraded)
+                az containerapp job logs show -n mire-restore-check -g "$RG" --execution "$execution" \
+                  --container restore-check 2>/dev/null || true
+                echo "::error::Restauration incorrecte ou injoignable (journaux ci-dessus, docs/deploiement-azure.md)"
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::Vérification : délai dépassé (10 min)"
+          exit 1
+
+      - name: suppression du serveur temporaire
+        if: always() && env.CLEANUP == 'true'
+        run: az postgres flexible-server delete -g "$RG" -n "$TARGET" --yes

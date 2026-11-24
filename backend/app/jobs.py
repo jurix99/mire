@@ -9,6 +9,8 @@
   taxonomy           charge la liste fermée (taxonomy.py) dans les tables de référence.
   classify [--all]   classe les offres en attente, par lots, jusqu'au bout ou au quota Gemini ; --all : reclasse
                      tout le stock (premier déploiement, changement de la liste).
+  restore-check      test de restauration : vérifie EN LECTURE SEULE la base restaurée sur RESTORE_HOST (schéma,
+                     tables, fraîcheur ; voir restore_check.py et .github/workflows/restore-test.yml).
 
 Code de retour : 0 si succès, 1 sinon (le job Container Apps est alors réessayé selon sa configuration).
 """
@@ -75,6 +77,18 @@ def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
     from . import market
 
     market.refresh_facts(db)
+    # Santé du moteur : une ligne par alerte (niveau warning : à surveiller dans Log Analytics)
+    from .engine_health import engine_health
+
+    try:
+        health = engine_health(db)
+    except Exception as exc:  # lecture seule : ne fait jamais échouer le passage quotidien
+        db.rollback()
+        log.warning("Santé du moteur indisponible : %s", exc)
+        health = {"alertes": []}
+    summary["alerts"] = health["alertes"]
+    for alert in health["alertes"]:
+        log.warning("Alerte moteur : %s", alert, extra={"step": "engine_health"})
     log.info("Daily terminé", extra={"step": "daily", **{k: v for k, v in summary.items() if k != "collect"}})
     return summary
 
@@ -156,6 +170,24 @@ def cmd_classify(reclassify_all: bool) -> int:
     return 0
 
 
+def cmd_restore_check() -> int:
+    from . import restore_check
+
+    try:
+        result = restore_check.run()
+    except Exception as exc:  # serveur injoignable, identifiants refusés…
+        # Message du pilote (hôte, cause) : jamais le mot de passe
+        log.error("Test de restauration en échec : %s : %s", type(exc).__name__, str(exc)[:300],
+                  extra={"step": "restore_check"})
+        return 1
+    extra = {"step": "restore_check", **{k: v for k, v in result.items() if k != "ok"}}
+    if result["ok"]:
+        log.info("Restauration vérifiée", extra=extra)
+        return 0
+    log.error("Restauration incorrecte : %s", " ; ".join(result["problemes"]), extra=extra)
+    return 1
+
+
 def cmd_migrate() -> int:
     from alembic.config import main as alembic_main
 
@@ -176,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("taxonomy", help="charge la liste fermée dans les tables de référence")
     cls = sub.add_parser("classify", help="classe les offres en attente sur la liste fermée")
     cls.add_argument("--all", action="store_true", help="reclasse tout le stock")
+    sub.add_parser("restore-check", help="vérifie une base restaurée (RESTORE_HOST), en lecture seule")
     args = parser.parse_args(argv)
     if args.command == "daily":
         return cmd_daily()
@@ -185,6 +218,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_taxonomy()
     if args.command == "classify":
         return cmd_classify(args.all)
+    if args.command == "restore-check":
+        return cmd_restore_check()
     return cmd_migrate()
 
 
