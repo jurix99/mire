@@ -51,10 +51,6 @@ class ImportPostingsOut(BaseModel):
     created: list[int]
     duplicates: list[int]  # déjà connus (jamais recréés)
     missing: list[str]  # plus listés par l'ATS
-    too_old: list[str] = []  # publiées il y a plus de 2 mois : non ajoutées (docs §4)
-
-
-MAX_AGE_DAYS = 61
 
 
 def check_and_commit(db: Session, company: Company, fetch=ats.fetch_postings) -> CheckOut:
@@ -89,9 +85,6 @@ def import_postings(db: Session, company: Company, ids: list[str], fetch=ats.fet
         p = postings.get(ats_id)
         if p is None:
             out.missing.append(ats_id)
-            continue
-        if p.published_on and (date.today() - p.published_on).days > MAX_AGE_DAYS:
-            out.too_old.append(ats_id)
             continue
         if dup := services.find_duplicate(db, company.id, p.title, p.url):
             out.duplicates.append(dup.id)

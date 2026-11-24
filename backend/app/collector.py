@@ -5,8 +5,9 @@ Pour chaque entreprise du référentiel :
    semaine par entreprise ;
 2. ATS lisible (Ashby, Lever, Greenhouse, Recruitee) : lecture de la liste actuelle des offres ;
    offres connues -> ouverture vérifiée (et champs vides complétés), absentes -> fermées ;
-   nouvelles offres -> ajoutées avec leur description complète (publiées il y a plus de 2 mois : ignorées,
-   doublons : jamais recréés).
+   nouvelles offres -> ajoutées avec leur description complète, QUELLE QUE SOIT leur date de publication (une
+   offre encore listée par l'ATS est ouverte : une offre publiée il y a 4 mois peut toujours recruter) ; doublons :
+   jamais recréés.
 Chaque collecte est un passage (search_runs, kind « collecte ») ; les nouvelles offres sont ensuite évaluées
 pour chaque utilisateur par la tâche de fond (processus 3).
 
@@ -31,7 +32,6 @@ from .services import find_duplicate
 
 log = logging.getLogger("mire.collector")
 
-MAX_AGE_DAYS = 61
 PROBE_EVERY = timedelta(days=7)
 
 
@@ -49,7 +49,7 @@ def collect_company(db: Session, company: Company, fetch=ats.fetch_postings, det
     """Collecte les offres d'une entreprise. Retourne des compteurs (sans commit final)."""
     now = now or datetime.now(UTC)
     stats = {"company_id": company.id, "detected": None, "added": [], "closed": 0, "verified": 0,
-             "too_old": 0, "duplicates": 0, "error": None}
+             "duplicates": 0, "error": None}
     if company.ats not in ats.SUPPORTED or not company.ats_slug:
         probed = company.ats_probed_at
         if probed is not None and probed.tzinfo is None:
@@ -73,9 +73,6 @@ def collect_company(db: Session, company: Company, fetch=ats.fetch_postings, det
         return stats
     stats["closed"], stats["verified"] = len(result.closed), len(result.verified)
     for p in result.new_postings:
-        if p.published_on and (now.date() - p.published_on).days > MAX_AGE_DAYS:
-            stats["too_old"] += 1
-            continue
         if find_duplicate(db, company.id, p.title, p.url):
             stats["duplicates"] += 1
             continue
@@ -117,7 +114,7 @@ def collect_all(db: Session, fetch=ats.fetch_postings, detect=ats.detect_ats) ->
                 errors.append(f"{company.name} : erreur inattendue")
                 continue
             run.companies_checked += 1
-            run.jobs_seen += s["verified"] + len(s["added"]) + s["too_old"] + s["duplicates"]
+            run.jobs_seen += s["verified"] + len(s["added"]) + s["duplicates"]
             run.jobs_added += len(s["added"])
             run.jobs_duplicates += s["duplicates"]
             run.jobs_closed += s["closed"]

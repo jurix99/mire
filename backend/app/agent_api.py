@@ -6,7 +6,9 @@ et sources, et enregistre ses passages. Garde-fous (docs/processus-recherche.md)
 - aucune suppression ; une source n'est jamais désactivée par l'agent ; il ne complète que les champs vides
   des entreprises (les valeurs saisies par un utilisateur sont conservées) ;
 - dédoublonnage (URL normalisée, entreprise + titre) : une offre déjà vue n'est jamais recréée (409) ;
-- offre publiée il y a plus de 2 mois : refusée ; ouverture non vérifiable : acceptée avec l'indicateur ;
+- offre encore listée par l'entreprise (open_verified) : acceptée quelle que soit sa date de publication ;
+  ouverture non vérifiée : acceptée avec l'indicateur, sauf si elle a été publiée il y a plus de 2 mois (une
+  vieille annonce de job board, absente du site de l'entreprise, est le plus souvent pourvue) ;
 - l'agent ne touche à aucune donnée propre à un utilisateur (statuts, notes, profil) : l'évaluation est faite
   par Mire, pour chaque utilisateur, avec son profil.
 """
@@ -32,7 +34,7 @@ from .profile import get_profile, job_labels, profile_data, profile_summary
 from .radar_api import CheckOut, check_and_commit
 from .schemas import HttpUrl, JobIn, ShortText, Text
 
-MAX_AGE = timedelta(days=61)  # « publiée il y a plus de 2 mois -> on ne l'ajoute pas »
+MAX_AGE_UNVERIFIED = timedelta(days=61)  # offre NON vérifiée ouverte, publiée il y a plus de 2 mois : refusée
 SOURCE_KINDS = ("ats", "job_board", "vc_board", "funding_radar", "recruiter", "google_query", "autre")
 
 
@@ -96,7 +98,8 @@ def context(db: DB) -> dict:
 
 class RunIn(BaseModel):
     # offres : passage qui lit les pages carrières que Mire ne sait pas lire seul (Welcome to the Jungle, Notion…)
-    kind: Literal["decouverte", "planifie", "manuel", "approfondi", "offres"] = "decouverte"
+    # recherche : passage qui part des offres correspondant aux profils pour trouver des entreprises inconnues
+    kind: Literal["decouverte", "planifie", "manuel", "approfondi", "offres", "recherche"] = "decouverte"
 
 
 class RunFinishIn(BaseModel):
@@ -320,8 +323,9 @@ class AgentJobIn(JobIn):
 @router.post("/jobs", status_code=201)
 def add_job(body: AgentJobIn, db: DB) -> dict:
     run = _run(db, body.run_id)
-    if body.published_on and body.published_on < date.today() - MAX_AGE:
-        raise HTTPException(422, "Offre publiée il y a plus de 2 mois : non ajoutée")
+    if not body.open_verified and body.published_on and body.published_on < date.today() - MAX_AGE_UNVERIFIED:
+        raise HTTPException(422, "Offre publiée il y a plus de 2 mois et absente de la liste des offres de "
+                                 "l'entreprise : non ajoutée")
     if body.source_id is not None:
         services.get_or_404(db, Source, body.source_id)
     fields = JobIn.model_validate(body.model_dump(include=set(JobIn.model_fields)))

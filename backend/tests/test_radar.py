@@ -232,7 +232,7 @@ def test_runs_listing_shows_my_summary(db, alice, bob, as_user):
     assert as_user(bob).get("/api/runs").json()["runs"][0]["mine"]["nouvelles"] == 0
 
 
-def test_import_refuses_postings_older_than_two_months(db, catalog):
+def test_import_accepts_old_postings_still_listed(db, catalog):
     from datetime import date, timedelta
 
     acme = acme_with_ats(db, catalog)
@@ -240,7 +240,7 @@ def test_import_refuses_postings_older_than_two_months(db, catalog):
     fetch = lambda _a, _s: [ats.Posting("o1", "Vieille offre", None, None, old),  # noqa: E731
                             ats.Posting("n1", "Offre récente", None, None, date.today())]
     out = radar_api.import_postings(db, acme, ["o1", "n1"], fetch)
-    assert out.too_old == ["o1"] and len(out.created) == 1
+    assert len(out.created) == 2  # encore listée par l'ATS : ouverte, quelle que soit sa date
 
 
 def test_api_text_limits_fit_database_columns():

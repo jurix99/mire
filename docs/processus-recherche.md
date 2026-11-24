@@ -73,7 +73,7 @@ Une page d'offre reste souvent en ligne après fermeture (cas réels : Huscarl, 
 - YC : `https://www.ycombinator.com/companies/<entreprise>/jobs`
 - sinon la page carrières.
 
-Non listée, ou publiée il y a plus de 2 mois → on ne l'ajoute pas. Invérifiable → on l'ajoute avec l'indicateur « ouverture non vérifiée ».
+Listée par l'entreprise → on l'ajoute, quelle que soit sa date de publication (une offre publiée il y a 4 mois et toujours listée recrute encore). Non listée → on ne l'ajoute pas. Invérifiable → on l'ajoute avec l'indicateur « ouverture non vérifiée », sauf si elle a été publiée il y a plus de 2 mois (vieille annonce de job board, le plus souvent pourvue).
 Une offre déjà en base qui disparaît de la liste de l'entreprise → marquée fermée (donnée partagée, `closed_at`), et affichée « Offre fermée » chez tous les utilisateurs qui ne l'ont pas déjà traitée.
 
 ### Dédoublonnage
