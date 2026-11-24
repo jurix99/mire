@@ -297,3 +297,39 @@ def test_free_ranking_blurs_the_best_and_shows_the_next_two(db, pro_and_free, as
     assert out[jobs[4].id]["locked"] is True
     assert out[jobs[3].id]["title"] == "Poste 3" and out[jobs[2].id]["title"] == "Poste 2"
     assert all(out[j.id]["locked"] for j in jobs[:2])
+
+
+# --- Essai Pro (TRIAL_DAYS) ---------------------------------------------------------------------------
+
+
+def test_trial_grants_pro_then_falls_back_to_free(db, alice, billing_on, monkeypatch, as_user):
+    monkeypatch.setenv("TRIAL_DAYS", "14")
+    alice.created_at = datetime.now(UTC) - timedelta(days=3)
+    db.commit()
+    assert entitlements.plan_of(db, alice) == "pro"
+    me = as_user(alice).get("/api/me").json()["billing"]
+    assert me["trial"] and me["plan"] == "pro" and me["trial_days"] == 14
+    assert me["trial_until"].startswith((datetime.now(UTC) + timedelta(days=11)).date().isoformat())
+
+    alice.created_at = datetime.now(UTC) - timedelta(days=15)  # essai terminé
+    db.commit()
+    assert entitlements.plan_of(db, alice) == "free"
+    assert not as_user(alice).get("/api/me").json()["billing"]["trial"]
+
+
+def test_no_trial_by_default(db, alice, billing_on, monkeypatch):
+    monkeypatch.delenv("TRIAL_DAYS", raising=False)
+    assert entitlements.plan_of(db, alice) == "free" and entitlements.trial_until(alice) is None
+    monkeypatch.setenv("TRIAL_DAYS", "n'importe quoi")
+    assert entitlements.trial_days() == 0
+
+
+def test_paid_pro_is_not_reported_as_trial(db, alice, billing_on, monkeypatch):
+    from app.models import Subscription
+
+    monkeypatch.setenv("TRIAL_DAYS", "14")
+    db.add(Subscription(user_id=alice.id, kind="subscription", status="active",
+                        current_period_end=datetime.now(UTC) + timedelta(days=30)))
+    db.commit()
+    summary = entitlements.billing_summary(db, alice)
+    assert summary["plan"] == "pro" and not summary["trial"] and summary["kind"] == "subscription"
