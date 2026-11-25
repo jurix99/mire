@@ -83,11 +83,12 @@ def test_collect_company_imports_all_and_closes(db, catalog):
         posting("a2", "Account Executive", desc="Acme sales", department="Sales"),  # ajoutée (le tri est par utilisateur)
         posting("a3", "Platform Engineer", desc="Acme platform", work_mode="hybride", salary="70-90 k€",
                 published_on=today - timedelta(days=3)),
-        posting("a4", "Vieille offre", published_on=today - timedelta(days=120)),
+        posting("a4", "Offre ancienne encore ouverte", published_on=today - timedelta(days=120)),
     ]})
     stats = collector.collect_company(db, acme, fetch)
     db.commit()
-    assert stats["verified"] == 1 and stats["closed"] == 1 and stats["too_old"] == 1 and len(stats["added"]) == 2
+    # Une offre encore listée par l'ATS est ouverte, quelle que soit sa date : ajoutée (ex. Lithosquare)
+    assert stats["verified"] == 1 and stats["closed"] == 1 and len(stats["added"]) == 3
     platform = db.scalar(select(Job).where(Job.title == "Platform Engineer"))
     assert (platform.summary, platform.work_mode, platform.salary, platform.source) == (
         "Acme platform", "hybride", "70-90 k€", "ATS ashby")
@@ -98,7 +99,7 @@ def test_collect_company_imports_all_and_closes(db, catalog):
     assert db.get(Job, catalog["jobs"][1].id).closed_at is not None  # Frontend absente de la liste
     # Deuxième collecte : aucun doublon
     again = collector.collect_company(db, acme, fetch)
-    assert again["added"] == [] and again["verified"] == 3
+    assert again["added"] == [] and again["verified"] == 4
 
 
 def test_detection_is_throttled_weekly(db):

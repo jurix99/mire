@@ -313,6 +313,8 @@ function renderLearned() {
 
 // --- Barème de notation --------------------------------------------------------
 
+// Libellés par défaut ; l'API envoie le barème de la variante de notation en cours (profile.criteria), avec en v2
+// une définition personnelle pour le stade, le type de rôle et le produit.
 const CRITERIA_LABELS = {
   competences: "Correspondance des compétences",
   stade: "Stade de l'entreprise et qualité des investisseurs",
@@ -323,17 +325,32 @@ const CRITERIA_LABELS = {
 };
 const DEFAULT_WEIGHTS = { competences: 3, stade: 2, ownership: 2, ia_concrete: 1, xp: 1, references: 1 };
 
+const SOURCE_NOTE = {
+  preferences: "déduit de vos préférences",
+  aucune: "non défini : ce critère ne départage pas les offres",
+};
+
 function renderScoring() {
   const { weights, threshold } = profile.scoring;
+  const definitions = profile.scoring.definitions ?? {};
+  const criteria = profile.criteria?.length
+    ? profile.criteria : Object.entries(CRITERIA_LABELS).map(([key, label]) => ({ key, label }));
   const total = Object.values(weights).reduce((a, b) => a + b, 0);
   $("#scoring").innerHTML = html`
     ${head("// Notation", "Barème", html`<span class="small muted">Total ${total.toLocaleString("fr-FR")} · ramené sur 10</span>`)}
     <form class="scoring" data-scoring>
-      ${Object.entries(CRITERIA_LABELS).map(([k, label]) => html`
+      ${criteria.map((c) => html`
         <label class="scoring-row">
-          <span class="small">${label}</span>
-          <input class="input" type="number" name="${k}" min="0" max="10" step="0.5" value="${weights[k] ?? 0}" aria-label="Poids : ${label}">
-        </label>`)}
+          <span class="small">${c.label}</span>
+          <input class="input" type="number" name="${c.key}" min="0" max="10" step="0.5" value="${weights[c.key] ?? 0}" aria-label="Poids : ${c.label}">
+        </label>
+        ${c.personal ? html`
+        <label class="scoring-def">
+          <span class="small muted">Ce qui compte pour vous${c.source !== "utilisateur" && SOURCE_NOTE[c.source]
+            ? ` · ${SOURCE_NOTE[c.source]}${c.definition ? ` (« ${c.definition} »)` : ""}` : ""}</span>
+          <input class="input" type="text" name="def-${c.key}" maxlength="300" value="${definitions[c.key] ?? ""}"
+            placeholder="${c.hint ?? ""}" aria-label="Définition : ${c.label}">
+        </label>` : ""}`)}
       <label class="scoring-row threshold">
         <span class="small"><strong>Seuil</strong> · en dessous, l'offre est « Écartée (auto) »</span>
         <input class="input" type="number" name="threshold" min="0" max="10" step="0.5" value="${threshold}" aria-label="Seuil">
@@ -349,13 +366,17 @@ function renderScoring() {
   box.onsubmit = (e) => {
     e.preventDefault();
     const f = e.target.elements;
-    const next = Object.fromEntries(Object.keys(CRITERIA_LABELS).map((k) => [k, Number(f[k].value || 0)]));
+    const next = Object.fromEntries(criteria.map((c) => [c.key, Number(f[c.key].value || 0)]));
     if (!Object.values(next).some((w) => w > 0)) return toast("Au moins un critère doit avoir un poids", true);
-    save({ scoring: { weights: next, threshold: Number(f.threshold.value || 0) } }, "Barème enregistré : réévaluation en cours");
+    // Définitions personnelles (v2) ; celles d'une autre variante sont conservées telles quelles
+    const defs = { ...definitions };
+    criteria.filter((c) => c.personal).forEach((c) => { defs[c.key] = f[`def-${c.key}`].value.trim(); });
+    save({ scoring: { weights: next, threshold: Number(f.threshold.value || 0), definitions: defs } },
+      "Barème enregistré : réévaluation en cours");
   };
   box.onclick = (e) => {
     if (e.target.closest("[data-default-scoring]")) {
-      save({ scoring: { weights: DEFAULT_WEIGHTS, threshold: 6 } }, "Barème par défaut rétabli");
+      save({ scoring: { weights: DEFAULT_WEIGHTS, threshold: 6, definitions } }, "Barème par défaut rétabli");
     }
   };
 }
@@ -673,6 +694,10 @@ function renderBilling() {
   } else if (billing.kind === "pass") {
     plan = "Pass 3 mois";
     detail = html`<p class="small">Actif jusqu'au ${until}, sans renouvellement automatique.</p>`;
+  } else if (billing.trial) {
+    plan = "Pro (essai)";
+    detail = html`<p class="small">Essai gratuit jusqu'au ${fmtLongDay.format(new Date(billing.trial_until))}, sans
+      carte bancaire. Ensuite, retour à l'offre Free sans rien perdre, sauf si vous passez Pro.</p>`;
   } else {
     plan = "Pro";
     detail = html`<p class="small muted">Accès Pro offert.</p>`;
@@ -682,7 +707,7 @@ function renderBilling() {
     <div style="display:grid;gap:10px">
       ${detail}
       <div class="import-actions">
-        ${billing.plan === "free" ? html`<button type="button" class="btn sm" data-pro>Passer Pro</button>` : ""}
+        ${billing.plan === "free" || billing.trial ? html`<button type="button" class="btn sm" data-pro>Passer Pro</button>` : ""}
         ${billing.plan === "pro" && billing.kind === "pass" ? html`<button type="button" class="btn ghost sm" data-pro>Prolonger de 3 mois</button>` : ""}
         ${billing.kind ? html`<button type="button" class="btn ghost sm" data-portal>Gérer mon abonnement</button>` : ""}
       </div>

@@ -5,16 +5,20 @@
 #   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind rattrapage      # 6 mois, mois par mois
 #   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind rattrapage -Months 12
 #   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind offres            # offres hors ATS lisible
+#   powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1 -Kind recherche         # entreprises trouvées par leurs offres
 #
 # offres : l'agent lit les pages d'offres que Mire ne lit pas seul (Welcome to the Jungle, Notion, page
 # carrières…) et enregistre les offres tech ouvertes (consignes : agent/prompt-offres.md).
+# recherche : l'agent part des offres qui correspondent aux profils pour trouver des entreprises que Mire ne
+# connaît pas (consignes : agent/prompt-recherche.md).
+# Plafond de dépense par passage (facultatif) : $env:AGENT_MAX_BUDGET_USD = "5" (--max-budget-usd de claude).
 # rattrapage : une exécution de l'agent par tranche d'un mois, de la plus récente à la plus ancienne (chaque
 # tranche est un passage distinct : une interruption ne fait pas perdre les précédentes).
 # L'agent n'a accès qu'à la recherche web, à la lecture de pages, à l'écriture de fichiers dans agent/tmp/
 # et au client de l'API de Mire (agent/mire_api.py) : aucune autre commande.
 # Journal : agent\logs\run-AAAAMMJJ-HHmm.log
 param(
-    [ValidateSet("decouverte", "rattrapage", "offres")]
+    [ValidateSet("decouverte", "rattrapage", "offres", "recherche")]
     [string]$Kind = "decouverte",
     [int]$Months = 6,
     [string]$Model = ""
@@ -79,6 +83,7 @@ $OutputEncoding = [System.Text.Encoding]::UTF8
 function Invoke-Claude([string]$Prompt, [string]$Label) {
     $claudeArgs = @("-p", $Prompt, "--allowedTools", $allowed, "--no-session-persistence", "--output-format", "text")
     if ($Model) { $claudeArgs += @("--model", $Model) }
+    if ($env:AGENT_MAX_BUDGET_USD) { $claudeArgs += @("--max-budget-usd", $env:AGENT_MAX_BUDGET_USD) }
     Write-Log "Début : $Label"
     & claude @claudeArgs 2>&1 | ForEach-Object {
         $line = "$_"
@@ -105,6 +110,11 @@ if ($Kind -eq "decouverte") {
     $prompt = (Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot "prompt-offres.md")) +
         "`n`n## Cette exécution`nDate du jour : $(Get-Date -Format 'dddd d MMMM yyyy')."
     $worst = Invoke-Claude $prompt "offres hors ATS"
+} elseif ($Kind -eq "recherche") {
+    # Entreprises inconnues, trouvées à partir des offres qui correspondent aux profils
+    $prompt = (Get-Content -Raw -Encoding utf8 (Join-Path $PSScriptRoot "prompt-recherche.md")) +
+        "`n`n## Cette exécution`nDate du jour : $(Get-Date -Format 'dddd d MMMM yyyy')."
+    $worst = Invoke-Claude $prompt "recherche partant des offres"
 } else {
     for ($i = 0; $i -lt $Months; $i++) {
         $code = Invoke-Slice $today.AddMonths(-($i + 1)) $today.AddMonths(-$i) "approfondi"

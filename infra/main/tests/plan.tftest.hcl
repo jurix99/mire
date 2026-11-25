@@ -78,6 +78,7 @@ variables {
   budget_alert_email = "alertes@example.invalid"
   api_image_tag      = "abc1234"
   worker_image_tag   = "abc1234"
+  agent_image_tag    = "abc1234"
 }
 
 run "premier_apply_sans_applications" {
@@ -116,12 +117,20 @@ run "applications" {
     error_message = "secrets : uniquement des références Key Vault, sans valeur"
   }
   assert {
+    condition     = length(setsubtract(toset(["BETA_EMAILS", "BETA_INVITE_CODE"]), toset([for e in azurerm_container_app.api[0].template[0].container[0].env : e.name]))) == 0
+    error_message = "bêta privée : configuration transmise à l'API (création des comptes)"
+  }
+  assert {
     condition     = contains([for s in azurerm_container_app.api[0].secret : s.name], "stripe-webhook-secret")
     error_message = "billing_enabled : secrets Stripe attendus"
   }
   assert {
     condition     = azurerm_container_app_job.worker[0].event_trigger_config[0].scale[0].rules[0].custom_rule_type == "postgresql"
     error_message = "mire-worker : règle KEDA postgresql"
+  }
+  assert {
+    condition     = azurerm_container_app_job.restore_check[0].template[0].container[0].command == tolist(["python", "-m", "app.jobs", "restore-check"]) && contains([for e in azurerm_container_app_job.restore_check[0].template[0].container[0].env : e.name], "RESTORE_HOST")
+    error_message = "mire-restore-check : vérifie le serveur RESTAURÉ, jamais la base de production"
   }
   assert {
     condition     = azurerm_container_app_job.daily[0].schedule_trigger_config[0].cron_expression == "30 5 * * *"
@@ -131,6 +140,55 @@ run "applications" {
     condition = contains([for e in azurerm_container_app.api[0].template[0].container[0].env : e.name if e.name == "PUBLIC_URL" && e.value == "https://mire-api.test.francecentral.azurecontainerapps.io"],
     "PUBLIC_URL")
     error_message = "PUBLIC_URL sans domaine personnalisé : URL azurecontainerapps.io"
+  }
+}
+
+run "agent_desactive_par_defaut" {
+  command = plan
+
+  variables {
+    apps_enabled = true
+  }
+
+  assert {
+    condition     = length(azurerm_container_app_job.agent) == 0
+    error_message = "agent : aucun job tant que agent_enabled est faux (secret anthropic-api-key à poser)"
+  }
+}
+
+run "agent_planifie" {
+  command = plan
+
+  variables {
+    apps_enabled  = true
+    agent_enabled = true
+    agent_model   = "claude-sonnet-5-5"
+  }
+
+  assert {
+    condition     = toset(keys(azurerm_container_app_job.agent)) == toset(["decouverte", "recherche", "offres"])
+    error_message = "agent : un job par type de passage planifié"
+  }
+  assert {
+    condition     = azurerm_container_app_job.agent["decouverte"].template[0].container[0].image == "ghcr.io/jurix99/mire-agent:abc1234"
+    error_message = "image de l'agent : tag passé par la CI"
+  }
+  assert {
+    condition     = azurerm_container_app_job.agent["offres"].template[0].container[0].args == tolist(["offres"])
+    error_message = "agent : le type de passage est l'argument du conteneur"
+  }
+  assert {
+    condition     = toset([for s in azurerm_container_app_job.agent["decouverte"].secret : s.name]) == toset(["agent-token", "anthropic-api-key", "ghcr-pat"])
+    error_message = "agent : ni la base ni Gemini, seulement le jeton de l'agent et la clé Anthropic"
+  }
+  assert {
+    condition = contains([for e in azurerm_container_app_job.agent["decouverte"].template[0].container[0].env :
+    e.name if e.name == "AGENT_MAX_BUDGET_USD" && e.value == "5"], "AGENT_MAX_BUDGET_USD")
+    error_message = "agent : plafond de dépense par passage"
+  }
+  assert {
+    condition     = azurerm_container_app_job.agent["decouverte"].replica_retry_limit == 0
+    error_message = "agent : pas de nouvelle tentative (elle paierait le passage deux fois)"
   }
 }
 

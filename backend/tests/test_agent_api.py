@@ -64,7 +64,7 @@ def test_full_run(db, alice, catalog, as_user, agent, fake_llm):
     db.refresh(source)
     assert (source.added_by, source.active, source.query) == ("agent", True, "https://lespepitestech.com")
 
-    # Offres : ajout, doublon refusé, trop ancienne refusée
+    # Offres : ajout, doublon refusé, ancienne refusée si son ouverture n'est pas vérifiée
     job = {"company_id": c["id"], "title": "Member of Technical Staff, Platform",
            "url": "https://jobs.ashbyhq.com/remanence/1?utm_source=x", "open_verified": True,
            "source_id": s["id"], "run_id": run_id, "work_mode": "hybride", "salary": "70-90 k€"}
@@ -72,7 +72,7 @@ def test_full_run(db, alice, catalog, as_user, agent, fake_llm):
     assert r.status_code == 201, r.text
     dup = agent.post("/api/agent/jobs", json={**job, "url": "https://jobs.ashbyhq.com/remanence/1"})
     assert dup.status_code == 409 and dup.json()["detail"]["existing_id"] == r.json()["id"]
-    old = agent.post("/api/agent/jobs", json={**job, "title": "Ancienne", "url": None,
+    old = agent.post("/api/agent/jobs", json={**job, "title": "Ancienne", "url": None, "open_verified": False,
                                               "published_on": (date.today() - timedelta(days=90)).isoformat()})
     assert old.status_code == 422
     created = db.get(Job, r.json()["id"])
@@ -85,6 +85,22 @@ def test_full_run(db, alice, catalog, as_user, agent, fake_llm):
     assert mine["nouvelles"] == 1 and mine["top"][0]["titre"] == "Member of Technical Staff, Platform"
     assert "12 offres vues, 1 ajoutées, 1 déjà connues" in done["summary"]
     assert agent.post(f"/api/agent/runs/{run_id}/finish", json={}).status_code == 409
+
+
+def test_old_job_still_listed_is_accepted(db, agent):
+    """Publiée il y a 4 mois mais toujours dans la liste de l'entreprise : ouverte, donc ajoutée."""
+    c = agent.post("/api/agent/companies", json={"name": "Lithosquare"}).json()
+    r = agent.post("/api/agent/jobs", json={
+        "company_id": c["id"], "title": "Platform Engineer", "url": "https://lithosquare.com/jobs/1",
+        "open_verified": True, "published_on": (date.today() - timedelta(days=120)).isoformat()})
+    assert r.status_code == 201, r.text
+
+
+def test_search_run_kind(agent):
+    """Passage « recherche » (agent/prompt-recherche.md) : type de passage accepté par l'API."""
+    run = agent.post("/api/agent/runs", json={"kind": "recherche"})
+    assert run.status_code in (200, 201), run.text
+    assert agent.post("/api/agent/runs", json={"kind": "inconnu"}).status_code == 422
 
 
 def test_agent_cannot_deactivate_or_delete(db, agent):

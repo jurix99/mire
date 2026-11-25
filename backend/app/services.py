@@ -89,6 +89,7 @@ class AssessmentContext:
 
     assessments: dict[int, JobAssessment] = dc_field(default_factory=dict)
     weights: dict[str, float] = dc_field(default_factory=dict)
+    labels: dict[str, str] = dc_field(default_factory=dict)  # libellés du barème (variante de notation en cours)
     version: int = 1
     access: Access = dc_field(default_factory=Access)  # ce que l'utilisateur peut voir (Free : masquage)
     feedback: dict[int, str] = dc_field(default_factory=dict)  # job_id -> dernier retour (like | dislike)
@@ -101,19 +102,22 @@ def assessment_context(db: Session, user: User) -> AssessmentContext:
     rows = db.scalars(select(JobAssessment).where(JobAssessment.user_id == user.id))
     feedback = dict(db.execute(select(JobFeedback.job_id, JobFeedback.sentiment)
                                .where(JobFeedback.user_id == user.id).order_by(JobFeedback.id)).all())
-    return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, profile.version,
-                             entitlements.access_for(db, user), feedback)
+    from .profile import criteria_labels
+
+    return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, criteria_labels(),
+                             profile.version, entitlements.access_for(db, user), feedback)
 
 
 def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = False) -> AssessmentOut:
     from .profile import CRITERIA
 
+    labels = ctx.labels or {k: label for k, (label, _) in CRITERIA.items()}
     auto = float(a.score) if a.score is not None else None
     manual = float(a.manual_score) if a.manual_score is not None else None
     out = AssessmentOut(
         score=manual if manual is not None else auto, auto_score=auto, manual_score=manual,
         verdict=a.verdict, exclusion=a.exclusion, why=a.why,
-        criteria=[CriterionOut(key=k, label=CRITERIA[k][0], points=float(a.criteria.get(k, 0)), max=w)
+        criteria=[CriterionOut(key=k, label=labels[k], points=float(a.criteria.get(k, 0)), max=w)
                   for k, w in ctx.weights.items() if a.criteria],
         skills_have=a.skills_have or [], skills_missing=a.skills_missing or [],
         # À réévaluer : même règle que assessments.jobs_to_assess (jamais si traitée ou note corrigée)

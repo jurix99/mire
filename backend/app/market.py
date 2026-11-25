@@ -12,6 +12,7 @@ d'offres ; « par offre » : chaque offre compte. Chaque chiffre est renvoyé av
 """
 
 import logging
+import os
 import re
 import statistics
 import time
@@ -752,6 +753,10 @@ BAROMETER_TOP = 10
 BAROMETER_RISING = 5
 BAROMETER_PERIOD = "30j"
 BAROMETER_TTL_S = 24 * 3600
+# Baromètre PUBLIC : rien n'est publié sous ces volumes (sur la période), car sur un petit échantillon surtout
+# parisien, une « tendance du marché » n'est que du bruit. Réglables : BAROMETER_MIN_JOBS, BAROMETER_MIN_COMPANIES.
+BAROMETER_MIN_JOBS = int(os.environ.get("BAROMETER_MIN_JOBS", "300"))
+BAROMETER_MIN_COMPANIES = int(os.environ.get("BAROMETER_MIN_COMPANIES", "100"))
 
 
 def barometer(facts: Facts, today: date | None = None) -> dict:
@@ -762,16 +767,24 @@ def barometer(facts: Facts, today: date | None = None) -> dict:
     trends = skill_trends(facts, "entreprise", today=today)
     by_role = roles(rows, "entreprise", BAROMETER_TOP)
 
-    def public(item: dict) -> dict:  # uniquement des agrégats
-        return {k: item[k] for k in ("key", "label", "share", "units", "jobs", "low_data") if k in item}
+    def public(items: list[dict]) -> list[dict]:  # uniquement des agrégats, jamais une ligne « peu de données »
+        return [{k: i[k] for k in ("key", "label", "share", "units", "jobs") if k in i}
+                for i in items if not i.get("low_data")]
 
-    return {
+    companies = len({r.company_id for r in rows})
+    published = len(rows) >= BAROMETER_MIN_JOBS and companies >= BAROMETER_MIN_COMPANIES
+    out = {
         "month": today.strftime("%m/%Y"), "period_days": PERIODS[BAROMETER_PERIOD],
-        "jobs": len(rows), "companies": len({r.company_id for r in rows}),
-        "top_skills": {"headline": skills["headline"], "items": [public(i) for i in skills["top"]]},
+        "jobs": len(rows), "companies": companies, "published": published,
+        "top_skills": {"headline": skills["headline"], "items": public(skills["top"])},
         "rising": {"headline": trends["headline"],
                    "items": [{k: i[k] for k in ("key", "label", "pp", "share_recent")} for i in
                              trends["up"][:BAROMETER_RISING]]},
-        "domains": {"headline": by_role["headline"], "items": [public(i) for i in by_role["domains"]]},
-        "thresholds": {"min_jobs": MIN_JOBS, "low_data": LOW_DATA},
+        "domains": {"headline": by_role["headline"], "items": public(by_role["domains"])},
+        "thresholds": {"min_jobs": MIN_JOBS, "low_data": LOW_DATA, "published_min_jobs": BAROMETER_MIN_JOBS,
+                       "published_min_companies": BAROMETER_MIN_COMPANIES},
     }
+    if not published:  # pas assez de volume : aucun chiffre (la landing masque la section)
+        for key in ("top_skills", "rising", "domains"):
+            out[key] = {"headline": "", "items": []}
+    return out

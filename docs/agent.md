@@ -6,7 +6,27 @@ en local) trouve les entreprises françaises qui ont levé des fonds et l'identi
 dans Mire via une API protégée par jeton. Le processus est décrit dans [processus-recherche.md](processus-recherche.md) ; les consignes
 données à l'agent sont dans [`agent/prompt.md`](../agent/prompt.md).
 
-## Mise en place
+## Côté serveur (production)
+
+En production, l'agent tourne dans des jobs Container Apps planifiés (`mire-agent-decouverte`,
+`mire-agent-recherche`, `mire-agent-offres`), avec un plafond de dépense par passage : voir « Agent de recherche planifié » dans
+[deploiement-azure.md](deploiement-azure.md). Le lanceur `agent/run_agent.py` (Linux, macOS ou Windows) fait la
+même chose que `run-agent.ps1`, sans démarrer docker compose :
+
+```sh
+MIRE_URL=https://<domaine> MIRE_AGENT_TOKEN=… ANTHROPIC_API_KEY=… python agent/run_agent.py decouverte
+python agent/run_agent.py rattrapage --months 6   # AGENT_TOTAL_BUDGET_USD plafonne l'ensemble
+python agent/run_agent.py offres
+python agent/run_agent.py recherche   # entreprises inconnues, trouvées par leurs offres
+```
+
+**Passage « recherche »** : la découverte par les levées rate les entreprises dont la levée est ancienne ou
+discrète, mais qui recrutent aujourd'hui les profils des utilisateurs. Ce passage part des rôles et compétences
+des profils (anonymisés), cherche les offres correspondantes (ATS, Welcome to the Jungle, tableaux d'offres des
+fonds) et enregistre les entreprises inconnues, avec leur ATS s'il est lisible (Mire collecte alors toutes leurs
+offres) ou leurs offres pertinentes sinon. Consignes : [`agent/prompt-recherche.md`](../agent/prompt-recherche.md).
+
+## Mise en place (poste local)
 
 1. Dans `.env` : `AGENT_TOKEN=<jeton aléatoire>` (par exemple `openssl rand -base64 32`), puis
    `docker compose up -d backend`. Sans jeton, l'API de l'agent répond 503.
@@ -49,14 +69,14 @@ script ne démarre pas docker compose, et le jeton du `.env` local n'est jamais 
 | Méthode | Chemin | Rôle |
 |---|---|---|
 | GET | `context` | Sources actives, entreprises (ATS, vérification), offres déjà vues, profils anonymisés, derniers passages |
-| POST | `runs` `{kind: decouverte\|approfondi\|manuel}` | Début d'un passage -> `run_id` |
+| POST | `runs` `{kind: decouverte\|approfondi\|manuel\|offres\|recherche}` | Début d'un passage -> `run_id` |
 | POST | `runs/{id}/finish` `{status, jobs_seen, companies_checked, summary, errors}` | Fin : Mire évalue les offres ajoutées pour chaque utilisateur et renvoie le résumé (top 5 par utilisateur) |
 | POST | `companies/bulk` `{companies: [...], run_id}` | Jusqu'à 100 entreprises en un appel (même règle que `companies`) |
 | POST | `companies` | Crée l'entreprise, ou complète les champs vides d'une existante (même nom ou même site) |
 | POST | `companies/{id}/check?run_id=` | Mire lit la liste des offres de l'ATS (Ashby, Lever, Greenhouse, Recruitee, Teamtailor) : ouvertes, fermées, nouvelles |
 | POST | `companies/{id}/ats` `{ats, slug}` | Mire teste l'identifiant ; enregistré seulement s'il fonctionne et contient les offres de cette entreprise (une valeur cassée peut être remplacée) |
 | POST | `companies/{id}/checked` `{no_relevant_jobs}` | Vérifiée (sans offre pertinente : pas revérifiée au prochain passage) |
-| POST | `jobs` | Ajoute une offre (dédoublonnée : 409 avec `existing_id` ; publiée il y a plus de 2 mois : 422) |
+| POST | `jobs` | Ajoute une offre (dédoublonnée : 409 avec `existing_id` ; non vérifiée ouverte et publiée il y a plus de 2 mois : 422) |
 | POST | `jobs/{id}/close?run_id=` | Offre disparue de la liste de l'entreprise : fermée |
 | POST | `sources` | Ajoute une source (ajoutée par : agent) ; existante : complète seulement l'URL vide |
 | PATCH | `sources/{id}` `{query, notes_append, used}` | Complète une source (URL vide, notes ajoutées à la suite) |

@@ -206,7 +206,9 @@ def test_admin_taxonomy_health(db, alice, as_user):
 # --- Baromètre public ---------------------------------------------------------------------------------------------
 
 
-def test_public_barometer_has_no_company_name_and_respects_thresholds(db, client_anon):
+def test_public_barometer_has_no_company_name_and_respects_thresholds(db, client_anon, monkeypatch):
+    monkeypatch.setattr(market, "BAROMETER_MIN_JOBS", 30)
+    monkeypatch.setattr(market, "BAROMETER_MIN_COMPANIES", 30)
     rich_radar(db)
     job(db, company(db, "Rare Corp"), "juridique", ["droit_contrats"], days_ago=3)  # 1 offre : sous le seuil
     db.commit()
@@ -220,14 +222,27 @@ def test_public_barometer_has_no_company_name_and_respects_thresholds(db, client
     assert all(i["jobs"] >= market.MIN_JOBS for i in b["top_skills"]["items"])
     assert "droit_contrats" not in {i["key"] for i in b["top_skills"]["items"]}
     assert len(b["top_skills"]["items"]) <= market.BAROMETER_TOP
+    assert b["published"] and b["top_skills"]["items"]
+    assert all("low_data" not in i for i in b["top_skills"]["items"] + b["domains"]["items"])
+
+
+def test_public_barometer_not_published_on_small_volume(db, client_anon):
+    """Sous 300 offres / 100 entreprises sur 30 jours : aucun chiffre public (ce ne serait que du bruit)."""
+    rich_radar(db)
+    market.refresh_facts(db)
+    b = client_anon.get("/api/public/barometer").json()
+    assert b["jobs"] == 30 and not b["published"]
+    assert b["top_skills"]["items"] == [] and b["rising"]["items"] == [] and b["domains"]["items"] == []
 
 
 @pytest.fixture
 def client_anon():
     from fastapi.testclient import TestClient
 
+    from app import public_api
     from app.main import app
 
+    public_api._BAROMETER.update(value=None, at=0.0)  # cache du baromètre (24 h) : vidé entre les tests
     return TestClient(app)
 
 

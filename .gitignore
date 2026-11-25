@@ -12,3 +12,5 @@ agent/tmp/
 *.tfplan
 tfplan
 crash.log
+# Jeux de référence et mesures de pertinence (contiennent un profil : données personnelles)
+backend/eval_data/

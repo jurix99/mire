@@ -12,7 +12,7 @@ const KINDS = [
 const KIND_LABEL = Object.fromEntries(KINDS);
 const RUN_KIND = {
   collecte: "Collecte des offres", decouverte: "Découverte des entreprises", planifie: "Planifié", manuel: "Manuel",
-  approfondi: "Approfondi",
+  approfondi: "Approfondi", offres: "Offres hors ATS", recherche: "Recherche par les offres",
 };
 const RUN_STATUS = { en_cours: "En cours", termine: "Terminé", echec: "Échec" };
 

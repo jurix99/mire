@@ -74,7 +74,8 @@ class LLM(Protocol):
 
     def analyze_profile(self, profile_json: str) -> Any: ...  # -> analysis.ProfileAnalysis
 
-    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None) -> Any: ...
+    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None,
+                      variant: str = "v1") -> Any: ...
 
     def synthesize_rules(self, contents: str) -> Any: ...  # -> rules_synthesis.RulesSynthesis
 
@@ -164,6 +165,7 @@ class GeminiClient:
         fallbacks = GEMINI_FALLBACK_MODELS if fallbacks is None else fallbacks
         self.models = list(dict.fromkeys([model, *fallbacks]))  # sans doublon, ordre conservé
         self.quota_until: dict[str, float] = {}
+        self.last_model: str | None = None  # dernier modèle qui a répondu
         self.client = genai.Client(
             api_key=api_key,
             http_options=types.HttpOptions(
@@ -197,7 +199,11 @@ class GeminiClient:
                     turn["index"] += 1  # hors quota récemment : on passe directement au suivant
                     continue
                 try:
-                    return self.client.models.generate_content(model=model, contents=contents, config=config)
+                    response = self.client.models.generate_content(model=model, contents=contents, config=config)
+                    # Modèle qui a VRAIMENT répondu (secours compris) : enregistré sur les évaluations
+                    # (job_assessments.model), il mesure la part de bascule (engine_health.py)
+                    self.last_model = model
+                    return response
                 except self.errors.APIError as exc:
                     if exc.code not in OVERLOAD_CODES:
                         raise
@@ -295,15 +301,19 @@ class GeminiClient:
             raise LLMUnavailable(type(exc).__name__) from None
         return json.loads(response.text or "{}")
 
-    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None):
+    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models: list[str] | None = None,
+                      variant: str = "v1"):
         import json
 
-        from .assessments import EVALUATE_INSTRUCTION, EvaluationBatch
+        from .assessments import EVALUATE_INSTRUCTION, EVALUATE_INSTRUCTION_V2, EvaluationBatch, EvaluationBatchV2
 
+        instruction, schema = ((EVALUATE_INSTRUCTION_V2, EvaluationBatchV2) if variant == "v2"
+                               else (EVALUATE_INSTRUCTION, EvaluationBatch))
         contents = (f"<profil>\n{profile_context}\n</profil>\n"
                     f"<offres>\n{json.dumps(jobs, ensure_ascii=False)}\n</offres>")
-        return self.structured(EVALUATE_INSTRUCTION, contents, EvaluationBatch, label="evaluate_jobs",
-                               rounds=1, models=models or GEMINI_EVAL_MODELS)
+        # v2 : une analyse par offre en plus des notes -> sortie plus longue
+        return self.structured(instruction, contents, schema, label="evaluate_jobs", rounds=1,
+                               models=models or GEMINI_EVAL_MODELS, max_tokens=12_000 if variant == "v2" else 8_000)
 
     # --- Chat avec appel de fonctions -----------------------------------------
 

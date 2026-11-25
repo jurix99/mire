@@ -7,6 +7,7 @@ Fusion d'un import (merge_profile) : on ne supprime jamais ce qui existe.
   le changement est proposé comme « modification », appliqué seulement si l'utilisateur l'accepte.
 """
 
+import os
 from datetime import UTC, date, datetime
 from typing import Annotated, Any, Literal
 
@@ -137,6 +138,32 @@ CRITERIA: dict[str, tuple[str, float]] = {
 }
 DEFAULT_THRESHOLD = 6.0
 
+# --- Critères personnels (notation v2, voir assessments.py) -----------------------------------------------------
+# En v1, stade / ownership / ia_concrete encodent un goût unique (amorçage, premier ingénieur, produit IA). En v2,
+# chacun a une DÉFINITION propre à l'utilisateur : la sienne (scoring.definitions), sinon déduite de ses
+# préférences (stades, secteurs visés), sinon aucune : le critère est alors neutre (0,5 pour toutes les offres)
+# au lieu d'imposer le goût de quelqu'un d'autre.
+VARIANTS = ("v1", "v2")
+PERSONAL_CRITERIA = ("stade", "ownership", "ia_concrete")
+CRITERIA_V2_LABELS = {
+    "stade": "Stade et taille de l'entreprise",
+    "ownership": "Type de rôle",
+    "ia_concrete": "Produit et secteur",
+}
+DEFINITION_HINTS = {
+    "stade": "Ex. : startup en amorçage ou Série A ; ou scale-up de plus de 200 personnes ; ou grand groupe",
+    "ownership": "Ex. : parmi les premiers ingénieurs, rôle transverse ; ou équipe structurée avec un périmètre clair",
+    "ia_concrete": "Ex. : produit IA concret avec des clients réels ; ou santé, climat ; ou outils pour développeurs",
+}
+
+
+def scoring_variant() -> str:
+    """Variante de notation en cours (SCORING_VARIANT, v1 par défaut ; lue à chaque appel)."""
+    variant = os.environ.get("SCORING_VARIANT", "v1").strip() or "v1"
+    if variant not in VARIANTS:
+        raise ValueError(f"SCORING_VARIANT inconnue : {variant} (attendu : {', '.join(VARIANTS)})")
+    return variant
+
 
 def _check_weights(weights: dict[str, float]) -> dict[str, float]:
     unknown = set(weights) - set(CRITERIA)
@@ -150,11 +177,23 @@ def _check_weights(weights: dict[str, float]) -> dict[str, float]:
     return merged
 
 
+def _check_definitions(definitions: dict[str, str]) -> dict[str, str]:
+    unknown = set(definitions) - set(PERSONAL_CRITERIA)
+    if unknown:
+        raise ValueError(f"Critères sans définition personnelle : {', '.join(sorted(unknown))}")
+    cleaned = {k: " ".join(str(v).split()) for k, v in definitions.items()}
+    if any(len(v) > 300 for v in cleaned.values()):
+        raise ValueError("Une définition de critère fait au plus 300 caractères")
+    return {k: v for k, v in cleaned.items() if v}
+
+
 class Scoring(Model):
     weights: Annotated[dict[str, float], AfterValidator(_check_weights)] = Field(
         default_factory=lambda: {k: float(w) for k, (_, w) in CRITERIA.items()}
     )
     threshold: Annotated[float, Field(ge=0, le=10)] = DEFAULT_THRESHOLD
+    # Notation v2 : ce que « 1 » veut dire pour l'utilisateur, par critère personnel (vide : déduit des préférences)
+    definitions: Annotated[dict[str, str], AfterValidator(_check_definitions)] = Field(default_factory=dict)
 
 
 class _ProfileFacts(Model):
@@ -201,10 +240,22 @@ class ImportTrace(Model):
     imported_at: datetime
 
 
+class CriterionDef(Model):
+    """Critère du barème tel que l'utilisateur le voit (libellé, et en v2 sa définition)."""
+
+    key: str
+    label: str
+    personal: bool = False  # définition modifiable par l'utilisateur (v2)
+    definition: str | None = None  # celle qui sert à noter (la sienne, sinon déduite des préférences)
+    source: Literal["utilisateur", "preferences", "aucune"] | None = None
+    hint: str | None = None
+
+
 class ProfileOut(ProfileData):
     raw_imports: list[ImportTrace] = []
     updated_at: datetime | None = None
     version: int = 1
+    criteria: list[CriterionDef] = []  # barème de la variante de notation en cours
 
 
 DATA_FIELDS = tuple(ProfileData.model_fields)
@@ -255,7 +306,53 @@ def profile_out(profile: UserProfile) -> ProfileOut:
     out = ProfileOut.model_validate({**profile_data(profile).model_dump(), "raw_imports": profile.raw_imports or []})
     out.updated_at = profile.updated_at
     out.version = profile.version or 1
+    out.criteria = criteria_defs(profile_data(profile))
     return out
+
+
+def criterion_definition(data: "ProfileData", key: str) -> tuple[str | None, str]:
+    """(définition, source) d'un critère personnel : celle de l'utilisateur, sinon déduite de ses préférences."""
+    if text := data.scoring.definitions.get(key):
+        return text, "utilisateur"
+    p = data.preferences
+    if key == "stade" and p.company_stages:
+        return "Stades visés : " + ", ".join(p.company_stages), "preferences"
+    if key == "ia_concrete" and p.sectors:
+        return "Produit dans les secteurs visés : " + ", ".join(p.sectors), "preferences"
+    return None, "aucune"
+
+
+def criteria_labels(variant: str | None = None) -> dict[str, str]:
+    labels = {k: label for k, (label, _) in CRITERIA.items()}
+    if (variant or scoring_variant()) == "v2":
+        labels.update(CRITERIA_V2_LABELS)
+    return labels
+
+
+def criteria_defs(data: "ProfileData", variant: str | None = None) -> list[CriterionDef]:
+    variant = variant or scoring_variant()
+    out = []
+    for key, label in criteria_labels(variant).items():
+        if variant == "v2" and key in PERSONAL_CRITERIA:
+            definition, source = criterion_definition(data, key)
+            out.append(CriterionDef(key=key, label=label, personal=True, definition=definition, source=source,
+                                    hint=DEFINITION_HINTS[key]))
+        else:
+            out.append(CriterionDef(key=key, label=label))
+    return out
+
+
+def criteria_block(data: "ProfileData") -> str:
+    """Barème personnel envoyé au modèle (notation v2)."""
+    lines = ["Barème personnel (critères notés de 0 à 1, poids entre parenthèses) :"]
+    for c in criteria_defs(data, "v2"):
+        weight = data.scoring.weights.get(c.key, 0)
+        if c.personal:
+            meaning = c.definition or "non défini : note 0,5 pour toutes les offres"
+            lines.append(f"- {c.key} ({c.label}, poids {weight:g}) : {meaning}")
+        else:
+            lines.append(f"- {c.key} ({c.label}, poids {weight:g})")
+    return "\n".join(lines)
 
 
 def save_fields(profile: UserProfile, data: ProfileData, fields: set[str] | None = None) -> bool:
@@ -429,13 +526,15 @@ def apply_import(current: ProfileData, incoming: ProfileData, accept: set[str] |
 
 
 def profile_summary(user: User, data: ProfileData, job_labels: dict[int, str] | None = None,
-                    max_chars: int = 5000) -> str:
+                    max_chars: int = 5000, include_name: bool = True) -> str:
     """Résumé compact du profil (contexte du chat et de l'évaluation des offres).
 
     job_labels : {job_id: "Entreprise – Titre"} pour citer les offres d'exemple des règles.
+    include_name : False pour les traitements qui n'en ont pas besoin (notation, synthèse des règles) : le nom
+    n'est pas envoyé à Gemini (minimisation des données).
     """
     job_labels = job_labels or {}
-    lines = [f"Nom : {user.name or user.given_name or 'inconnu'}"]
+    lines = [f"Nom : {user.name or user.given_name or 'inconnu'}"] if include_name else []
     if data.headline:
         lines.append(f"Titre : {data.headline}")
     if data.positioning:
@@ -476,7 +575,8 @@ def profile_summary(user: User, data: ProfileData, job_labels: dict[int, str] | 
     for ref in data.reference_jobs[:8]:
         lines.append("Offre de référence (aimée) : " + _describe("reference_jobs", ref))
     weights = data.scoring.weights
-    lines.append("Barème : " + " · ".join(f"{CRITERIA[k][0]} /{w:g}" for k, w in weights.items())
+    labels = criteria_labels()
+    lines.append("Barème : " + " · ".join(f"{labels[k]} /{w:g}" for k, w in weights.items())
                  + f" ; seuil {data.scoring.threshold:g}")
     text = "\n".join(lines)
     return text if len(text) <= max_chars else text[: max_chars - 1] + "…"

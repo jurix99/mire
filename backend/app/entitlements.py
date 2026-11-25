@@ -1,7 +1,9 @@
 """Offres Free / Pro : le SEUL endroit qui décide du plan d'un utilisateur, de ses limites et de ce qu'il voit.
 
 - plan_of(db, user) : « free » ou « pro », calculé à partir de la table subscriptions (écrite par le webhook
-  Stripe, voir billing.py). Pas d'essai gratuit.
+  Stripe, voir billing.py), ou de l'ESSAI Pro : TRIAL_DAYS jours après la création du compte (défaut 0 = pas
+  d'essai), sans carte bancaire ; ensuite, retour au Free sans rien perdre (seuls les nouveaux usages au-delà des
+  limites Free sont bloqués).
 - PLAN_LIMITS : toutes les limites, à ajuster ici sans toucher au reste.
 - usage / check_quota : quotas calculés sur les tables existantes (pas de table de compteurs).
 - access_for : contexte de lecture (offres en clair, entreprises floutées) utilisé par services.job_out et
@@ -169,18 +171,40 @@ def _forced_pro(user: User) -> bool:
     return not billing_enabled() or bool(user.email and user.email.strip().lower() in pro_emails())
 
 
+def trial_days() -> int:
+    """Durée de l'essai Pro offert à la création du compte (TRIAL_DAYS, 0 = aucun essai)."""
+    try:
+        return max(0, int(os.environ.get("TRIAL_DAYS", "0") or 0))
+    except ValueError:
+        return 0
+
+
+def trial_until(user: User) -> datetime | None:
+    """Fin de l'essai Pro de l'utilisateur, s'il est EN COURS (None sinon)."""
+    days = trial_days()
+    created = aware(user.created_at)
+    if not days or created is None:
+        return None
+    end = created + timedelta(days=days)
+    return end if end > now() else None
+
+
 def plan_of(db: Session, user: User) -> str:
     if _forced_pro(user):
         return "pro"
     at = now()
-    return "pro" if any(grants_pro(s, at) for s in _subscriptions(db, user)) else "free"
+    if any(grants_pro(s, at) for s in _subscriptions(db, user)):
+        return "pro"
+    return "pro" if trial_until(user) else "free"
 
 
 def pro_until(db: Session, user: User) -> datetime | None:
-    """Date de fin la plus lointaine parmi les droits en cours (None si aucun, ou Pro « forcé »)."""
+    """Date de fin la plus lointaine parmi les droits en cours, essai compris (None si aucun, ou Pro « forcé »)."""
     at = now()
     ends = [aware(s.current_period_end) for s in _subscriptions(db, user)
             if grants_pro(s, at) and s.current_period_end is not None]
+    if trial := trial_until(user):
+        ends.append(trial)
     return max(ends) if ends else None
 
 
@@ -435,9 +459,14 @@ def billing_summary(db: Session, user: User) -> dict:
     current = max(granting, key=lambda s: aware(s.current_period_end) or at, default=None)
     locked_jobs, locked_fundings = locked_counts(db, user, plan)
     pro = PLAN_LIMITS["pro"]
+    # Essai : Pro seulement grâce à l'essai (aucun abonnement ni Pass en cours, Pro non « forcé »)
+    trial = trial_until(user) if plan == "pro" and not granting and not _forced_pro(user) else None
     return {
         "enabled": billing_enabled(),
         "plan": plan,
+        "trial": trial is not None,
+        "trial_until": trial,
+        "trial_days": trial_days(),
         "pro_until": pro_until(db, user),
         "cancel_at_period_end": bool(current and current.kind == "subscription" and current.cancel_at_period_end),
         "kind": current.kind if current else None,
