@@ -24,6 +24,8 @@ dev = [
 ]
 worker = [
     "fastembed>=0.7",
+    # PDF des candidatures (pdf.py) ; bibliothèques système (Pango, polices) installées dans l'image worker
+    "weasyprint>=66",
 ]
 
 [tool.pytest.ini_options]

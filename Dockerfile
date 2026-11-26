@@ -7,7 +7,8 @@
 #
 # api     API FastAPI + front (frontend/), sans modèle d'embeddings : légère, démarrage à froid rapide.
 #         Sert aussi au job mire-migrate (python -m app.jobs migrate).
-# worker  jobs mire-daily et mire-worker : fastembed + modèle multilingue téléchargé AU BUILD.
+# worker  jobs mire-daily et mire-worker : fastembed + modèle multilingue téléchargé AU BUILD ; WeasyPrint et
+#         Pango pour les PDF des candidatures (CV adapté, lettre).
 # agent   jobs mire-agent-* : agent de recherche (Claude Code non interactif, agent/run_agent.py), sans le
 #         backend : il ne parle à Mire que par l'API de l'agent (HTTPS + jeton).
 # linux/amd64 : seule architecture exécutée par Container Apps (profil Consumption).
@@ -34,6 +35,12 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --no-install-project
 
 FROM base AS worker-deps
+# PDF des candidatures (WeasyPrint, backend/app/pdf.py) : Pango + HarfBuzz (sous-ensembles de polices) et deux
+# familles de polices sans empattement (Liberation, DejaVu), sans les paquets recommandés
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
+       fonts-liberation fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev --group worker --no-install-project

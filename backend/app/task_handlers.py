@@ -11,7 +11,9 @@ classify_jobs  classement sur la liste fermée des offres en attente (CLASSIFY_M
 daily          enchaînement complet (comme `python -m app.jobs daily`)
 fetch_apply_form  formulaire de candidature d'une offre {job_id, force?, application_id?} (apply_forms.py, GET
                publics), puis prepare_application si application_id est donné
-prepare_application  candidature préparée {application_id} (application_prep.py) : réponses, CV adapté, lettre
+prepare_application  candidature préparée {application_id} (application_prep.py) : réponses, CV adapté, lettre,
+               puis leurs PDF
+render_application_files  PDF du CV et de la lettre {application_id} (pdf.py, WeasyPrint : image worker)
 """
 
 import logging
@@ -133,7 +135,21 @@ def prepare_application(db: Session, payload: dict) -> None:
     """Candidature préparée {application_id} : un appel Gemini (CV, lettre, questions), contrôle anti-invention."""
     from . import application_prep
 
-    application_prep.run(db, int(payload["application_id"]), get_llm())
+    draft = application_prep.run(db, int(payload["application_id"]), get_llm())
+    if draft is not None:
+        render_application_files(db, payload)
+
+
+@tasks.handler("render_application_files")
+def render_application_files(db: Session, payload: dict) -> None:
+    """PDF du CV et de la lettre {application_id} (après la préparation, ou une modification du texte)."""
+    from . import application_prep, pdf
+
+    app = application_prep.load_application(db, int(payload["application_id"]))
+    if app is None or app.draft is None:
+        return
+    pdf.store_files(db, app, app.draft)
+    db.commit()
 
 
 @tasks.handler("daily")
