@@ -156,6 +156,81 @@ function renderPrefs() {
   };
 }
 
+// --- Réponses types pour les candidatures -----------------------------------
+// Reprises telles quelles dans les formulaires préparés (page Candidature) ; une valeur absente laisse le champ « À toi ».
+
+const AUTH_LABEL = { oui: "Oui, sans visa", non: "Non, visa nécessaire" };
+
+function defaultRows(d) {
+  const salary = d.salary_min_keur || d.salary_max_keur
+    ? `${d.salary_min_keur ?? "?"}–${d.salary_max_keur ?? "?"} k€ brut / an` : "";
+  return [
+    ["Nom", [d.first_name, d.last_name].filter(Boolean).join(" ")],
+    ["Email de contact", d.email],
+    ["Téléphone", d.phone],
+    ["LinkedIn", d.linkedin_url],
+    ["GitHub", d.github_url],
+    ["Portfolio", d.portfolio_url],
+    ["Ville", d.city],
+    ["Travail en France / UE", AUTH_LABEL[d.work_authorization] ?? ""],
+    ["Disponibilité", [d.availability, d.available_from ? `dès le ${d.available_from}` : ""].filter(Boolean).join(", ")],
+    ["Salaire attendu", salary],
+    ["Mode de travail", WORK_MODE_LABEL[d.work_mode] ?? ""],
+    ["Langues", joinList(d.languages)],
+  ];
+}
+
+function editDefaults() {
+  const d = profile.preferences.application_defaults ?? {};
+  return openForm({
+    title: "Réponses types pour les candidatures",
+    values: { ...d, languages: joinList(d.languages) },
+    fields: [
+      { name: "first_name", label: "Prénom", maxlength: 200 },
+      { name: "last_name", label: "Nom", maxlength: 200 },
+      { name: "email", label: "Email de contact", type: "email", maxlength: 320 },
+      { name: "phone", label: "Téléphone", maxlength: 40, placeholder: "+33 6 12 34 56 78" },
+      { name: "linkedin_url", label: "LinkedIn", type: "url", maxlength: 300 },
+      { name: "github_url", label: "GitHub", type: "url", maxlength: 300 },
+      { name: "portfolio_url", label: "Portfolio / site", type: "url", maxlength: 300 },
+      { name: "city", label: "Ville", maxlength: 200, placeholder: "Paris" },
+      { name: "work_authorization", label: "Autorisé à travailler en France / UE", type: "select",
+        options: [["", "Non précisé"], ["oui", AUTH_LABEL.oui], ["non", AUTH_LABEL.non]] },
+      { name: "work_mode", label: "Mode de travail souhaité", type: "select", options: [["", "Non précisé"], ...WORK_MODES] },
+      { name: "availability", label: "Préavis / disponibilité", maxlength: 200, placeholder: "Préavis de 3 mois" },
+      { name: "available_from", label: "Disponible à partir du", type: "date" },
+      { name: "salary_min_keur", label: "Salaire attendu, bas (k€ brut / an)", type: "number", min: 0, max: 1000 },
+      { name: "salary_max_keur", label: "Salaire attendu, haut (k€ brut / an)", type: "number", min: 0, max: 1000 },
+      { name: "languages", label: "Langues", full: true, hint: "Séparées par des virgules", placeholder: "Français (natif), Anglais (courant)" },
+    ],
+    extra: html`<p class="small muted">Ces valeurs servent telles quelles dans les candidatures que vous préparez. Rien n'est envoyé
+      à un site : vous copiez-collez vous-même. Elles ne changent pas la notation des offres.</p>`,
+    onSubmit: async (v) => {
+      profile = await api("/profile/application-defaults", { method: "PUT", body: { ...v, languages: splitList(v.languages) } });
+      return profile;
+    },
+  }).then((r) => {
+    if (r) {
+      renderDefaults();
+      toast("Réponses types enregistrées");
+    }
+    return r;
+  });
+}
+
+function renderDefaults() {
+  const d = profile.preferences.application_defaults ?? {};
+  $("#apply-defaults").innerHTML = html`
+    ${head("// Candidatures", "Réponses types pour les candidatures", editBtn("edit-defaults", "Modifier les réponses types"))}
+    <p class="small muted">Reprises dans chaque candidature préparée (page Candidature). Un champ laissé vide reste « À toi » dans le formulaire.</p>
+    <div class="rows">${defaultRows(d).map(([k, v]) => html`
+      <div class="row-item"><span class="muted small" style="min-width:160px">${k}</span><span class="grow">${v || html`<span class="muted">—</span>`}</span></div>`)}
+    </div>`.s;
+  $("#apply-defaults").onclick = (e) => {
+    if (e.target.closest("[data-edit-defaults]")) editDefaults().catch(() => {});
+  };
+}
+
 // --- Compétences ------------------------------------------------------------
 
 function renderSkills() {
@@ -757,6 +832,7 @@ function renderProfile() {
   renderRules();
   renderList("experiences");
   renderList("education");
+  renderDefaults();
 }
 
 let firstRender = true;
@@ -803,6 +879,11 @@ async function render() {
   if (firstRender) {
     firstRender = false;
     handleCheckoutReturn();
+    // Lien « Compléter dans mon profil » de la page Candidature : bloc des réponses types, ouvert
+    if (location.hash === "#reponses-types") {
+      $("#reponses-types").scrollIntoView({ block: "start" });
+      editDefaults().catch(() => {});
+    }
   }
 }
 

@@ -29,8 +29,8 @@ from pydantic import BaseModel, ValidationError
 
 from .profile import (
     FIELD_LABELS,
-    Preferences,
     ProfileData,
+    SearchPreferences,
     _describe,
     _fill_empty,
     _item_key,
@@ -42,7 +42,7 @@ SCALAR_FIELDS = ("headline", "summary", "location", "years_experience", "positio
 PREF_LIST_FIELDS = ("roles", "locations", "work_modes", "company_stages", "clouds_preferred", "clouds_avoided",
                     "sectors")
 PREF_SCALAR_FIELDS = ("min_salary_keur", "travel")
-assert set(PREF_LIST_FIELDS) | set(PREF_SCALAR_FIELDS) == set(Preferences.model_fields)
+assert set(PREF_LIST_FIELDS) | set(PREF_SCALAR_FIELDS) == set(SearchPreferences.model_fields)  # hors réponses types
 PREF_LABELS = {
     "roles": "Rôles visés", "locations": "Lieux", "work_modes": "Mode de travail",
     "company_stages": "Stades d'entreprise", "clouds_preferred": "Clouds préférés",

@@ -22,6 +22,7 @@ from .entitlements import RequirePro
 from .llm import LLM, get_llm, require_llm
 from .models import ProfileImport, User
 from .profile import (
+    ApplicationDefaults,
     ProfileData,
     ProfileOut,
     ProfilePatch,
@@ -54,13 +55,34 @@ def read_profile(db: DB, user: Me) -> ProfileOut:
 
 @router.patch("")
 def update_profile(body: ProfilePatch, db: DB, user: Me) -> ProfileOut:
-    """Édition manuelle : les champs envoyés remplacent les valeurs actuelles."""
+    """Édition manuelle : les champs envoyés remplacent les valeurs actuelles.
+
+    preferences sans application_defaults (formulaire « Préférences ») : les réponses types sont conservées.
+    """
     profile = get_profile(db, user)
     fields = body.model_fields_set
-    data = profile_data(profile).model_copy(update={f: getattr(body, f) for f in fields})
-    if save_fields(profile, data, fields):
-        db.commit()
+    current = profile_data(profile)
+    if "preferences" in fields and "application_defaults" not in body.preferences.model_fields_set:
+        body.preferences = body.preferences.model_copy(
+            update={"application_defaults": current.preferences.application_defaults})
+    data = current.model_copy(update={f: getattr(body, f) for f in fields})
+    changed = save_fields(profile, data, fields)
+    db.commit()
+    if changed:
         tasks.profile_changed(db, user.id)  # profil modifié : nouvelle présélection et réévaluation
+    return profile_out(profile)
+
+
+@router.put("/application-defaults")
+def update_application_defaults(body: ApplicationDefaults, db: DB, user: Me) -> ProfileOut:
+    """Réponses types pour les candidatures (remplacées en entier). Ne change pas la version du profil : aucune
+    offre n'est réévaluée."""
+    profile = get_profile(db, user)
+    current = profile_data(profile)
+    data = current.model_copy(update={"preferences": current.preferences.model_copy(
+        update={"application_defaults": body})})
+    save_fields(profile, data, {"preferences"})
+    db.commit()
     return profile_out(profile)
 
 

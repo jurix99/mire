@@ -82,7 +82,34 @@ class Language(Model):
 WorkMode = Literal["remote", "hybride", "sur_site"]
 
 
-class Preferences(Model):
+Url = Annotated[str | None, Field(default=None, max_length=300), AfterValidator(_clean)]
+
+
+class ApplicationDefaults(Model):
+    """Réponses types pour les candidatures (Mon profil), reprises TELLES QUELLES dans les formulaires (origine
+    « Réponse type ») : jamais envoyées à Gemini, jamais déduites. Une valeur absente laisse le champ « À toi »."""
+
+    first_name: Short
+    last_name: Short
+    email: Annotated[str | None, Field(default=None, max_length=320), AfterValidator(_clean)]
+    phone: Annotated[str | None, Field(default=None, max_length=40), AfterValidator(_clean)]
+    linkedin_url: Url
+    github_url: Url
+    portfolio_url: Url
+    city: Short
+    # Autorisé à travailler en France / UE sans visa (oui : pas de parrainage nécessaire)
+    work_authorization: Literal["oui", "non"] | None = None
+    availability: Short = Field(default=None, description="Préavis ou disponibilité, ex. « Préavis de 3 mois »")
+    available_from: DateText = Field(default=None, description="Date de disponibilité, AAAA-MM-JJ")
+    salary_min_keur: Annotated[int | None, Field(default=None, ge=0, le=1000)] = None
+    salary_max_keur: Annotated[int | None, Field(default=None, ge=0, le=1000)] = None
+    work_mode: WorkMode | None = None
+    languages: StrList = Field(description="Ex. Français (natif), Anglais (courant)")
+
+
+class SearchPreferences(Model):
+    """Préférences de recherche (aussi le schéma d'extraction d'un import, sans les réponses types)."""
+
     roles: StrList = Field(description="Rôles visés")
     locations: StrList = Field(description="Lieux souhaités")
     work_modes: list[WorkMode] = Field(default_factory=list, description="remote, hybride, sur_site")
@@ -93,6 +120,11 @@ class Preferences(Model):
     sectors: StrList
     travel: Annotated[Literal["aucun", "occasionnel", "frequent"] | None,
                       Field(default=None, description="Tolérance aux déplacements")] = None
+
+
+class Preferences(SearchPreferences):
+    # Réponses types des candidatures : sans effet sur la notation (ne change pas la version du profil)
+    application_defaults: ApplicationDefaults = Field(default_factory=ApplicationDefaults)
 
 
 RuleKind = Literal["eviter", "preferer"]
@@ -211,6 +243,7 @@ class _ProfileFacts(Model):
 class FactualProfile(_ProfileFacts):
     """Schéma de sortie de l'EXTRACTION (import PDF / texte) : uniquement des faits."""
 
+    preferences: SearchPreferences = Field(default_factory=SearchPreferences)  # sans les réponses types
     rules: list[FactualRule] = Field(default_factory=list, max_length=50)
 
 
@@ -355,6 +388,14 @@ def criteria_block(data: "ProfileData") -> str:
     return "\n".join(lines)
 
 
+def _for_version(field: str, value: Any) -> Any:
+    """Valeur qui compte pour la version du profil : les réponses types des candidatures n'en font pas partie
+    (les changer ne réévalue aucune offre)."""
+    if field == "preferences" and isinstance(value, dict):
+        return {k: v for k, v in value.items() if k != "application_defaults"}
+    return value
+
+
 def save_fields(profile: UserProfile, data: ProfileData, fields: set[str] | None = None) -> bool:
     """Copie les champs de `data` dans le profil (nouvelles valeurs JSON : SQLAlchemy détecte le changement).
 
@@ -368,7 +409,7 @@ def save_fields(profile: UserProfile, data: ProfileData, fields: set[str] | None
     dumped = data.model_dump(mode="json")
     changed = False
     for f in fields if fields is not None else DATA_FIELDS:
-        if dumped[f] != current.get(f):
+        if _for_version(f, dumped[f]) != _for_version(f, current.get(f)):
             changed = True
         setattr(profile, f, dumped[f])
     if changed:
