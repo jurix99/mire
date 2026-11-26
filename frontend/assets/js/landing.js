@@ -1,6 +1,7 @@
 // Mire — landing publique : liens de connexion, état connecté, prix et logos (API publique), animations.
 // Page indépendante : n'importe pas app.js (qui redirige vers la connexion en cas de 401).
 
+import { initDemo } from "./landing-demo.js";
 import { planFeatures } from "./plans.js";
 
 document.documentElement.classList.add("js");
@@ -10,6 +11,8 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
 const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ESC[c]);
 const fmtInt = (n) => Number(n).toLocaleString("fr-FR");
+/** Lien externe affichable : http(s) seulement. */
+const safeUrl = (u) => typeof u === "string" && /^https?:\/\//i.test(u);
 /** Élément déjà visible à l'écran : affiché tout de suite, sans attendre l'IntersectionObserver. */
 const inView = (el) => { const r = el.getBoundingClientRect(); return r.top < innerHeight && r.bottom > 0; };
 
@@ -106,11 +109,18 @@ async function loadPublic() {
 
   // Bande de logos (entreprises déjà visibles en Free), dupliquée pour un défilement continu
   if (data.companies.length >= 4) {
-    const chip = (c) => `<span class="co" style="--h:${hue(c.name)}">
-        <img src="${esc(c.logo)}" alt="" loading="lazy" data-ini="${esc(initials(c.name))}">${esc(c.name)}
-        ${c.sector ? `<small>${esc(c.sector)}</small>` : ""}</span>`;
-    const html = data.companies.map(chip).join("");
-    $("#logo-track").innerHTML = html + html.replace(/<span class="co"/g, '<span class="co" aria-hidden="true"');
+    // Chaque logo mène au site de l'entreprise (nouvel onglet) ; sans site connu, simple étiquette
+    const chip = (c, copy) => {
+      const inner = `<img src="${esc(c.logo)}" alt="" loading="lazy" data-ini="${esc(initials(c.name))}">${esc(c.name)}
+        ${c.sector ? `<small>${esc(c.sector)}</small>` : ""}`;
+      const hidden = copy ? ' aria-hidden="true" tabindex="-1"' : "";
+      return safeUrl(c.website)
+        ? `<a class="co" style="--h:${hue(c.name)}" href="${esc(c.website)}" target="_blank" rel="noopener"
+             title="Site de ${esc(c.name)}"${hidden}>${inner}</a>`
+        : `<span class="co" style="--h:${hue(c.name)}"${copy ? ' aria-hidden="true"' : ""}>${inner}</span>`;
+    };
+    $("#logo-track").innerHTML = data.companies.map((c) => chip(c, false)).join("")
+      + data.companies.map((c) => chip(c, true)).join("");
     $("#logo-strip").hidden = false;
   }
 }
@@ -151,33 +161,133 @@ tick();
 setInterval(tick, 30_000);
 $("#year").textContent = new Date().getFullYear();
 
-// --- Baromètre : agrégats publics (aucun nom d'entreprise), masqué s'il n'y a pas assez de données ----------
+// --- Démo cliquable de l'app (données fictives) ------------------------------------------------------------
 
-const pct = (x) => `${Math.round(x * 100)} %`;
-const bars = (items) => items.map((i) => `<div class="baro-bar"><span>${esc(i.label)}</span>
-  <span class="track"><span class="fill" style="width:${Math.max(4, i.share * 100)}%"></span></span>
-  <span class="pct">${pct(i.share)}</span></div>`).join("");
+initDemo($("#demo-app"));
 
-async function loadBarometer() {
-  let b;
-  try {
-    const res = await fetch("/api/public/barometer", { headers: { Accept: "application/json" } });
-    if (!res.ok) return;
-    b = await res.json();
-  } catch {
-    return;
-  }
-  if (!b.top_skills.items.length) return;
-  $("#baro-scope").textContent = `${fmtInt(b.jobs)} offres de ${fmtInt(b.companies)} startups, ${b.period_days} derniers jours.`;
-  $("#baro-skills-head").textContent = b.top_skills.headline;
-  $("#baro-skills").innerHTML = bars(b.top_skills.items);
-  $("#baro-rising-head").textContent = b.rising.headline;
-  $("#baro-rising").innerHTML = b.rising.items.length
-    ? b.rising.items.map((i) => `<li><span>${esc(i.label)}</span><span class="up">▲ +${i.pp} pts</span></li>`).join("")
-    : `<li class="muted">Pas de hausse nette ce mois-ci</li>`;
-  $("#baro-domains-head").textContent = b.domains.headline;
-  $("#baro-domains").innerHTML = bars(b.domains.items);
-  $("#barometre").hidden = false;
+// --- Essai gratuit : lien LinkedIn -> 3 startups, sans compte (POST /api/public/trial) -------------------------
+
+const LINKEDIN_RE = /^(?:https?:\/\/)?(?:[a-z]{2,3}\.)?linkedin\.com\/in\/[A-Za-z0-9\-_%]{3,100}\/?(?:[?#].*)?$/i;
+const MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."];
+const fmtMonth = (iso) => { const [y, m] = iso.split("-"); return `${MONTHS[Number(m) - 1]} ${y}`; };
+const fmtMeur = (n) => `${Number(n).toLocaleString("fr-FR", { maximumFractionDigits: 1 })} M€`;
+const smooth = () => (matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth");
+
+const form = $("#trial-form");
+const urlInput = $("#trial-url");
+const field = urlInput.closest(".field");
+const errorEl = $("#trial-error");
+const submitBtn = $("#trial-submit");
+const results = $("#resultats");
+const loading = $("#results-loading");
+const list = $("#results-list");
+
+function showError(text) {
+  errorEl.textContent = text;
+  errorEl.hidden = !text;
 }
 
-loadBarometer();
+function funding(f) {
+  const parts = [f.stage, f.amount_meur ? fmtMeur(f.amount_meur) : null].filter(Boolean).join(" · ");
+  return [parts && `<span class="fund">${esc(parts)}</span>`,
+          f.announced_on && `<span class="tagc">levée en ${esc(fmtMonth(f.announced_on))}</span>`].filter(Boolean).join("");
+}
+
+function pickCard(c, i) {
+  const site = safeUrl(c.website);
+  const name = site ? `<a href="${esc(c.website)}" target="_blank" rel="noopener">${esc(c.name)} ↗</a>` : esc(c.name);
+  const tags = [c.sector, c.city, c.headcount && `${c.headcount} pers.`].filter(Boolean)
+    .map((t) => `<span class="tagc">${esc(t)}</span>`).join("");
+  const others = c.open_jobs > 1 ? ` et ${c.open_jobs - 1} autre${c.open_jobs > 2 ? "s" : ""}` : "";
+  return `<article class="pick" style="animation-delay:${i * 90}ms">
+      <div class="logo" style="--h:${hue(c.name)}"><img src="${esc(c.logo)}" alt="" data-ini="${esc(initials(c.name))}"></div>
+      <div>
+        <p class="rank">0${i + 1}</p>
+        <h3>${name}</h3>
+        <div class="meta">${funding(c.funding)}${tags}</div>
+        <p class="reason">${esc(c.reason)}</p>
+        ${c.job_title ? `<p class="job">Offre ouverte : <b>${esc(c.job_title)}</b>${others}</p>` : ""}
+      </div>
+      ${site ? `<a class="pill ghost visit" href="${esc(c.website)}" target="_blank" rel="noopener">Voir le site</a>` : ""}
+    </article>`;
+}
+
+let stepTimer;
+function animateLoading() {
+  const steps = $$("[data-step]", loading);
+  let k = 0;
+  steps.forEach((s) => (s.className = ""));
+  steps[0].className = "on";
+  clearInterval(stepTimer);
+  stepTimer = setInterval(() => {
+    if (k >= steps.length - 1) return clearInterval(stepTimer);
+    steps[k].className = "done";
+    steps[++k].className = "on";
+  }, 4000);
+}
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const url = urlInput.value.trim();
+  if (!LINKEDIN_RE.test(url)) {
+    field.classList.add("invalid");
+    showError("Collez l'adresse de votre profil LinkedIn, de la forme linkedin.com/in/votre-nom.");
+    urlInput.focus();
+    return;
+  }
+  field.classList.toggle("invalid", false);
+  showError("");
+  submitBtn.disabled = true;
+  submitBtn.textContent = "Recherche en cours…";
+  results.hidden = false;
+  loading.hidden = false;
+  list.innerHTML = "";
+  $("#results-cta").hidden = true;
+  $("#results-title").textContent = "On cherche pour vous…";
+  $("#results-sub").textContent = "";
+  animateLoading();
+  results.scrollIntoView({ behavior: smooth() });
+
+  try {
+    const res = await fetch("/api/public/trial", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ linkedin_url: url, wish: $("#trial-wish").value.trim() || null }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.detail?.code === "need_wish") {
+      // Profil public introuvable : pas de sélection au hasard, on demande une ligne
+      const wish = $(".wish");
+      wish.open = true;
+      throw Object.assign(new Error(data.detail.message), { focus: $("#trial-wish") });
+    }
+    if (!res.ok) {
+      throw new Error(typeof data.detail === "string" ? data.detail : "L'essai n'a pas pu aboutir, réessayez dans un instant.");
+    }
+    if (!data.companies?.length) {
+      $(".wish").open = true;
+      throw Object.assign(new Error("Aucune offre du radar n'est assez proche de votre profil pour l'instant. "
+        + "Précisez ce que vous cherchez (métier, niveau, ville) et relancez."), { focus: $("#trial-wish") });
+    }
+    const n = data.companies.length;
+    $("#results-title").innerHTML = `${n} startup${n > 1 ? "s" : ""} financée${n > 1 ? "s" : ""}<br>`
+      + `<span class="soft">qui recrute${n > 1 ? "nt" : ""} dans votre métier.</span>`;
+    $("#results-sub").textContent = data.profile_found
+      ? `Votre profil, tel que Mire l'a compris : ${data.profile_summary ?? ""}`
+      : "Votre profil public n'a pas été trouvé : la sélection repose sur ce que vous avez écrit. "
+        + "Précisez votre recherche pour l'affiner.";
+    list.innerHTML = data.companies.map(pickCard).join("");
+    $("#results-cta").hidden = false;
+  } catch (err) {
+    results.hidden = true;
+    showError(err.message || "L'essai n'a pas pu aboutir, réessayez dans un instant.");
+    form.scrollIntoView({ behavior: smooth(), block: "center" });
+    err.focus?.focus({ preventScroll: true });
+  } finally {
+    clearInterval(stepTimer);
+    loading.hidden = true;
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Voir mes 3 startups";
+  }
+});
+urlInput.addEventListener("input", () => field.classList.toggle("invalid", false));

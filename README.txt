@@ -33,6 +33,9 @@ Architecture
               - app/taxonomy.py     LISTE FERMÉE des catégories (familles de postes, compétences, secteurs)
               - app/classify.py     classement de chaque offre sur la liste (règles, puis Gemini à énumérations)
               - app/market.py       agrégats du marché (page Analytics, baromètre public) ; analytics_api.py
+              - app/trial.py        essai gratuit de la landing sans compte : lien LinkedIn -> 5 startups (Gemini +
+                                    recherche Google), liens gardés 12 mois (trial_leads) ; export admin
+                                    /api/admin/trial-leads?format=csv ; limites TRIAL_PER_IP, TRIAL_DAILY_CAP
               - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau) ; test_postgres.py
                                     (marqueur postgres) : seulement avec TEST_POSTGRES_URL
               - scripts/eval_reference.py  évaluation de référence avec le vrai Gemini (voir plus bas)

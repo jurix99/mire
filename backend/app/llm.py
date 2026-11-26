@@ -78,6 +78,10 @@ class LLM(Protocol):
 
     def synthesize_rules(self, contents: str) -> Any: ...  # -> rules_synthesis.RulesSynthesis
 
+    def find_public_profile(self, linkedin_url: str) -> str | None: ...  # essai gratuit (trial.py)
+
+    def select_trial_companies(self, instruction: str, contents: str, model_cls: type[BaseModel]) -> Any: ...
+
     def chat(
         self,
         system: str,
@@ -304,6 +308,30 @@ class GeminiClient:
                     f"<offres>\n{json.dumps(jobs, ensure_ascii=False)}\n</offres>")
         return self.structured(EVALUATE_INSTRUCTION, contents, EvaluationBatch, label="evaluate_jobs",
                                rounds=1, models=models or GEMINI_EVAL_MODELS)
+
+    # --- Essai gratuit de la landing (trial.py) ------------------------------------
+
+    def find_public_profile(self, linkedin_url: str) -> str | None:
+        """Profil public derrière un lien LinkedIn, via la recherche Google de Gemini (rien n'est lu sur LinkedIn).
+        None : introuvable ou erreur (l'essai continue avec ce que la personne a écrit)."""
+        from .trial import SEARCH_INSTRUCTION
+
+        t = self.types
+        try:
+            response = self._generate(
+                {}, contents=f"Profil LinkedIn : {linkedin_url}",
+                config=t.GenerateContentConfig(system_instruction=SEARCH_INSTRUCTION,
+                                               tools=[t.Tool(google_search=t.GoogleSearch())],
+                                               max_output_tokens=1_500),
+            )
+        except Exception as exc:
+            log.warning("Gemini find_public_profile: %s", exc)
+            return None
+        text = (response.text or "").strip()
+        return None if not text or "INTROUVABLE" in text.upper() else text[:2_000]
+
+    def select_trial_companies(self, instruction: str, contents: str, model_cls: type[BaseModel]):
+        return self.structured(instruction, contents, model_cls, label="select_trial_companies", rounds=1)
 
     # --- Chat avec appel de fonctions -----------------------------------------
 

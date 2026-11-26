@@ -43,6 +43,11 @@ def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
     purged = account.purge_inactive(db)
     if purged:
         log.info("Comptes inactifs supprimés : %s", purged, extra={"step": "purge", "count": purged})
+    from . import trial
+
+    purged_leads = trial.purge_old_leads(db)  # essais gratuits (liens LinkedIn) : 12 mois
+    if purged_leads:
+        log.info("Essais gratuits supprimés : %s", purged_leads, extra={"step": "purge", "count": purged_leads})
     run = collector.collect_all(db, fetch=fetch or ats.fetch_postings)
     log.info("%s", run.summary, extra={"step": "collect", "jobs_added": run.jobs_added, "jobs_closed": run.jobs_closed})
     embedded = embeddings.embed_pending_jobs(db, embedder)

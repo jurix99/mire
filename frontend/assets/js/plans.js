@@ -7,8 +7,8 @@ const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
 export function planFeatures(free = {}, pro = {}) {
   return {
     free: [
-      [true, `${plural(free.visible_jobs ?? 2, "offre")} en clair parmi les plus pertinentes pour vous`],
-      [false, "La plus pertinente, et toutes les autres offres"],
+      [true, `${plural(free.visible_jobs ?? 2, "offre")} bien notée${(free.visible_jobs ?? 2) > 1 ? "s" : ""} pour vous, visible${(free.visible_jobs ?? 2) > 1 ? "s" : ""} en entier`],
+      [false, "Votre meilleure offre et toutes les autres"],
       [true, `${plural(free.assessments_per_week ?? 20, "évaluation")} par semaine`],
       [true, `${free.active_processes ?? 10} process actifs`],
       [true, `${plural(free.imports_total ?? 1, "import")} de profil, ${plural(free.chat_per_month ?? 10, "message")} à l'assistant par mois`],

@@ -193,8 +193,8 @@ async function drawProBanner() {
   const n = b?.enabled && b.plan === "free" ? b.locked_jobs : 0;
   const visible = b?.limits?.visible_jobs;
   $("#pro-banner").innerHTML = n
-    ? proBar(`En Free, ${visible} offres en clair parmi les plus pertinentes pour vous : ${n} autre${n > 1 ? "s" : ""}, `
-      + `dont la plus pertinente, ${n > 1 ? "sont réservées" : "est réservée"} au Pro`).s
+    ? proBar(`En Free, vous voyez en entier ${visible} offres bien notées pour vous. ${n > 1 ? `Les ${n} autres` : "L'autre"}, `
+      + `dont votre meilleure offre, ${n > 1 ? "sont réservées" : "est réservée"} au Pro`).s
     : "";
 }
 

@@ -650,3 +650,23 @@ class MarketJob(Base):
     funding_stage: Mapped[str | None] = mapped_column(String(200))
     funding_announced_on: Mapped[date | None] = mapped_column(Date)
     investors: Mapped[str | None] = mapped_column(Text)
+
+
+class TrialLead(Base):
+    """Essai gratuit de la landing (trial.py) : un lien LinkedIn déposé sans compte, et les 5 startups proposées.
+
+    Sert aussi de liste de prospection (export admin) : la personne en est informée sous le formulaire.
+    ip_hash : empreinte salée de l'adresse IP (limite d'essais), jamais l'adresse elle-même.
+    """
+
+    __tablename__ = "trial_leads"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    linkedin_url: Mapped[str] = mapped_column(String(300))
+    linkedin_slug: Mapped[str] = mapped_column(String(120), index=True)
+    wish: Mapped[str | None] = mapped_column(String(300))  # « ce que vous cherchez », facultatif
+    profile_summary: Mapped[str | None] = mapped_column(Text)  # profil public retrouvé par Gemini (None : introuvable)
+    understood: Mapped[str | None] = mapped_column(String(300))  # une phrase : le profil tel que compris
+    results: Mapped[list | None] = mapped_column(JSONType)  # [{company_id, name, reason, …}]
+    ip_hash: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

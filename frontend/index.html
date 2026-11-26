@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Mire · Rejoignez l'avenir</title>
-  <meta name="description" content="Mire repère les startups françaises qui viennent de lever des fonds, lit leurs offres chaque matin et les note selon votre profil.">
+  <meta name="description" content="Collez votre lien LinkedIn : Mire vous montre tout de suite 3 startups françaises qui viennent de lever des fonds et qui recrutent des profils comme le vôtre.">
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/favicon.png" sizes="32x32">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -14,8 +14,8 @@
 <body class="landing">
   <div class="announce">
     <span class="mono">Paris</span>
-    <span>Les offres des startups financées, lues chaque matin</span>
-    <a href="#processus">Voir comment →</a>
+    <span>Les offres des startups qui viennent de lever des fonds, lues chaque matin</span>
+    <a href="#essai">Essayer avec mon LinkedIn →</a>
   </div>
 
   <header class="site-head" id="top">
@@ -25,15 +25,15 @@
         <span>Mire</span>
       </a>
       <nav class="head-nav" id="head-nav" aria-label="Sections">
-        <a href="#processus">Processus</a>
-        <a href="#fonctionnalites">Fonctionnalités</a>
-        <a href="#entreprises">Entreprises</a>
+        <a href="#essai">Essai gratuit</a>
+        <a href="#demo">Démo</a>
+        <a href="#comment">Comment ça marche</a>
         <a href="#tarifs">Tarifs</a>
         <a href="#faq">FAQ</a>
       </nav>
       <div class="head-cta">
         <a class="link" href="/auth/login" data-login data-guest>Se connecter</a>
-        <a class="pill dark" href="/auth/login" data-login data-guest>Commencer</a>
+        <a class="pill dark" href="#essai" data-guest>Essayer</a>
         <a class="pill dark" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
         <button type="button" class="menu-btn" aria-controls="head-nav" aria-expanded="false" aria-label="Menu">
           <span></span><span></span>
@@ -43,8 +43,8 @@
   </header>
 
   <main>
-    <!-- Hero -->
-    <section class="hero">
+    <!-- Hero + essai gratuit : un lien LinkedIn, 3 startups tout de suite, sans compte -->
+    <section class="hero" id="essai">
       <div class="glow" aria-hidden="true"></div>
       <div class="wrap hero-grid">
         <div class="hero-copy reveal">
@@ -52,42 +52,62 @@
           <h1>Rejoignez l'avenir.<br><span class="soft">Avant tout le monde.</span></h1>
           <p class="lead">Mire repère les startups françaises qui viennent de lever des fonds, lit leurs offres chaque
             matin et les note selon votre profil. Vous ne regardez plus que celles qui valent le coup.</p>
-          <div class="cta-row">
-            <a class="pill dark lg" href="/auth/login" data-login data-guest>
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13ZM7.12 20.45H3.56V9h3.56v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0Z"/></svg>
-              Se connecter avec LinkedIn
-            </a>
-            <a class="pill dark lg" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
-            <a class="pill ghost lg" href="#tarifs">Voir les tarifs</a>
-          </div>
-          <p class="mono note">Gratuit pour commencer · sans carte bancaire</p>
+          <a class="pill dark lg member-cta" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
         </div>
 
-        <!-- Aperçu de l'app (illustration) -->
-        <div class="mock reveal" aria-hidden="true">
-          <div class="mock-bar"><span></span><span></span><span></span><em class="mono">mire · postes</em></div>
-          <div class="mock-body">
-            <div class="mock-side">
-              <b>Mire</b>
-              <i class="on">Tableau de bord</i><i>Entreprises</i><i>Postes</i><i>Mes process</i><i>Mon profil</i>
-            </div>
-            <div class="mock-main">
-              <p class="mono tiny">// À traiter en priorité</p>
-              <div class="mock-row"><span class="lg-ico" style="--h:210">NO</span><div><b>Founding Backend Engineer</b><small>Nova Orbital · Paris · Série A</small></div><span class="score">9.1</span><span class="st st-a">À regarder</span></div>
-              <div class="mock-row"><span class="lg-ico" style="--h:150">HL</span><div><b>Platform Engineer</b><small>Halo Labs · Hybride · Seed</small></div><span class="score">8.6</span><span class="st st-n">Nouveau</span></div>
-              <div class="mock-row"><span class="lg-ico" style="--h:30">VR</span><div><b>MLOps Engineer</b><small>Vertex Rail · Remote · Série B</small></div><span class="score">8.2</span><span class="st st-p">Postulé</span></div>
-              <div class="mock-row dim"><span class="lg-ico" style="--h:300">QT</span><div><b>Senior Frontend Engineer</b><small>Quanta · Paris</small></div><span class="score low">5.4</span><span class="st st-x">Écartée (auto)</span></div>
-              <div class="mock-why"><span class="mono tiny">Pourquoi</span> Premier ingénieur backend, Python et Kubernetes, 70-85 k€, peu de déplacements.</div>
-            </div>
+        <form class="trial-card reveal" id="trial-form" novalidate>
+          <p class="mono tiny accent">Essai gratuit · sans compte</p>
+          <h2 class="trial-title">Collez votre LinkedIn.<br>Voyez 3 startups pour vous.</h2>
+          <p class="trial-sub">Des startups qui viennent de lever des fonds, qui recrutent des profils comme le vôtre,
+            et pourquoi elles vous correspondent. Résultat en 20 secondes.</p>
+          <label class="field">
+            <span class="sr-only">Adresse de votre profil LinkedIn</span>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.85 0-2.14 1.45-2.14 2.94v5.67H9.35V9h3.41v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.34 7.43a2.06 2.06 0 1 1 0-4.13 2.06 2.06 0 0 1 0 4.13ZM7.12 20.45H3.56V9h3.56v11.45ZM22.22 0H1.77C.79 0 0 .77 0 1.73v20.54C0 23.23.79 24 1.77 24h20.45c.98 0 1.78-.77 1.78-1.73V1.73C24 .77 23.2 0 22.22 0Z"/></svg>
+            <input id="trial-url" name="linkedin_url" type="url" inputmode="url" autocomplete="url" required
+                   placeholder="linkedin.com/in/votre-nom" maxlength="300">
+          </label>
+          <details class="wish">
+            <summary>Préciser ce que vous cherchez <span>(facultatif)</span></summary>
+            <input id="trial-wish" name="wish" type="text" maxlength="300"
+                   placeholder="Ex. backend senior, Python, Paris ou remote">
+          </details>
+          <button class="pill dark lg block" type="submit" id="trial-submit">Voir mes 3 startups</button>
+          <p class="trial-error" id="trial-error" role="alert" hidden></p>
+          <p class="trial-legal">Mire ne se connecte pas à votre compte : il lit seulement votre profil public. Votre
+            lien est gardé pour que l'équipe puisse vous écrire sur LinkedIn. <a href="/confidentialite#essai">En savoir plus</a></p>
+        </form>
+      </div>
+    </section>
+
+    <!-- Résultats de l'essai (remplis par landing.js) -->
+    <section class="section results" id="resultats" hidden aria-live="polite">
+      <div class="wrap">
+        <div class="section-intro reveal in">
+          <p class="mono label">// Vos startups</p>
+          <h2 id="results-title">On cherche pour vous…</h2>
+          <p class="lead" id="results-sub"></p>
+        </div>
+        <div class="loading" id="results-loading">
+          <p data-step="0">Lecture de votre profil public</p>
+          <p data-step="1">Croisement avec les startups qui viennent de lever</p>
+          <p data-step="2">Choix des offres vraiment proches de votre métier</p>
+        </div>
+        <div class="picks" id="results-list"></div>
+        <div class="results-cta" id="results-cta" hidden>
+          <div>
+            <h3>Ce n'est qu'un aperçu.</h3>
+            <p>Avec un compte, chaque offre de ces startups est notée sur 10 selon votre profil, chaque matin.</p>
           </div>
+          <a class="pill light lg" href="/auth/login" data-login data-guest>Créer mon compte avec LinkedIn</a>
+          <a class="pill light lg" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
         </div>
       </div>
     </section>
 
-    <!-- Logos -->
+    <!-- Logos : cliquables, vers le site de chaque entreprise -->
     <section class="logos" id="entreprises">
       <div class="wrap">
-        <p class="mono label center">// Elles recrutent dans le radar</p>
+        <p class="mono label center">// Elles recrutent dans le radar · cliquez pour voir leur site</p>
         <div class="marquee" id="logo-strip" hidden><div class="track" id="logo-track"></div></div>
         <div class="stats" id="stats">
           <div><strong data-stat="companies">—</strong><span>startups financées suivies</span></div>
@@ -97,124 +117,83 @@
       </div>
     </section>
 
-    <!-- Processus -->
-    <section class="section" id="processus">
+    <!-- Démo cliquable de l'app (données fictives) -->
+    <section class="section" id="demo">
+      <div class="wrap">
+        <div class="section-intro center reveal">
+          <p class="mono label">// Démo</p>
+          <h2>Explorez Mire.<br><span class="soft">Cliquez partout, rien à installer.</span></h2>
+        </div>
+        <div class="app reveal" id="demo-app">
+          <div class="app-bar">
+            <span></span><span></span><span></span>
+            <em class="mono" id="demo-path">mire · tableau de bord</em>
+            <b class="hint">Démo interactive</b>
+          </div>
+          <div class="app-body">
+            <nav class="app-side" aria-label="Démo : pages">
+              <b>Mire</b>
+              <button type="button" data-view="dashboard" aria-pressed="true">Tableau de bord</button>
+              <button type="button" data-view="jobs">Postes</button>
+              <button type="button" data-view="analytics">Analytics <span class="new">Nouveau</span></button>
+              <button type="button" data-view="companies">Entreprises</button>
+              <button type="button" data-view="process">Mes process</button>
+              <button type="button" data-view="chat">Assistant</button>
+            </nav>
+            <div class="app-main" id="demo-main"></div>
+          </div>
+          <div class="toast" id="demo-toast" role="status" hidden></div>
+        </div>
+        <p class="mono note center">Données fictives · l'app réelle se remplit avec votre profil</p>
+      </div>
+    </section>
+
+    <!-- Comment ça marche : un seul parcours, de votre profil à l'offre -->
+    <section class="section" id="comment">
       <div class="wrap">
         <div class="section-intro reveal">
-          <p class="mono label">// Processus</p>
-          <h2>Quatre étapes, toutes automatiques.<br><span class="soft">Vous gardez la dernière décision.</span></h2>
+          <p class="mono label">// Comment ça marche</p>
+          <h2>Mire fait le tri.<br><span class="soft">Vous choisissez où postuler.</span></h2>
         </div>
         <ol class="steps">
           <li class="step reveal">
             <span class="mono num">01</span>
-            <div><h3>Découverte</h3>
-              <p>Chaque lundi, un agent repère les startups françaises qui viennent de lever des fonds, de l'amorçage
-                à la Série C, et retrouve leur page carrières.</p></div>
-            <div class="step-art"><span class="chip">Seed · 4 M€</span><span class="chip">Série A · 12 M€</span><span class="chip">Série B · 30 M€</span></div>
+            <div><p class="who">Vous, une fois</p><h3>Votre profil</h3>
+              <p>Importez votre export LinkedIn, un CV en PDF ou un simple texte. Mire vous propose chaque élément, vous
+                cochez ce que vous gardez, puis vous fixez vos règles : salaire, lieu, télétravail, ce que vous refusez.</p></div>
+            <div class="step-art"><span class="chip">Export LinkedIn</span><span class="chip">CV PDF</span><span class="chip">« Pas de stage »</span><span class="chip">70-85 k€</span></div>
           </li>
           <li class="step reveal">
             <span class="mono num">02</span>
-            <div><h3>Collecte</h3>
-              <p>Chaque matin, Mire lit les offres directement dans leurs outils de recrutement, description comprise,
-                et ferme celles qui ont disparu.</p></div>
-            <div class="step-art"><span class="chip">Ashby</span><span class="chip">Lever</span><span class="chip">Greenhouse</span><span class="chip">Recruitee</span><span class="chip">Teamtailor</span></div>
+            <div><p class="who">Mire, chaque lundi</p><h3>Les startups qui viennent de lever</h3>
+              <p>Un agent repère les startups françaises financées, de l'amorçage à la Série C, et note pour chacune le
+                tour, le montant, l'effectif et la page carrières.</p></div>
+            <div class="step-art"><span class="chip">Seed · 4 M€</span><span class="chip">Série A · 12 M€</span><span class="chip">Série B · 30 M€</span></div>
           </li>
           <li class="step reveal">
             <span class="mono num">03</span>
-            <div><h3>Pertinence</h3>
-              <p>Un premier tri écarte les stages, les métiers hors cible et les lieux à l'étranger. L'IA note ensuite
-                chaque offre sur 10, avec votre barème et vos règles.</p></div>
-            <div class="step-art bars">
-              <span><i style="width:90%"></i>Compétences</span><span><i style="width:75%"></i>Stade</span><span><i style="width:60%"></i>Ownership</span>
-            </div>
+            <div><p class="who">Mire, chaque matin</p><h3>Leurs offres, vérifiées</h3>
+              <p>Les offres sont lues directement dans leurs outils de recrutement, description comprise. Une offre
+                retirée est marquée fermée : vous ne postulez plus dans le vide.</p></div>
+            <div class="step-art"><span class="chip">Ashby</span><span class="chip">Lever</span><span class="chip">Greenhouse</span><span class="chip">Recruitee</span><span class="chip">Teamtailor</span></div>
           </li>
           <li class="step reveal">
             <span class="mono num">04</span>
-            <div><h3>Suivi</h3>
-              <p>Vous postulez, relancez, passez les entretiens. Chaque process garde son historique et sa prochaine
-                étape, jusqu'à l'offre.</p></div>
+            <div><p class="who">Mire, puis vous</p><h3>Une note sur 10, qui apprend</h3>
+              <p>Chaque offre reçoit une note selon votre barème, avec la raison en une phrase. Vos « J'aime » et
+                « Pas intéressé » font émerger de nouvelles règles, que vous validez une par une.</p></div>
+            <div class="step-art bars">
+              <span><i style="width:90%"></i>Compétences · 2,7 / 3</span><span><i style="width:70%"></i>Stade · 1,4 / 2</span><span><i style="width:95%"></i>Ownership · 1,9 / 2</span>
+            </div>
+          </li>
+          <li class="step reveal">
+            <span class="mono num">05</span>
+            <div><p class="who">Vous, jusqu'à l'offre</p><h3>Le suivi de vos candidatures</h3>
+              <p>Postulé, relance, entretien, offre : chaque process garde son historique et sa prochaine étape.
+                L'assistant répond à vos questions sur le radar et sur vos process.</p></div>
             <div class="step-art"><span class="st st-p">Postulé</span><span class="st st-r">Relance</span><span class="st st-e">Entretien</span><span class="st st-o">Offre</span></div>
           </li>
         </ol>
-      </div>
-    </section>
-
-    <!-- Fonctionnalités -->
-    <section class="section" id="fonctionnalites">
-      <div class="wrap">
-        <div class="section-intro reveal">
-          <p class="mono label">// Fonctionnalités</p>
-          <h2>Un radar qui apprend<br><span class="soft">ce que vous cherchez vraiment.</span></h2>
-        </div>
-        <div class="bento">
-          <article class="tile wide reveal">
-            <p class="mono tiny">Notation</p>
-            <h3>Une note sur 10, avec votre barème</h3>
-            <p>Compétences, stade de l'entreprise, ownership, IA concrète, expérience demandée : vous choisissez le poids
-              de chaque critère et le seuil en dessous duquel une offre est écartée.</p>
-            <div class="crit"><span>Compétences</span><i style="--w:88%"></i><b>2,6 / 3</b></div>
-            <div class="crit"><span>Stade</span><i style="--w:70%"></i><b>1,4 / 2</b></div>
-            <div class="crit"><span>Ownership</span><i style="--w:95%"></i><b>1,9 / 2</b></div>
-          </article>
-          <article class="tile reveal">
-            <p class="mono tiny">Profil</p>
-            <h3>Importé depuis LinkedIn</h3>
-            <p>Export de données LinkedIn, PDF ou texte collé. Chaque élément vous est proposé, vous cochez ce que vous
-              gardez.</p>
-          </article>
-          <article class="tile reveal">
-            <p class="mono tiny">Retours</p>
-            <h3>Des règles qui s'affinent</h3>
-            <p>« J'aime », « Pas intéressé » : après quelques retours, Mire propose de nouvelles règles, que vous validez
-              une par une.</p>
-            <div class="fb"><span>♥ J'aime</span><span>Pas intéressé</span></div>
-          </article>
-          <article class="tile reveal">
-            <p class="mono tiny">Assistant</p>
-            <h3>Posez vos questions</h3>
-            <div class="bubble me">Quels postes regarder en priorité ?</div>
-            <div class="bubble">Trois offres dépassent 8,5. La première est un poste de premier ingénieur backend…</div>
-          </article>
-          <article class="tile reveal">
-            <p class="mono tiny">Levées de fonds</p>
-            <h3>Le contexte de chaque startup</h3>
-            <p>Tour, montant, investisseurs, effectif et outil de recrutement, mis à jour par l'agent.</p>
-          </article>
-          <article class="tile dark reveal">
-            <p class="mono tiny">Fiabilité</p>
-            <h3>Des offres vérifiées ouvertes</h3>
-            <p>Une offre retirée de la page carrières est marquée fermée. Vous ne postulez plus dans le vide.</p>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- Baromètre : ce que recrutent les startups financées (agrégats publics, sans nom d'entreprise) -->
-    <section class="section" id="barometre" hidden>
-      <div class="wrap">
-        <div class="section-intro reveal">
-          <p class="mono label">// Baromètre Mire</p>
-          <h2>Ce que recrutent les startups financées.<br><span class="soft" id="baro-scope">Ce mois-ci.</span></h2>
-        </div>
-        <div class="baro">
-          <article class="tile reveal">
-            <p class="mono tiny">Compétences les plus demandées</p>
-            <h3 id="baro-skills-head"></h3>
-            <div class="baro-bars" id="baro-skills"></div>
-          </article>
-          <article class="tile reveal">
-            <p class="mono tiny">En hausse sur 30 jours</p>
-            <h3 id="baro-rising-head"></h3>
-            <ul class="baro-rising" id="baro-rising"></ul>
-          </article>
-          <article class="tile dark reveal">
-            <p class="mono tiny">Postes par domaine</p>
-            <h3 id="baro-domains-head"></h3>
-            <div class="baro-bars" id="baro-domains"></div>
-          </article>
-        </div>
-        <p class="mono note">Part des startups qui recrutent avec chaque compétence exigée, sur les offres vues par Mire.
-          Startups françaises financées, pas tout le marché.</p>
       </div>
     </section>
 
@@ -229,7 +208,7 @@
           <article class="plan reveal">
             <p class="mono tiny">Free</p>
             <p class="price">0 €</p>
-            <p class="muted">Pour découvrir le radar : 2 offres en clair, choisies pour vous.</p>
+            <p class="muted">Pour essayer le radar avec votre profil.</p>
             <ul id="free-features"></ul>
             <a class="pill ghost block" href="/auth/login" data-login data-guest>Commencer gratuitement</a>
             <a class="pill ghost block" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
@@ -257,19 +236,24 @@
           <details class="reveal"><summary><span class="mono">01</span>Qu'est-ce que Mire ?</summary>
             <p>Un radar d'offres d'emploi dans les startups qui viennent de lever des fonds, centré sur Paris. Il trouve
               les entreprises, lit leurs offres et les trie selon votre profil, puis vous aide à suivre vos candidatures.</p></details>
-          <details class="reveal"><summary><span class="mono">02</span>D'où viennent les offres ?</summary>
+          <details class="reveal"><summary><span class="mono">02</span>Que fait l'essai avec mon lien LinkedIn ?</summary>
+            <p>Mire cherche votre profil public sur le web (poste, métier, compétences), sans se connecter à votre
+              compte, puis choisit jusqu'à 3 startups du radar qui ont une offre ouverte dans votre métier. Le lien est gardé pour
+              que l'équipe puisse vous écrire ; vous pouvez demander sa suppression à tout moment.</p></details>
+          <details class="reveal"><summary><span class="mono">03</span>D'où viennent les offres ?</summary>
             <p>Directement des pages carrières des startups (Ashby, Lever, Greenhouse, Recruitee, Teamtailor…), lues
               chaque matin. Une offre qui disparaît est marquée fermée.</p></details>
-          <details class="reveal"><summary><span class="mono">03</span>Comment les offres sont-elles notées ?</summary>
+          <details class="reveal"><summary><span class="mono">04</span>Comment les offres sont-elles notées ?</summary>
             <p>Un premier tri sans IA écarte ce qui ne vous correspond clairement pas. Gemini note ensuite le reste
               critère par critère ; la note finale est calculée avec votre barème. Vous pouvez toujours la corriger.</p></details>
-          <details class="reveal"><summary><span class="mono">04</span>Que lit Mire de mon compte LinkedIn ?</summary>
+          <details class="reveal"><summary><span class="mono">05</span>Que lit Mire de mon compte LinkedIn ?</summary>
             <p>La connexion LinkedIn ne donne que votre nom, votre e-mail, votre photo et votre langue. Votre parcours
               n'est importé que si vous déposez vous-même un export, un PDF ou un texte.</p></details>
-          <details class="reveal"><summary><span class="mono">05</span>Quelle différence entre Free et Pro ?</summary>
-            <p>En Free, les offres récentes, les levées de fonds et la plupart des notes de l'IA sont floutées. Le Pro
-              donne le radar complet et à jour, et lève les limites de l'assistant, des process et des imports.</p></details>
-          <details class="reveal"><summary><span class="mono">06</span>Comment résilier ?</summary>
+          <details class="reveal"><summary><span class="mono">06</span>Quelle différence entre Free et Pro ?</summary>
+            <p>En Free, vous voyez en entier deux offres bien notées pour vous ; les autres offres, les levées de fonds
+              et la plupart des notes sont floutées. Le Pro donne le radar complet et à jour, et lève les limites de
+              l'assistant, des process et des imports.</p></details>
+          <details class="reveal"><summary><span class="mono">07</span>Comment résilier ?</summary>
             <p>Depuis « Mon profil », en un clic : l'abonnement reste actif jusqu'à la fin de la période payée. Le Pass
               3 mois ne se renouvelle jamais tout seul.</p></details>
         </div>
@@ -283,7 +267,8 @@
         <p class="mono label center">// Prêt ?</p>
         <h2 class="center">Rejoignez l'avenir.</h2>
         <div class="cta-row center">
-          <a class="pill dark lg" href="/auth/login" data-login data-guest>Se connecter avec LinkedIn</a>
+          <a class="pill dark lg" href="#essai" data-guest>Voir mes 3 startups</a>
+          <a class="pill ghost lg" href="/auth/login" data-login data-guest>Se connecter avec LinkedIn</a>
           <a class="pill dark lg" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
         </div>
       </div>
@@ -297,7 +282,7 @@
         <p class="mono tiny" id="clock">Paris</p>
       </div>
       <nav aria-label="Produit"><p class="mono tiny">Produit</p>
-        <a href="#processus">Processus</a><a href="#fonctionnalites">Fonctionnalités</a><a href="#tarifs">Tarifs</a></nav>
+        <a href="#essai">Essai gratuit</a><a href="#demo">Démo</a><a href="#comment">Comment ça marche</a><a href="#tarifs">Tarifs</a></nav>
       <nav aria-label="Compte"><p class="mono tiny">Compte</p>
         <a href="/auth/login" data-login>Se connecter</a><a href="/tableau-de-bord">Tableau de bord</a><a href="#faq">FAQ</a></nav>
     </div>

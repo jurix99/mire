@@ -1,173 +1,251 @@
 // Analytics : trois onglets (Marché, Toi face au marché, Mon suivi), onglet actif dans l'URL (?onglet=marche).
 // Marché et « Toi face au marché » lisent des agrégats précalculés (API /analytics/market, /analytics/me) ;
-// les indicateurs réservés au Pro arrivent sans aucune vraie valeur (aperçu factice, flouté ici).
+// les indicateurs réservés au Pro arrivent sans aucune vraie valeur (regroupés ici dans un encart « Pro »).
+//
+// Onglet Marché, en trois parties : « Qui recrute » (tous métiers), « Par métier » (un domaine à la fois : les
+// compétences de la tech ne se mélangent pas à celles de la vente), « Après la levée ». Chaque carte = une question
+// et UN graphique adapté (charts.js, linechart.js) : pas de phrase qui répète le graphique, le détail est dans
+// l'infobulle.
 import {
-  $, $$, STATUS_LABEL, api, boot, fmtDate, html, loadMe, lockedBlock, logo, proBar, renderValue,
+  $, $$, STATUS_LABEL, api, boot, fmtDate, html, loadMe, logo, proBar, renderValue,
 } from "./app.js";
+import { COLORS, SERIES, barChart, dumbbell, rangeChart, stackedBars } from "./charts.js";
+import { lineChart } from "./linechart.js";
 
 const TABS = ["marche", "moi", "suivi"];
-const SHOWN = 10; // éléments par liste avant « voir tout »
+// Domaines proposés dans « Par métier » (« Généraliste » n'a pas de compétences propres)
+const DOMAINS = [["tech", "Tech"], ["produit_design", "Produit et design"], ["gtm_ventes", "Ventes"],
+  ["gtm_marketing", "Marketing"], ["operations", "Opérations"]];
 const params = new URLSearchParams(location.search);
 const state = {
   tab: TABS.includes(params.get("onglet")) ? params.get("onglet") : "marche",
-  domain: params.get("domaine") ?? "",
-  family: params.get("famille") ?? "",
+  domain: DOMAINS.some(([k]) => k === params.get("domaine")) ? params.get("domaine") : "tech",
   period: params.get("periode") ?? "90j",
-  countBy: params.get("par") ?? "entreprise",
 };
 const loaded = new Set();
-let options = null;
-
-// --- Mise en forme ------------------------------------------------------------------------------------
+const byDomain = new Map(); // réponses « Par métier » déjà reçues (période courante)
 
 const pct = (x) => `${Math.round(x * 100)} %`;
-const unitWord = (n, by = state.countBy) => (by === "entreprise" ? `${n} entreprise${n > 1 ? "s" : ""}` : `${n} offre${n > 1 ? "s" : ""}`);
-const offers = (n) => `${n} offre${n > 1 ? "s" : ""}`;
-const lowNote = (item) => (item?.low_data ? html`<span class="low-note">peu de données</span>` : "");
+const plural = (n, word) => `${n} ${word}${n > 1 ? "s" : ""}`;
 
-/** Barre horizontale : libellé, pourcentage et effectif, toujours ensemble. */
-const bar = (label, share, count, { low = false, note = "" } = {}) => html`
-  <div class="mbar ${low ? "is-low" : ""}">
-    <span class="mbar-label">${label}</span>
-    <span class="mbar-track" aria-hidden="true"><span class="mbar-fill" style="width:${Math.max(2, Math.min(100, share * 100))}%"></span></span>
-    <span class="mbar-value">${pct(share)} <span class="muted">· ${count}</span>${note}</span>
-  </div>`;
+/** Carte : une question en titre, une ligne qui définit la mesure, le graphique (rempli ensuite par id). */
+const chartCard = (id, title, sub, { wide = false } = {}) => html`
+  <article class="card pad-lg mcard ${wide ? "wide" : ""}">
+    <div class="mcard-top"><h2 class="mcard-title">${title}</h2>${sub ? html`<p class="mcard-sub">${sub}</p>` : ""}</div>
+    <div id="${id}"></div>
+  </article>`;
 
-const shareBars = (items, by) => items.map((i) => bar(i.label, i.share, unitWord(i.units, by), { low: i.low_data, note: lowNote(i) }));
+/** Indicateurs réservés au Pro : un seul encart par partie, pas une carte floutée par indicateur. */
+const proCard = (titles) => (titles.length ? html`
+  <article class="card pad-lg mcard pro-teaser">
+    <h2 class="mcard-title">Avec le Pro</h2>
+    <ul>${titles.map((t) => html`<li>${t}</li>`)}</ul>
+    ${proBar("Toutes les analyses du marché, sur 6 mois")}
+  </article>` : "");
 
-/** Liste de 10 éléments au plus, avec « voir tout » pour la suite (déjà reçue). */
-function capped(id, items, render) {
-  if (!items.length) return html`<p class="small muted">Rien au-dessus du seuil de 5 offres.</p>`;
-  const head = items.slice(0, SHOWN);
-  const rest = items.slice(SHOWN);
-  return html`<div class="mlist">${head.map(render)}</div>
-    ${rest.length ? html`<details class="see-all"><summary>Voir tout (${items.length})</summary>
-      <div class="mlist">${rest.map(render)}</div></details>` : ""}`;
+const isOpen = (ind) => ind && !ind.locked;
+
+// --- Qui recrute (tous métiers) -------------------------------------------------------------------------------
+
+function renderWho(data, opts) {
+  const roles = data.indicators.roles;
+  const domainOf = Object.fromEntries(opts.families.map((f) => [f.key, f.domain]));
+  const domainLabel = Object.fromEntries(opts.domains.map((d) => [d.key, d.label]));
+  // Métiers regroupés par domaine (domaines dans l'ordre du nombre d'offres), offres publiées sur la période
+  const fams = (roles.families ?? []).filter((f) => domainOf[f.key]);
+  const totals = {};
+  for (const f of fams) totals[domainOf[f.key]] = (totals[domainOf[f.key]] ?? 0) + f.jobs;
+  fams.sort((a, b) => (totals[domainOf[b.key]] - totals[domainOf[a.key]]) || (b.jobs - a.jobs));
+  $("#m-who").innerHTML = html`
+    ${chartCard("ch-families", "Les métiers qui recrutent", "Offres publiées sur la période", { wide: true })}`.s;
+  barChart($("#ch-families"), {
+    items: fams.map((f) => ({
+      label: f.label, value: f.jobs, display: String(f.jobs), group: domainLabel[domainOf[f.key]],
+      tip: `${plural(f.jobs, "offre")} dans ${plural(f.units, "startup")}`,
+    })),
+  });
 }
 
-const card = (ind, body, { wide = false } = {}) => html`
-  <article class="card pad-lg mcard ${wide ? "wide" : ""}">
-    <p class="label">${ind.title}</p>
-    <h2 class="mcard-head">${ind.headline}</h2>
-    ${body}
-  </article>`;
+// --- Par métier (un domaine) ----------------------------------------------------------------------------------
 
-/** Indicateur réservé au Pro : bloc flouté d'un seul tenant (texte factice), nombre d'éléments cachés. */
-const lockedCard = (ind) => html`
-  <article class="card pad-lg mcard">
-    <p class="label">${ind.title}</p>
-    <h2 class="mcard-head">${ind.title}</h2>
-    ${lockedBlock(html`<div class="mlist">${(ind.preview ?? []).map((p, i) => bar(p.label.placeholder, 0.6 - i * 0.1, p.value.placeholder))}</div>`)}
-    <p class="small muted">${ind.hidden ? `${ind.hidden} élément${ind.hidden > 1 ? "s" : ""} réservé${ind.hidden > 1 ? "s" : ""} au Pro` : "Réservé au Pro"}</p>
-  </article>`;
+const ROLE_NOTE = { gtm_ventes: true, gtm_marketing: true }; // marchés visés : seulement ventes et marketing
+
+function renderDomain(data) {
+  const ind = data.indicators;
+  const cards = [];
+  const draws = [];
+  const locked = [];
+  const sk = ind.skills;
+  if (isOpen(sk) && sk.top?.length) {
+    cards.push(chartCard("ch-skills", "Les compétences exigées", "Part des startups du métier qui l'exigent"));
+    draws.push(() => barChart($("#ch-skills"), {
+      items: sk.top.slice(0, 10).map((i) => ({
+        label: i.label, value: i.share, display: pct(i.share),
+        tip: `${plural(i.units, "startup")} sur ${i.base} · ${plural(i.jobs, "offre")}${i.low_data ? " · peu de données" : ""}`,
+      })),
+      max: Math.max(...sk.top.map((i) => i.share)),
+    }));
+  }
+  const tl = ind.timeline;
+  if (isOpen(tl) && tl.months?.length >= 2 && tl.skills?.length) {
+    cards.push(chartCard("ch-timeline", "Leur évolution", "Part des startups du métier qui l'exigent, mois par mois"));
+    draws.push(() => {
+      const series = tl.skills.map((s) => ({ key: s.key, label: s.label, values: s.points.map((p) => p.share) }));
+      lineChart($("#ch-timeline"), { months: tl.months, series, selected: series.slice(0, 3).map((s) => s.key), unit: "startups" });
+    });
+  }
+  const tr = ind.trends;
+  if (isOpen(tr)) {
+    const items = [...tr.up, ...tr.down].sort((a, b) => b.pp - a.pp);
+    if (items.length) {
+      cards.push(chartCard("ch-trends", "Ce qui monte, ce qui baisse", "30 derniers jours face aux 90 jours d'avant"));
+      draws.push(() => dumbbell($("#ch-trends"), {
+        legend: ["90 jours d'avant", "30 derniers jours"],
+        items: items.map((i) => ({
+          label: i.label, before: i.share_before, after: i.share_recent,
+          display: `${i.pp > 0 ? "+" : "−"}${Math.abs(Math.round(i.pp))} pts`,
+          tip: `${pct(i.share_before)} → ${pct(i.share_recent)} des startups`,
+        })),
+      }));
+    }
+  } else if (tr) locked.push("Les compétences qui montent ou baissent");
+  const ro = ind.roles;
+  if (isOpen(ro) && ro.seniority_jobs?.length) {
+    cards.push(chartCard("ch-seniority", "Le niveau recherché", "Offres qui précisent la séniorité"));
+    draws.push(() => stackedBars($("#ch-seniority"), {
+      legend: ro.seniority_jobs.map((s, i) => ({ key: s.key, label: s.label, color: COLORS.ramp[i + 1] ?? COLORS.ramp[4] })),
+      rows: [{ parts: ro.seniority_jobs.map((s) => ({ key: s.key, value: s.share, tip: plural(s.jobs, "offre") })) }],
+    }));
+  }
+  const wm = ind.work_modes;
+  if (isOpen(wm) && wm.items?.length) {
+    const legend = [{ key: "remote", label: "Remote", color: SERIES[0] }, { key: "hybride", label: "Hybride", color: SERIES[1] },
+      { key: "sur_site", label: "Sur site", color: SERIES[2] }];
+    cards.push(chartCard("ch-workmodes", "Remote, hybride ou sur site", "Offres qui le précisent, par métier"));
+    draws.push(() => stackedBars($("#ch-workmodes"), {
+      legend,
+      rows: wm.items.slice(0, 6).map((i) => ({
+        label: i.label, parts: i.modes.map((m) => ({ key: m.key, value: m.share, tip: plural(m.jobs, "offre") })),
+      })),
+    }));
+  } else if (wm?.locked) locked.push("Remote, hybride ou sur site, par métier");
+  const sa = ind.salaries;
+  if (isOpen(sa) && sa.items?.length >= 2) { // une seule fourchette ne compare rien
+    cards.push(chartCard("ch-salaries", "Les salaires affichés", "Brut annuel : fourchette du milieu (25-75 %) et médiane"));
+    draws.push(() => rangeChart($("#ch-salaries"), {
+      unit: " k€",
+      rows: sa.items.map((i) => ({
+        label: i.kind === "ote" ? `${i.family_label} (OTE)` : i.family_label, q1: i.q1, med: i.median, q3: i.q3,
+        display: `${i.median} k€`,
+        tip: `${i.q1} – ${i.q3} k€ · ${plural(i.jobs, "offre")}${i.low_data ? " · peu de données" : ""}`,
+      })),
+    }));
+  } else if (sa?.locked) locked.push("Les salaires affichés, par métier");
+  const mk = ind.markets;
+  if (ROLE_NOTE[state.domain]) {
+    if (isOpen(mk) && mk.items?.length) {
+      cards.push(chartCard("ch-markets", "Les marchés visés", "Part des startups qui recrutent pour ce marché"));
+      draws.push(() => barChart($("#ch-markets"), {
+        items: mk.items.slice(0, 8).map((i) => ({
+          label: i.label, value: i.share, display: pct(i.share), tip: `${plural(i.units, "startup")} · ${plural(i.jobs, "offre")}`,
+        })),
+      }));
+    } else if (mk?.locked) locked.push("Les marchés visés");
+  }
+  $("#m-domain-cards").innerHTML = cards.length
+    ? html`${cards}${proCard(locked)}`.s
+    : html`<p class="small muted">Pas encore assez d'offres dans ce métier sur la période.</p>${proCard(locked)}`.s;
+  draws.forEach((draw) => draw());
+}
+
+// --- Après la levée (tous métiers) ----------------------------------------------------------------------------
+
+function renderFunding(data) {
+  const ind = data.indicators;
+  const cards = [];
+  const draws = [];
+  const locked = [];
+  const af = ind.after_funding;
+  const lt = ind.lifetimes;
+  if (isOpen(af) || isOpen(lt)) {
+    const tiles = [];
+    if (isOpen(af) && af.median_delay_days != null) {
+      tiles.push(html`<div class="stat"><p class="big-number">${af.median_delay_days} <span>jours</span></p>
+        <p class="small muted">entre la levée et la première offre (médiane, ${plural(af.companies, "startup")})</p></div>`);
+    }
+    if (isOpen(lt) && lt.median_days != null) {
+      tiles.push(html`<div class="stat"><p class="big-number">${lt.median_days} <span>jours</span></p>
+        <p class="small muted">en ligne avant d'être pourvue ou retirée (médiane, ${plural(lt.closed, "offre")})</p></div>`);
+    }
+    if (tiles.length) cards.push(html`<article class="card pad-lg mcard stats-card">${tiles}</article>`);
+  }
+  if (isOpen(af) && af.by_round?.length) {
+    cards.push(chartCard("ch-rounds", "Qui recrute-t-on selon le stade", "Répartition des offres après la levée"));
+    draws.push(() => stackedBars($("#ch-rounds"), {
+      legend: [{ key: "tech", label: "Tech", color: SERIES[0] }, { key: "gtm", label: "Ventes et marketing", color: SERIES[1] },
+        { key: "other", label: "Autres métiers", color: SERIES[2] }],
+      rows: af.by_round.map((r) => ({
+        label: r.label, parts: [
+          { key: "tech", value: r.tech_share, tip: plural(r.tech_jobs, "offre") },
+          { key: "gtm", value: r.gtm_share, tip: plural(r.gtm_jobs, "offre") },
+          { key: "other", value: Math.max(0, 1 - r.tech_share - r.gtm_share), tip: `${plural(r.companies, "startup")} au total` },
+        ],
+      })),
+    }));
+  } else if (af?.locked) locked.push("Le délai entre la levée et la première offre", "Qui recrute-t-on selon le stade");
+  if (lt?.locked) locked.push("La durée de vie d'une offre");
+  const inv = ind.investors;
+  if (isOpen(inv) && inv.items?.length) {
+    cards.push(chartCard("ch-investors", "Les fonds dont le portefeuille recrute", "Startups du portefeuille qui recrutent"));
+    draws.push(() => barChart($("#ch-investors"), {
+      items: inv.items.slice(0, 10).map((i) => ({
+        label: i.label, value: i.companies, display: String(i.companies), tip: `${plural(i.jobs, "offre")} ouvertes`,
+      })),
+    }));
+  } else if (inv?.locked) locked.push("Les fonds dont le portefeuille recrute");
+  $("#m-funding").innerHTML = html`${cards}${proCard(locked)}`.s;
+  draws.forEach((draw) => draw());
+}
 
 // --- Onglet Marché ------------------------------------------------------------------------------------
-
-const RENDER = {
-  skills: (d, by) => html`
-    ${capped("skills", d.top, (i) => shareBars([i], by)[0])}
-    ${d.by_family?.length ? html`<details class="see-all"><summary>Par famille de compétences</summary>
-      ${d.by_family.map((f) => html`<p class="small strong">${f.label}</p><div class="mlist">${shareBars(f.items.slice(0, SHOWN), by)}</div>`)}
-    </details>` : ""}`,
-  trends: (d) => {
-    const row = (i) => html`<div class="trend ${i.pp > 0 ? "up" : "down"}">
-      <span>${i.label}</span>
-      <span class="trend-pp">${i.pp > 0 ? "▲ +" : "▼ −"}${Math.abs(i.pp).toLocaleString("fr-FR")} pts</span>
-      <span class="small muted">${pct(i.share_before)} → ${pct(i.share_recent)}</span></div>`;
-    return html`<div class="trends">
-      <div><p class="small strong">En hausse</p>${d.up.length ? d.up.map(row) : html`<p class="small muted">Aucune hausse nette</p>`}</div>
-      <div><p class="small strong">En baisse</p>${d.down.length ? d.down.map(row) : html`<p class="small muted">Aucune baisse nette</p>`}</div>
-    </div>
-    <p class="small muted">30 derniers jours face aux 90 jours précédents (${unitWord(d.base_recent)} / ${unitWord(d.base_before)}).</p>`;
-  },
-  roles: (d, by) => html`
-    ${!state.domain && d.domains?.length ? html`<p class="small strong">Par domaine</p><div class="mlist">${shareBars(d.domains, by)}</div>` : ""}
-    <p class="small strong">Par famille</p>
-    ${capped("roles", d.families, (i) => shareBars([i], by)[0])}
-    ${d.seniority?.length ? html`<p class="small strong">Par séniorité</p><div class="mlist">${shareBars(d.seniority, by)}</div>` : ""}`,
-  stacks: (d) => html`<div class="mlist">${d.items.map((i) => html`
-    <div class="row-item"><div class="grow"><span class="title">${i.skills.join(" + ")}</span>
-      <span class="small muted"> · ${i.family_label}</span></div>
-      <span class="small">${pct(i.share)} <span class="muted">· ${offers(i.jobs)}</span></span>${lowNote(i)}</div>`)}</div>`,
-  salaries: (d) => html`${capped("salaries", d.items, (i) => html`
-    <div class="row-item ${i.low_data ? "is-low" : ""}">
-      <div class="grow"><span class="title">${i.family_label}</span>
-        <span class="small muted"> · ${i.seniority_label}</span> <span class="pill plain">${i.kind === "ote" ? "OTE" : "Fixe"}</span></div>
-      <span class="small"><strong>${i.median} k€</strong> <span class="muted">(${i.q1}–${i.q3}) · ${offers(i.jobs)}</span></span>${lowNote(i)}
-    </div>`)}
-    <p class="small muted">Médiane et écart interquartile du milieu de fourchette, brut annuel, sur ${offers(d.with_salary)} qui affichent un salaire.</p>`,
-  work_modes: (d) => html`${capped("work_modes", d.items, (i) => html`
-    <div class="wm-row ${i.low_data ? "is-low" : ""}">
-      <span class="mbar-label">${i.label}</span>
-      <span class="wm-stack" aria-label="${i.modes.map((m) => `${m.label} ${pct(m.share)}`).join(", ")}">
-        ${i.modes.map((m) => html`<span class="wm-${m.key}" style="width:${m.share * 100}%"></span>`)}</span>
-      <span class="mbar-value">${i.modes.map((m) => `${m.label[0]} ${pct(m.share)}`).join(" · ")} <span class="muted">· ${offers(i.jobs)}</span></span>
-    </div>`)}
-    <p class="small muted wm-legend"><span class="wm-remote"></span>Remote <span class="wm-hybride"></span>Hybride <span class="wm-sur_site"></span>Sur site</p>`,
-  after_funding: (d) => html`
-    ${d.median_delay_days != null ? html`<p class="big-number">${d.median_delay_days} <span>jours</span></p>
-      <p class="small muted">Délai médian entre l'annonce de la levée et la première offre, sur ${d.companies} startups${d.low_data ? " (peu de données)" : ""}.</p>` : ""}
-    ${d.by_round.length ? html`<p class="small strong">Tech et commercial selon le stade</p>${d.by_round.map((r) => html`
-      <div class="wm-row"><span class="mbar-label">${r.label}</span>
-        <span class="wm-stack"><span class="wm-remote" style="width:${r.tech_share * 100}%"></span><span class="wm-hybride" style="width:${r.gtm_share * 100}%"></span></span>
-        <span class="mbar-value">Tech ${pct(r.tech_share)} · Ventes et marketing ${pct(r.gtm_share)} <span class="muted">· ${offers(r.jobs)}</span></span></div>`)}` : ""}
-    ${d.first_families.length ? html`<p class="small strong">Familles ouvertes en premier</p><div class="mlist">${d.first_families.map((f) => html`
-      <div class="row-item"><span class="grow">${f.label}</span><span class="small muted">${f.companies} startups</span></div>`)}</div>` : ""}`,
-  lifetimes: (d) => html`${capped("lifetimes", d.items, (i) => html`
-    <div class="row-item ${i.low_data ? "is-low" : ""}"><span class="grow">${i.label}</span>
-      <span class="small"><strong>${i.median_days} j</strong> <span class="muted">· ${offers(i.jobs)} fermées</span></span>${lowNote(i)}</div>`)}`,
-  markets: (d, by) => capped("markets", d.items, (i) => shareBars([i], by)[0]),
-  investors: (d) => capped("investors", d.items, (i) => html`
-    <div class="row-item"><span class="grow">${i.label}</span>
-      <span class="small"><strong>${offers(i.jobs)}</strong> <span class="muted">ouvertes · ${i.companies} startups</span></span></div>`),
-};
-
-function drawFilters() {
-  const domains = [{ key: "", label: "Tous" }, ...options.domains];
-  $("#m-domains").innerHTML = html`${domains.map((d) => html`
-    <button type="button" class="chip" data-domain="${d.key}" aria-pressed="${state.domain === d.key}">${d.label}</button>`)}`.s;
-  const families = options.families.filter((f) => !state.domain || f.domain === state.domain);
-  if (state.family && !families.some((f) => f.key === state.family)) state.family = "";
-  $("#m-family").innerHTML = html`<option value="">Toutes les familles</option>${families.map((f) => html`
-    <option value="${f.key}" ${f.key === state.family ? "selected" : ""}>${f.label}</option>`)}`.s;
-  $("#m-period").innerHTML = html`${options.periods.map((p) => html`
-    <option value="${p.key}" ${p.key === state.period ? "selected" : ""}>${p.label}</option>`)}`.s;
-  $("#m-countby").innerHTML = html`${options.count_by.map((c) => html`
-    <button type="button" data-countby="${c.key}" aria-pressed="${state.countBy === c.key}">${c.label}</button>`)}`.s;
-}
 
 function syncUrl() {
   const url = new URL(location.href);
   url.searchParams.set("onglet", state.tab);
-  for (const [k, v] of [["domaine", state.domain], ["famille", state.family], ["periode", state.period], ["par", state.countBy]]) {
-    if (v && state.tab === "marche") url.searchParams.set(k, v);
+  for (const [k, v] of [["domaine", state.domain], ["periode", state.period]]) {
+    if (state.tab === "marche") url.searchParams.set(k, v);
     else url.searchParams.delete(k);
   }
+  for (const old of ["famille", "par"]) url.searchParams.delete(old);
   history.replaceState(null, "", url);
 }
 
-async function renderMarket() {
-  const q = new URLSearchParams({ period: state.period, count_by: state.countBy });
-  if (state.domain) q.set("domain", state.domain);
-  if (state.family) q.set("family", state.family);
-  const data = await api(`/analytics/market?${q}`);
-  options = data.options;
-  state.period = data.filters.period;
-  drawFilters();
+const marketQuery = (domain) => {
+  const q = new URLSearchParams({ period: state.period, count_by: "entreprise" });
+  if (domain) q.set("domain", domain);
+  return api(`/analytics/market?${q}`);
+};
+
+async function renderDomainTab() {
+  $$("#m-domains [data-domain]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.domain === state.domain)));
   syncUrl();
-  $("#m-perimeter").textContent = data.perimeter.text;
-  $("#m-pro").innerHTML = data.plan === "free"
-    ? proBar(`En Free : compétences et postes sur 90 jours (top 5) ; tendances, salaires, stacks, levées et fonds réservés au Pro`
-      + (data.period_locked ? " · période ramenée à 90 jours" : "")).s
-    : "";
-  const order = ["skills", "trends", "roles", "stacks", "salaries", "work_modes", "after_funding", "lifetimes", "markets", "investors"];
-  $("#m-cards").innerHTML = html`${order.map((key) => {
-    const ind = data.indicators[key];
-    if (!ind) return "";
-    if (ind.locked) return lockedCard(ind);
-    const hidden = ind.hidden ? html`<p class="small muted">${ind.hidden} de plus avec le Pro</p>` : "";
-    return card(ind, html`${RENDER[key](ind, data.filters.count_by)}${hidden}`, { wide: ["skills", "roles"].includes(key) });
-  })}`.s;
+  if (!byDomain.has(state.domain)) byDomain.set(state.domain, marketQuery(state.domain));
+  renderDomain(await byDomain.get(state.domain));
+}
+
+async function renderMarket() {
+  byDomain.clear();
+  const data = await marketQuery(null);
+  state.period = data.filters.period;
+  $("#m-period").innerHTML = html`${data.options.periods.map((p) => html`
+    <option value="${p.key}" ${p.key === state.period ? "selected" : ""}
+      ${data.allowed_periods && !data.allowed_periods.includes(p.key) ? "disabled" : ""}>${p.label}</option>`)}`.s;
+  $("#m-perimeter").textContent = `${plural(data.perimeter.jobs, "offre")} · ${plural(data.perimeter.companies, "startup")} financée${data.perimeter.companies > 1 ? "s" : ""}`;
+  $("#m-domains").innerHTML = html`${DOMAINS.map(([k, label]) => html`
+    <button type="button" data-domain="${k}" aria-pressed="${k === state.domain}">${label}</button>`)}`.s;
+  renderWho(data, data.options);
+  renderFunding(data);
+  await renderDomainTab();
 }
 
 async function renderHealth() {
@@ -196,36 +274,39 @@ async function renderHealth() {
 async function renderMe() {
   const d = await api("/analytics/me");
   if (d.locked) {
-    $("#me-pro").innerHTML = proBar("Vos écarts de compétences, votre couverture des offres et vos salaires : réservés au Pro").s;
     $("#me-scope").textContent = "";
-    $("#me-cards").innerHTML = html`${["missing", "coverage", "strengths", "salary"].map((k) => html`
-      <article class="card pad-lg mcard"><p class="label">${d[k].title}</p><h2 class="mcard-head">${d[k].headline}</h2>
-        ${lockedBlock(html`<div class="mlist">${(d[k].preview ?? []).map((p, i) => bar(p.label.placeholder, 0.55 - i * 0.1, p.value.placeholder))}</div>`)}
-      </article>`)}`.s;
+    $("#me-cards").innerHTML = proCard([d.missing.title, d.coverage.title, d.strengths.title, d.salary.title]).s;
     return;
   }
-  $("#me-pro").innerHTML = "";
   $("#me-scope").textContent = d.family_label
-    ? `Comparaison avec les offres « ${d.family_label} » des 90 derniers jours et avec vos offres bien notées.`
+    ? `Face aux offres « ${d.family_label} » des 90 derniers jours et à vos offres bien notées.`
     : "Indiquez les rôles visés dans votre profil pour vous comparer à votre famille de postes.";
   const s = d.salary.data;
-  $("#me-cards").innerHTML = html`
-    ${card(d.missing, d.missing.items.length
-      ? html`<div class="mlist">${d.missing.items.map((i) => bar(i.label, i.share, offers(i.jobs), { low: i.low_data, note: lowNote(i) }))}</div>
-        <p class="small muted">Sur vos ${offers(d.missing.base)} notées 7 et plus.</p>`
-      : html`<p class="small muted">Pas encore assez d'évaluations.</p>`)}
-    ${card(d.coverage, d.coverage.share != null
-      ? html`<p class="big-number">${pct(d.coverage.share)}</p><p class="small muted">${d.coverage.covered} offres sur ${d.coverage.base}${d.coverage.low_data ? " (peu de données)" : ""}.</p>`
-      : "")}
-    ${card(d.strengths, d.strengths.items.length
-      ? html`<div class="mlist">${d.strengths.items.map((i) => bar(i.label, i.share, offers(i.jobs), { low: i.low_data, note: lowNote(i) }))}</div>`
-      : "")}
-    ${card(d.salary, s ? html`
-      <p class="big-number">${s.median} <span>k€</span></p>
-      <p class="small muted">Écart interquartile ${s.q1}–${s.q3} k€ · ${offers(s.jobs)}${s.seniority_label ? ` · ${s.seniority_label.toLowerCase()}` : ""}${s.low_data ? " (peu de données)" : ""}.</p>
-      ${s.expected ? html`<p class="small">Vos attentes : ${s.expected} k€ minimum ·
-        ${s.share_meeting_expectation != null ? `${pct(s.share_meeting_expectation)} des fourchettes les atteignent` : ""}</p>`
-        : html`<p class="small muted">Renseignez votre salaire minimum dans votre profil pour vous situer.</p>`}` : "")}`.s;
+  const cards = [];
+  const draws = [];
+  if (d.missing.items.length) {
+    cards.push(chartCard("ch-missing", "Ce qui vous manque le plus souvent", "Part de vos offres notées 7 et plus qui l'exigent"));
+    draws.push(() => barChart($("#ch-missing"), { items: d.missing.items.map((i) => ({
+      label: i.label, value: i.share, display: pct(i.share), tip: plural(i.jobs, "offre") })) }));
+  }
+  if (d.strengths.items.length) {
+    cards.push(chartCard("ch-strengths", "Vos atouts recherchés", "Part des offres de votre famille qui les exigent"));
+    draws.push(() => barChart($("#ch-strengths"), { items: d.strengths.items.map((i) => ({
+      label: i.label, value: i.share, display: pct(i.share), tip: plural(i.jobs, "offre") })) }));
+  }
+  const tiles = [];
+  if (d.coverage.share != null) {
+    tiles.push(html`<div class="stat"><p class="big-number">${pct(d.coverage.share)}</p>
+      <p class="small muted">des offres de votre famille dont vous cochez l'essentiel (${d.coverage.covered} sur ${d.coverage.base})</p></div>`);
+  }
+  if (s) {
+    tiles.push(html`<div class="stat"><p class="big-number">${s.median} <span>k€</span></p>
+      <p class="small muted">salaire médian affiché dans votre famille (${s.q1}–${s.q3} k€)${s.expected && s.share_meeting_expectation != null
+        ? ` ; ${pct(s.share_meeting_expectation)} atteignent vos ${s.expected} k€` : ""}</p></div>`);
+  }
+  if (tiles.length) cards.push(html`<article class="card pad-lg mcard stats-card">${tiles}</article>`);
+  $("#me-cards").innerHTML = cards.length ? html`${cards}`.s : html`<p class="small muted">Pas encore assez d'évaluations.</p>`.s;
+  draws.forEach((draw) => draw());
 }
 
 // --- Onglet Mon suivi (inchangé) ----------------------------------------------------------------------
@@ -300,18 +381,11 @@ $(".tabs").addEventListener("keydown", (e) => {
   $(`#tabbtn-${next}`).focus();
 });
 $("#m-domains").addEventListener("click", (e) => {
-  const chip = e.target.closest("[data-domain]");
-  if (!chip) return;
-  state.domain = chip.dataset.domain;
-  renderMarket();
+  const b = e.target.closest("[data-domain]");
+  if (!b || b.dataset.domain === state.domain) return;
+  state.domain = b.dataset.domain;
+  renderDomainTab();
 });
-$("#m-family").addEventListener("change", (e) => { state.family = e.target.value; renderMarket(); });
 $("#m-period").addEventListener("change", (e) => { state.period = e.target.value; renderMarket(); });
-$("#m-countby").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-countby]");
-  if (!b) return;
-  state.countBy = b.dataset.countby;
-  renderMarket();
-});
 
 boot(() => show(state.tab));

@@ -31,6 +31,7 @@ class PublicCompany(BaseModel):
     id: int
     name: str
     sector: str | None
+    website: str | None  # la bande de logos renvoie vers le site de l'entreprise
     logo: str
 
 
@@ -47,7 +48,7 @@ def landing(db: DB) -> LandingOut:
     week_ago = datetime.now(UTC) - timedelta(days=7)
     public = public_company_ids(db)
     rows = db.execute(
-        select(Company.id, Company.name, Company.sector, func.count(Job.id))
+        select(Company.id, Company.name, Company.sector, Company.website, func.count(Job.id))
         .join(Job, Job.company_id == Company.id)
         .where(Company.id.in_(public or {-1}))
         .group_by(Company.id)
@@ -64,8 +65,9 @@ def landing(db: DB) -> LandingOut:
             "jobs_open": db.scalar(select(func.count(Job.id)).where(Job.closed_at.is_(None))) or 0,
             "jobs_week": db.scalar(select(func.count(Job.id)).where(Job.created_at >= week_ago)) or 0,
         },
-        companies=[PublicCompany(id=cid, name=name, sector=sector, logo=f"/api/public/logos/{cid}")
-                   for cid, name, sector, _ in rows],
+        companies=[PublicCompany(id=cid, name=name, sector=sector, logo=f"/api/public/logos/{cid}",
+                                 website=(site if "://" in site else f"https://{site}") if site else None)
+                   for cid, name, sector, site, _ in rows],
     )
 
 

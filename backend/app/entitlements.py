@@ -60,7 +60,7 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         # (nombre d'éléments cachés seulement) ; « Toi face au marché » réservé au Pro
         "market_periods": ["90j"],  # listes (pas de tuples) : identiques une fois passées en JSON (/api/me)
         "market_top": 5,
-        "market_open_indicators": ["skills", "roles"],
+        "market_open_indicators": ["skills", "roles", "timeline"],  # courbes : vitrine, ouvertes en Free
         "market_me": False,
     },
     "pro": {

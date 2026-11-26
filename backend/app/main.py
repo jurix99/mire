@@ -38,6 +38,7 @@ from .llm import get_llm
 from .net import TLS_CONTEXT
 from .profile_api import router as profile_router
 from .public_api import router as public_router
+from .trial import router as trial_router
 from .radar_api import router as radar_router
 from .seed import seed_catalog, seed_sources
 from .users import DEV_LOGIN_BYPASS, SEED_DEMO, normalize_locale, upsert_user
@@ -115,6 +116,7 @@ app.include_router(feedback_router)
 app.include_router(radar_router)
 app.include_router(agent_router)
 app.include_router(public_router)
+app.include_router(trial_router)  # /api/public/trial (essai gratuit sans compte), /api/admin/trial-leads
 app.include_router(billing_router)  # /api/billing/webhook : sans session (appelé par Stripe)
 app.include_router(account_router)  # /api/me/export, DELETE /api/me : droits RGPD
 app.include_router(analytics_router)  # /api/analytics/market, /api/analytics/me, /api/admin/taxonomy-health

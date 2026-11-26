@@ -166,6 +166,52 @@ def test_free_user_gets_no_real_value_of_pro_indicators(db, alice, bob, as_user,
     assert pro["indicators"]["salaries"]["items"][0]["median"] == 69
 
 
+def test_timeline_month_by_month(db):
+    """Courbes : un point par mois (mois vides compris), part du mois, petit mois signalé."""
+    today = date(2026, 11, 20)
+    c = [company(db, f"C{i}") for i in range(30)]
+    # Septembre : 20 entreprises, 5 exigent Python ; novembre : 25 entreprises, 15 exigent Python ; octobre : 2 offres
+    ago = lambda d: (today - d).days  # noqa: E731
+    ts = "typescript_javascript"
+    for i in range(20):
+        job(db, c[i], "backend", ["python"] if i < 5 else [ts], days_ago=ago(date(2026, 9, 10)))
+    for i in range(25):
+        job(db, c[i], "backend", ["python"] if i < 15 else [ts], days_ago=ago(date(2026, 11, 5)))
+    for i in range(2):
+        job(db, c[i], "sales", [], days_ago=ago(date(2026, 10, 3)))
+    for i in range(2):  # août : 2 entreprises, en tête d'historique -> retiré des courbes
+        job(db, c[i], "data", ["sql"], days_ago=ago(date(2026, 8, 5)))
+    market.refresh_facts(db)
+    tl = market.timeline(market.load_facts(db), "entreprise", today=today)
+    assert [m["key"] for m in tl["months"]] == ["2026-09", "2026-10", "2026-11"]
+    assert [m["low_data"] for m in tl["months"]] == [False, True, False]  # octobre : 2 entreprises seulement
+    python = next(s for s in tl["skills"] if s["key"] == "python")
+    assert [p["share"] for p in python["points"]] == [0.25, 0.0, 0.6]
+    # Classement sur toute la fenêtre : TypeScript touche 20 entreprises distinctes (C5-C24), Python 15
+    assert [s["key"] for s in tl["skills"]] == ["typescript_javascript", "python"]
+    assert tl["headline"] == "TypeScript / JavaScript : 40 % des entreprises en nov. 2026, contre 75 % en sept. 2026"
+    assert [v["jobs"] for v in tl["volume"]] == [20, 2, 25]
+    assert {s["key"] for s in tl["roles"]} == {"backend"}  # « sales » sous le seuil de 5 offres
+
+
+def test_domain_view_keeps_only_skills_of_that_domain(db):
+    """En Ventes, une compétence tech exigée par quelques postes (sales engineer) ne se classe pas."""
+    cs = [company(db, f"V{i}") for i in range(6)]
+    for c in cs:
+        job(db, c, "sales", ["crm", "api"])
+    out = overview(db, period="90j", domain="gtm_ventes")
+    keys = [i["key"] for i in out["indicators"]["skills"]["top"]]
+    assert "crm" in keys and "api" not in keys
+    assert "api" in [i["key"] for i in overview(db, period="90j")["indicators"]["skills"]["top"]]  # tous métiers
+
+
+def test_timeline_is_open_in_free_with_five_series(db, alice, bob, as_user, billing_on):
+    rich_radar(db)
+    free = as_user(bob).get("/api/analytics/market").json()
+    tl = free["indicators"]["timeline"]
+    assert tl["locked"] is False and len(tl["skills"]) <= 5 and len(tl["roles"]) <= 5
+
+
 def test_free_user_me_tab_is_a_generic_preview(db, alice, bob, as_user, billing_on):
     rich_radar(db)
     as_user(bob).patch("/api/profile", json={"skills": [{"name": "Python"}], "preferences": {"roles": ["Backend"]},

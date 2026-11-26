@@ -41,6 +41,7 @@ STACK_MIN_SUPPORT = 5  # une paire / un trio doit apparaître dans au moins 5 of
 TREND_RECENT_DAYS = 30
 TREND_BEFORE_DAYS = 90
 POST_FUNDING_WINDOW_DAYS = 365
+INVESTOR_MIN_COMPANIES = 2  # un fonds n'apparaît que si au moins 2 startups de son portefeuille recrutent
 ME_MIN_JOBS = 3  # « Toi face au marché » : sur tes offres, effectifs plus petits
 COVERAGE_THRESHOLD = 0.7
 STRENGTH_MIN_SHARE = 0.15
@@ -233,12 +234,21 @@ def _careful(item: dict | None, sentence: str) -> str:
 # --- Indicateurs de l'onglet Marché ------------------------------------------------------------------------------
 
 
+_SKILL_DOMAINS = {sid: domains for sid, _, _, domains, _ in tx.SKILLS}
+
+
+def counts_for(sid: str, domain: str | None) -> bool:
+    """Une compétence compte pour un domaine seulement si la liste fermée l'y rattache : en Ventes, « Conception
+    d'API » (exigée par quelques postes de sales engineer) ne se classe pas parmi les compétences commerciales."""
+    return domain is None or domain in _SKILL_DOMAINS.get(sid, ())
+
+
 def top_skills(facts: Facts, rows, count_by, limit=TOP, domain=None, family=None) -> dict:
     base = base_units(rows, count_by)
     groups: dict[str, list] = defaultdict(list)
     for r in rows:
         for sid, required in facts.skills.get(r.job_id, {}).items():
-            if required:
+            if required and counts_for(sid, domain):
                 groups[sid].append(r)
     # Classement général : les savoir-faire seulement. Langues exigées et type de clients (B2B, grands comptes…)
     # restent visibles dans leur famille, mais ne sont pas « la compétence la plus demandée »
@@ -273,7 +283,9 @@ def skill_trends(facts: Facts, count_by, domain=None, family=None, today=None) -
             jobs = Counter()
             for r in rs:
                 for sid, required in facts.skills.get(r.job_id, {}).items():
-                    if required:
+                    # Langues et type de clients : du contexte, pas des compétences qui « montent »
+                    if (required and tx.SKILL_FAMILY.get(sid) not in CONTEXT_SKILL_FAMILIES
+                            and counts_for(sid, domain)):
                         g[sid].add(unit(r, count_by))
                         jobs[sid] += 1
             return g, jobs
@@ -298,14 +310,21 @@ def skill_trends(facts: Facts, count_by, domain=None, family=None, today=None) -
 def roles(rows, count_by, limit=TOP, domain=None, family=None) -> dict:
     base = base_units(rows, count_by)
     by_domain, _ = ranked(_group(rows, lambda r: r.domain), tx.DOMAINS | {tx.OTHER: "Autre"}, base, count_by, None)
-    by_family, total = ranked(_group(rows, lambda r: r.role_family), tx.FAMILY_LABEL, base, count_by, limit)
+    # « autre » n'est pas une famille de postes : hors du classement
+    by_family, total = ranked(_group(rows, lambda r: r.role_family if r.role_family != tx.OTHER else None),
+                              tx.FAMILY_LABEL, base, count_by, limit)
     by_seniority, _ = ranked(_group(rows, lambda r: r.seniority_level or "inconnu"), tx.SENIORITY_LEVELS, base,
                              count_by, None)
+    # Séniorité en parts d'OFFRES (total 100 %, de junior à lead) : pour une barre segmentée. Non précisé à part.
+    known = [r for r in rows if r.seniority_level in tx.SENIORITY_LEVELS and r.seniority_level != "inconnu"]
+    counts = Counter(r.seniority_level for r in known)
+    seniority_jobs = [{"key": k, "label": label, "jobs": counts[k], "share": round(counts[k] / len(known), 3)}
+                      for k, label in tx.SENIORITY_LEVELS.items() if k != "inconnu"] if len(known) >= MIN_JOBS else []
     first = by_family[0] if by_family else None
     headline = (_careful(first, f"{first['label']} est la famille de postes la plus recherchée{_where(domain, None)}")
                 if first else "Pas encore assez d'offres par famille de postes")
     return {"headline": headline, "domains": by_domain, "families": by_family, "seniority": by_seniority,
-            "base": base, "total": total}
+            "seniority_jobs": seniority_jobs, "seniority_known": len(known), "base": base, "total": total}
 
 
 def _group(rows, key) -> dict[str, list]:
@@ -351,26 +370,26 @@ def stacks(facts: Facts, rows, count_by, family=None) -> dict:
 
 
 def salaries(rows, limit=TOP) -> dict:
+    # Par famille et type de rémunération (fixe / OTE), toutes séniorités : sinon les groupes sont trop petits
     groups = defaultdict(list)
     for r in rows:
-        if r.salary_min_keur and r.salary_max_keur and r.salary_kind in ("fixe", "ote"):
-            groups[(r.role_family, r.seniority_level or "inconnu", r.salary_kind)].append(
-                (r.salary_min_keur + r.salary_max_keur) / 2)
+        if (r.salary_min_keur and r.salary_max_keur and r.salary_kind in ("fixe", "ote")
+                and r.role_family and r.role_family != tx.OTHER):
+            groups[(r.role_family, r.salary_kind)].append((r.salary_min_keur + r.salary_max_keur) / 2)
     items = []
-    for (fam, sen, kind), values in groups.items():
+    for (fam, kind), values in groups.items():
         if len(values) < MIN_JOBS:
             continue
         q1, med, q3 = quartiles(values)
-        items.append({"family": fam, "family_label": tx.FAMILY_LABEL.get(fam, fam), "seniority": sen,
-                      "seniority_label": tx.SENIORITY_LEVELS.get(sen, sen), "kind": kind,
+        items.append({"family": fam, "family_label": tx.FAMILY_LABEL.get(fam, fam), "seniority": "toutes",
+                      "seniority_label": "Toutes séniorités", "kind": kind,
                       "kind_label": tx.SALARY_KINDS[kind], "median": round(med), "q1": round(q1), "q3": round(q3),
                       "jobs": len(values), "low_data": len(values) < LOW_DATA})
     items.sort(key=lambda i: (-i["jobs"], i["family_label"]))
     with_salary = sum(len(v) for v in groups.values())
     first = items[0] if items else None
     headline = (_careful(first, f"Salaire médian affiché : {first['median']} k€ "
-                                f"{'OTE ' if first['kind'] == 'ote' else ''}en {first['family_label'].lower()}"
-                                f"{'' if first['seniority'] == 'inconnu' else ' ' + first['seniority_label'].lower()}")
+                                f"{'OTE ' if first['kind'] == 'ote' else ''}en {first['family_label'].lower()}")
                 if first else "Trop peu d'offres affichent un salaire pour une médiane")
     return {"headline": headline, "items": items[:limit], "total": len(items), "with_salary": with_salary,
             "base": len(rows)}
@@ -378,7 +397,7 @@ def salaries(rows, limit=TOP) -> dict:
 
 def work_modes(rows, limit=TOP) -> dict:
     items = []
-    for fam, rs in _group(rows, lambda r: r.role_family).items():
+    for fam, rs in _group(rows, lambda r: r.role_family if r.role_family != tx.OTHER else None).items():
         known = [r for r in rs if r.work_mode in WORK_MODES]
         if len(known) < MIN_JOBS:
             continue
@@ -448,7 +467,8 @@ def lifetimes(rows, limit=TOP) -> dict:
     all_days = [d for v in groups.values() for d in v]
     headline = (f"Une offre reste en ligne {round(statistics.median(all_days))} jours en médiane"
                 if len(all_days) >= MIN_JOBS else "Pas encore assez d'offres fermées pour mesurer leur durée")
-    return {"headline": headline, "items": items[:limit], "total": len(items), "closed": len(all_days)}
+    return {"headline": headline, "items": items[:limit], "total": len(items), "closed": len(all_days),
+            "median_days": round(statistics.median(all_days)) if len(all_days) >= MIN_JOBS else None}
 
 
 def markets(rows, count_by, limit=TOP) -> dict:
@@ -471,18 +491,103 @@ def investors(rows, limit=TOP) -> dict:
         if r.closed_on is None:
             for name in investor_names(r.investors):
                 groups[name].append(r)
+    # Classement par nombre de startups du portefeuille qui recrutent (au moins 2) : sinon une seule grosse
+    # startup suffit à mettre un fonds en tête, et tous ses co-investisseurs avec lui
     items = [{"key": name, "label": name, "jobs": len(rs), "companies": len({r.company_id for r in rs}),
-              "low_data": len(rs) < LOW_DATA} for name, rs in groups.items() if len(rs) >= MIN_JOBS]
-    items.sort(key=lambda i: (-i["jobs"], i["label"]))
+              "low_data": len(rs) < LOW_DATA} for name, rs in groups.items()
+             if len(rs) >= MIN_JOBS and len({r.company_id for r in rs}) >= INVESTOR_MIN_COMPANIES]
+    items.sort(key=lambda i: (-i["companies"], -i["jobs"], i["label"]))
     first = items[0] if items else None
-    headline = (f"{first['label']} : le portefeuille qui recrute le plus ({first['jobs']} offres ouvertes)"
-                if first else "Pas encore assez d'offres ouvertes par fonds")
+    headline = (f"{first['label']} : {first['companies']} startups du portefeuille recrutent"
+                if first else "Pas encore assez de startups qui recrutent par fonds")
     return {"headline": headline, "items": items[:limit], "total": len(items)}
 
 
-INDICATORS = ("skills", "trends", "roles", "stacks", "salaries", "work_modes", "after_funding", "lifetimes",
-              "markets", "investors")
+TIMELINE_MONTHS = 12  # courbes : jusqu'à 12 mois glissants (moins tant que l'historique est court)
+TIMELINE_SERIES = 8  # compétences (et familles de postes) proposées dans le sélecteur des courbes
+TIMELINE_MIN_BASE = 10  # premiers mois sous ce nombre d'entreprises (ou d'offres) : retirés des courbes
+MONTHS_FR = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+
+
+def _month_label(y: int, m: int) -> str:
+    return f"{MONTHS_FR[m - 1]} {y}"
+
+
+def timeline(facts: Facts, count_by: str, domain=None, family=None, today=None) -> dict:
+    """Évolution mois par mois : part des entreprises (ou offres) qui exigent chaque compétence, part de chaque
+    famille de postes, et volume. Ignore la période choisie : toujours les derniers mois disponibles.
+
+    Séries : les TIMELINE_SERIES compétences (et familles) les plus fréquentes sur toute la fenêtre. Un mois
+    calculé sur moins de LOW_DATA unités est marqué low_data (point creux à l'écran)."""
+    today = today or date.today()
+    y, m = today.year, today.month - (TIMELINE_MONTHS - 1)
+    while m < 1:
+        y, m = y - 1, m + 12
+    start = date(y, m, 1)
+    rows = [r for r in scope(facts, period=None, domain=domain, family=family, today=today) if r.ref_date >= start]
+    if not rows:
+        return {"headline": "Pas encore assez d'offres pour tracer des courbes", "months": [], "skills": [],
+                "roles": [], "volume": [], "total": 0}
+    # Mois continus du premier mois avec des données jusqu'au mois en cours (un mois vide reste visible)
+    first = min(r.ref_date for r in rows)
+    keys, (y, m) = [], (first.year, first.month)
+    while (y, m) <= (today.year, today.month):
+        keys.append((y, m))
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+    by_month: dict[tuple, list] = defaultdict(list)
+    for r in rows:
+        by_month[(r.ref_date.year, r.ref_date.month)].append(r)
+    bases = {k: base_units(by_month[k], count_by) for k in keys}
+    # Premiers mois trop maigres (début de l'historique) : retirés, sinon un mois de 3 startups écrase l'échelle.
+    # Entre TIMELINE_MIN_BASE et LOW_DATA : gardés, marqués « peu de données » (point creux)
+    while len(keys) > 1 and bases[keys[0]] < TIMELINE_MIN_BASE:
+        keys.pop(0)
+    rows = [r for r in rows if (r.ref_date.year, r.ref_date.month) in set(keys)]
+    months = [{"key": f"{y}-{m:02d}", "label": _month_label(y, m), "base": bases[(y, m)],
+               "low_data": bases[(y, m)] < LOW_DATA} for y, m in keys]
+
+    def series(groups: dict[str, list], labels: dict[str, str]) -> list[dict]:
+        ranked_keys = sorted((k for k, g in groups.items() if len(g) >= MIN_JOBS),
+                             key=lambda k: (-len({unit(r, count_by) for r in groups[k]}), labels.get(k, k)))
+        out = []
+        for k in ranked_keys[:TIMELINE_SERIES]:
+            per_month: dict[tuple, set] = defaultdict(set)
+            for r in groups[k]:
+                per_month[(r.ref_date.year, r.ref_date.month)].add(unit(r, count_by))
+            points = [{"units": len(per_month[mk]),
+                       "share": round(len(per_month[mk]) / bases[mk], 3) if bases[mk] else None} for mk in keys]
+            out.append({"key": k, "label": labels.get(k, k), "points": points})
+        return out
+
+    skill_groups: dict[str, list] = defaultdict(list)
+    for r in rows:
+        for sid, required in facts.skills.get(r.job_id, {}).items():
+            if required and tx.SKILL_FAMILY.get(sid) not in CONTEXT_SKILL_FAMILIES and counts_for(sid, domain):
+                skill_groups[sid].append(r)
+    skills = series(skill_groups, tx.SKILL_LABEL)
+    # Familles de postes (sauf « autre », qui n'est pas une famille) ; rien si on filtre déjà sur une famille
+    role_series = series(_group(rows, lambda r: r.role_family if r.role_family != tx.OTHER else None)
+                         if not family else {}, tx.FAMILY_LABEL)
+    volume = [{"jobs": len(by_month[k]), "companies": len({r.company_id for r in by_month[k]})} for k in keys]
+
+    headline = "Pas encore assez d'offres pour tracer des courbes"
+    reliable = [i for i, mo in enumerate(months) if not mo["low_data"]]
+    if skills and len(reliable) >= 2:
+        a, b = reliable[0], reliable[-1]
+        top = skills[0]
+        sa, sb = top["points"][a]["share"], top["points"][b]["share"]
+        headline = (f"{top['label']} : {_pct(sb)} des {'entreprises' if count_by == 'entreprise' else 'offres'} "
+                    f"en {months[b]['label']}, contre {_pct(sa)} en {months[a]['label']}")
+    elif skills:
+        headline = f"{skills[0]['label']} en tête ; les courbes s'affinent chaque mois"
+    return {"headline": headline, "months": months, "skills": skills, "roles": role_series, "volume": volume,
+            "count_by": count_by, "total": len(skills)}  # total : séries de compétences (masquage Free)
+
+
+INDICATORS = ("skills", "timeline", "trends", "roles", "stacks", "salaries", "work_modes", "after_funding",
+              "lifetimes", "markets", "investors")
 INDICATOR_TITLES = {
+    "timeline": "Évolution mois par mois",
     "skills": "Compétences les plus demandées", "trends": "Compétences qui montent ou baissent",
     "roles": "Postes les plus recherchés", "stacks": "Stacks types", "salaries": "Salaires affichés",
     "work_modes": "Mode de travail", "after_funding": "Après la levée", "lifetimes": "Durée de vie d'une offre",
@@ -507,6 +612,7 @@ def market_overview(facts: Facts, *, period: str = "90j", domain: str | None = N
     broad = scope(facts, period=period, domain=domain, family=None, today=today)  # répartition par famille
     data = {
         "skills": top_skills(facts, rows, count_by, limit, domain, family),
+        "timeline": timeline(facts, count_by, domain, family, today),
         "trends": skill_trends(facts, count_by, domain, family, today),
         "roles": roles(broad, count_by, limit, domain, family),
         "stacks": stacks(facts, rows, count_by, family),
@@ -724,6 +830,8 @@ def mask_market(out: dict, limits: dict) -> dict:
             value["by_family"] = [{**f, "items": f["items"][:top]} for f in value["by_family"]]
         if key == "roles":
             value["families"] = value["families"][:top]
+        if key == "timeline":
+            value["skills"], value["roles"] = value["skills"][:top], value["roles"][:top]
         value["hidden"] = max(0, (value.get("total") or 0) - top)
         masked[key] = value
     return {**out, "indicators": masked}

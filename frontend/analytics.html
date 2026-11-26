@@ -30,23 +30,28 @@
 
       <!-- Marché : agrégats précalculés, filtrables -->
       <section id="tab-marche" role="tabpanel" aria-labelledby="tabbtn-marche" hidden>
-        <div class="market-filters">
-          <div class="toolbar" id="m-domains" role="group" aria-label="Domaine"></div>
-          <div class="toolbar">
-            <select id="m-family" aria-label="Famille de poste"></select>
-            <select id="m-period" aria-label="Période"></select>
-            <div class="seg" id="m-countby" role="group" aria-label="Mode de comptage"></div>
-          </div>
+        <div class="mk-bar">
+          <select id="m-period" aria-label="Période"></select>
+          <span class="small muted" id="m-perimeter"></span>
         </div>
-        <div id="m-pro"></div>
-        <p class="small muted perimeter" id="m-perimeter"></p>
-        <div class="market-grid" id="m-cards"></div>
+
+        <h2 class="mk-title">Qui recrute</h2>
+        <div class="market-grid" id="m-who"></div>
+
+        <div class="mk-title-row">
+          <h2 class="mk-title">Par métier</h2>
+          <div class="seg" id="m-domains" role="group" aria-label="Métier"></div>
+        </div>
+        <div class="market-grid" id="m-domain-cards"></div>
+
+        <h2 class="mk-title">Après la levée</h2>
+        <div class="market-grid" id="m-funding"></div>
+
         <div class="card pad-lg section" id="m-health" hidden></div>
       </section>
 
       <!-- Toi face au marché (Pro) -->
       <section id="tab-moi" role="tabpanel" aria-labelledby="tabbtn-moi" hidden>
-        <div id="me-pro"></div>
         <p class="small muted perimeter" id="me-scope"></p>
         <div class="market-grid" id="me-cards"></div>
       </section>
