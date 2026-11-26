@@ -115,7 +115,7 @@ def test_me_exposes_billing(alice, as_user, billing_on):
     assert b["enabled"] is True and b["plan"] == "free"
     assert b["limits"] == entitlements.PLAN_LIMITS["free"]
     assert b["prices"]["monthly"] == entitlements.PLAN_LIMITS["pro"]["price_monthly_label"]
-    assert set(b["usage"]) == {"chat", "imports", "processes", "assessments"}
+    assert set(b["usage"]) == {"chat", "imports", "processes", "assessments", "prepare", "regenerate"}
 
 
 # --- Stripe simulé ---------------------------------------------------------------------------------

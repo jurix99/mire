@@ -1,8 +1,8 @@
 """Droits RGPD de l'utilisateur sur ses données : export (portabilité, accès) et suppression du compte (effacement).
 
 - GET /api/me/export : toutes les données personnelles de l'utilisateur, en JSON (fichier téléchargé).
-- DELETE /api/me : supprime le compte et TOUT ce qui s'y rattache (profil, process, retours, évaluations,
-  conversations, imports, droits Pro). Refusé (409) tant qu'un abonnement se renouvelle : il faut d'abord le
+- DELETE /api/me : supprime le compte et TOUT ce qui s'y rattache (profil, process, candidatures préparées et
+  PDF générés, retours, évaluations, conversations, imports, droits Pro). Refusé (409) tant qu'un abonnement se renouvelle : il faut d'abord le
   résilier, sinon Stripe continuerait de prélever. Les données de facturation conservées par Stripe (obligation
   comptable) ne sont pas dans Mire.
 - purge_inactive : comptes sans connexion depuis INACTIVE_YEARS ans, supprimés par le job quotidien (durée
@@ -11,6 +11,7 @@
 Les données partagées (entreprises, offres, sources) ne sont pas des données personnelles : elles restent.
 """
 
+import base64
 import logging
 from datetime import UTC, date, datetime, timedelta
 from typing import Annotated
@@ -18,16 +19,19 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import JSONResponse, Response
 from sqlalchemy import delete, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, undefer
 
 from . import entitlements
 from .db import get_db
 from .models import (
     Application,
+    ApplicationDraft,
     ApplicationEvent,
+    ApplicationGeneration,
     ChatAction,
     ChatConversation,
     ChatMessage,
+    GeneratedFile,
     JobAssessment,
     JobFeedback,
     ProfileImport,
@@ -51,6 +55,12 @@ def _row(obj) -> dict:
     return {c.key: getattr(obj, c.key) for c in obj.__table__.columns if c.key not in ("embedding",)}
 
 
+def _file_row(f: GeneratedFile) -> dict:
+    """PDF générés (CV adapté, lettre) : contenu inclus, encodé en base64."""
+    return {**{k: v for k, v in _row(f).items() if k != "content"}, "content_base64": base64.b64encode(f.content).decode(),
+            "media_type": "application/pdf"}
+
+
 def export_data(db: Session, user: User) -> dict:
     """Données personnelles de l'utilisateur, table par table (colonnes brutes, sans les embeddings)."""
     apps = db.scalars(select(Application).where(Application.user_id == user.id)).all()
@@ -59,12 +69,20 @@ def export_data(db: Session, user: User) -> dict:
     def rows(model, *where):
         return [_row(r) for r in db.scalars(select(model).where(*where))]
 
+    app_ids = [a.id for a in apps] or [-1]
+    files = db.scalars(select(GeneratedFile).where(GeneratedFile.user_id == user.id)
+                       .options(undefer(GeneratedFile.content))).all()
     return {
         "exported_at": datetime.now(UTC),
         "user": _row(user),
         "profile": rows(UserProfile, UserProfile.user_id == user.id),
         "applications": [_row(a) for a in apps],
-        "application_events": rows(ApplicationEvent, ApplicationEvent.application_id.in_([a.id for a in apps] or [-1])),
+        "application_events": [{**_row(e), "snapshot": e.snapshot} for e in db.scalars(
+            select(ApplicationEvent).where(ApplicationEvent.application_id.in_(app_ids))
+            .options(undefer(ApplicationEvent.snapshot)))],
+        "application_drafts": rows(ApplicationDraft, ApplicationDraft.application_id.in_(app_ids)),
+        "generated_files": [_file_row(f) for f in files],
+        "application_generations": rows(ApplicationGeneration, ApplicationGeneration.user_id == user.id),
         "job_feedback": rows(JobFeedback, JobFeedback.user_id == user.id),
         "job_assessments": rows(JobAssessment, JobAssessment.user_id == user.id),
         "profile_imports": rows(ProfileImport, ProfileImport.user_id == user.id),
@@ -88,6 +106,10 @@ def delete_account(db: Session, user: User) -> None:
     app_ids = select(Application.id).where(Application.user_id == uid)
     conv_ids = select(ChatConversation.id).where(ChatConversation.user_id == uid)
     db.execute(delete(ApplicationEvent).where(ApplicationEvent.application_id.in_(app_ids)))
+    # Candidatures préparées et PDF générés (CV, lettre)
+    db.execute(delete(GeneratedFile).where(GeneratedFile.user_id == uid))
+    db.execute(delete(ApplicationDraft).where(ApplicationDraft.application_id.in_(app_ids)))
+    db.execute(delete(ApplicationGeneration).where(ApplicationGeneration.user_id == uid))
     db.execute(delete(Application).where(Application.user_id == uid))
     db.execute(delete(ChatAction).where(ChatAction.user_id == uid))
     db.execute(delete(ChatMessage).where(ChatMessage.conversation_id.in_(conv_ids)))

@@ -29,7 +29,7 @@ def test_status_enabled(alice, as_user, fake_llm):
 def test_no_delete_tool():
     names = {t.name for t in TOOLS}
     assert not any("delete" in n or "remove_job" in n for n in names)
-    assert names == {"get_profile", "list_jobs", "get_job", "list_applications", "get_dashboard",
+    assert names == {"get_profile", "list_jobs", "get_job", "list_applications", "get_dashboard", "get_application_draft",
                      "update_profile", "set_job_status", "update_application", "create_job", "rate_job",
                      "ask_question"}
 

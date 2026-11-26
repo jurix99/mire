@@ -248,6 +248,8 @@ class JobOut(JobMini):
     display_status: str = "nouveau"
     # Dernier retour de l'utilisateur sur l'offre : like | dislike | None (cœur / pouce remplis dans la liste)
     feedback: str | None = None
+    # Candidature préparée : en_preparation | brouillon | prete | envoyee | None (bouton « Voir ma candidature »)
+    draft_status: str | None = None
 
 
 class ManualScoreIn(BaseModel):
@@ -275,10 +277,12 @@ class ApplicationIn(ApplicationPatch):
 
 
 class EventOut(ORM):
+    id: int
     from_status: ProcessStatus | None
     to_status: ProcessStatus
     note: str | None
     created_at: datetime
+    has_snapshot: bool = False  # « J'ai envoyé ma candidature » : instantané consultable
 
 
 class ApplicationOut(ORM):
@@ -293,6 +297,7 @@ class ApplicationOut(ORM):
     job: JobMini
     company: CompanyMini
     events: list[EventOut] = []
+    draft_status: str | None = None  # candidature préparée (page Candidature)
 
 
 # --- Tableau de bord / analytics --------------------------------------------

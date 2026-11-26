@@ -74,6 +74,10 @@ TOOLS: list[ToolSpec] = [
              {"type": "object", "properties": {"status": _status}}),
     ToolSpec("get_dashboard", "Tableau de bord : compteurs, postes prioritaires, process actifs, levées de fonds récentes.",
              {"type": "object", "properties": {}}),
+    ToolSpec("get_application_draft",
+             "Lit la candidature préparée pour un poste (page Candidature) : réponses au formulaire, CV adapté et "
+             "lettre en texte, champs encore à compléter. Lecture seule, offre Pro. Mire n'envoie jamais de candidature.",
+             {"type": "object", "properties": {"job_id": {"type": "integer"}}, "required": ["job_id"]}),
     # Écritures (propositions à confirmer)
     ToolSpec(
         "update_profile",
@@ -155,7 +159,8 @@ TOOLS: list[ToolSpec] = [
     ),
 ]
 
-READ_TOOLS = {"get_profile", "list_jobs", "get_job", "list_applications", "get_dashboard"}
+READ_TOOLS = {"get_profile", "list_jobs", "get_job", "list_applications", "get_dashboard", "get_application_draft"}
+PRO_TOOLS = {"get_application_draft"}  # lectures réservées à l'offre Pro
 WRITE_TOOLS = {"update_profile", "set_job_status", "update_application", "create_job", "rate_job"}
 UI_TOOLS = {"ask_question"}  # n'accède à aucune donnée : sert seulement à l'affichage
 
@@ -207,6 +212,8 @@ def _label(job) -> str:
 
 
 def _read(db: Session, user: User, name: str, args: dict) -> Any:
+    if name in PRO_TOOLS and entitlements.plan_of(db, user) != "pro":
+        raise entitlements.pro_required("La préparation des candidatures est réservée à l'offre Pro")
     match name:
         case "get_profile":
             return _compact(profile_data(get_profile(db, user)).model_dump(exclude_none=True))
@@ -250,6 +257,10 @@ def _read(db: Session, user: User, name: str, args: dict) -> Any:
                                               "amount_meur": _v(c.funding_amount_meur),
                                               "announced_on": _v(c.funding_announced_on)}) for c in d.recent_fundings],
             }
+        case "get_application_draft":
+            from .application_api import draft_summary
+
+            return draft_summary(db, user, int(args["job_id"]))
     raise ToolError(f"Outil inconnu : {name}")
 
 

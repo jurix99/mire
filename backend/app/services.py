@@ -24,6 +24,7 @@ from .models import (
     ACTIVE_STATUSES,
     TODO_STATUSES,
     Application,
+    ApplicationDraft,
     ApplicationEvent,
     Company,
     Job,
@@ -78,7 +79,8 @@ def user_apps(db: Session, user: User) -> dict[int, Application]:
     apps = db.scalars(
         select(Application)
         .where(Application.user_id == user.id)
-        .options(selectinload(Application.job).selectinload(Job.company), selectinload(Application.events))
+        .options(selectinload(Application.job).selectinload(Job.company), selectinload(Application.events),
+                 selectinload(Application.draft))
     )
     return {a.job_id: a for a in apps}
 
@@ -93,6 +95,7 @@ class AssessmentContext:
     version: int = 1
     access: Access = dc_field(default_factory=Access)  # ce que l'utilisateur peut voir (Free : masquage)
     feedback: dict[int, str] = dc_field(default_factory=dict)  # job_id -> dernier retour (like | dislike)
+    drafts: dict[int, str] = dc_field(default_factory=dict)  # job_id -> statut de la candidature préparée
 
 
 def assessment_context(db: Session, user: User) -> AssessmentContext:
@@ -104,8 +107,10 @@ def assessment_context(db: Session, user: User) -> AssessmentContext:
                                .where(JobFeedback.user_id == user.id).order_by(JobFeedback.id)).all())
     from .profile import criteria_labels
 
+    drafts = dict(db.execute(select(Application.job_id, ApplicationDraft.status).join(
+        ApplicationDraft, ApplicationDraft.application_id == Application.id).where(Application.user_id == user.id)).all())
     return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, criteria_labels(),
-                             profile.version, entitlements.access_for(db, user), feedback)
+                             profile.version, entitlements.access_for(db, user), feedback, drafts)
 
 
 def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = False) -> AssessmentOut:
@@ -171,6 +176,7 @@ def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = N
         out.application_id = app.id
     if ctx:
         out.feedback = ctx.feedback.get(job.id)  # le plus récent l'emporte (dict construit par ordre d'id)
+        out.draft_status = ctx.drafts.get(job.id)
     a = ctx.assessments.get(job.id) if ctx else None
     if a is not None:
         out.assessment = assessment_out(a, ctx, treated=app is not None)
@@ -241,7 +247,8 @@ def load_application(db: Session, app_id: int, user: User) -> Application:
     app = db.scalar(
         select(Application)
         .where(Application.id == app_id, Application.user_id == user.id)
-        .options(selectinload(Application.job).selectinload(Job.company), selectinload(Application.events))
+        .options(selectinload(Application.job).selectinload(Job.company), selectinload(Application.events),
+                 selectinload(Application.draft))
     )
     if app is None:
         raise ServiceError(404, "Process introuvable")

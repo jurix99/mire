@@ -56,7 +56,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, deferred, mapped_column, relationship, validates
+from sqlalchemy.orm import Mapped, column_property, deferred, mapped_column, relationship, validates
 
 from .db import Base
 
@@ -289,6 +289,11 @@ class Application(TimestampMixin, Base):
     def company(self) -> Company:
         return self.job.company
 
+    @property
+    def draft_status(self) -> str | None:
+        """Statut de la candidature préparée (en_preparation, brouillon, prete, envoyee), None sans préparation."""
+        return self.draft.status if self.draft is not None else None
+
 
 class ApplicationEvent(Base):
     __tablename__ = "application_events"
@@ -305,6 +310,10 @@ class ApplicationEvent(Base):
     snapshot: Mapped[dict | None] = deferred(mapped_column(JSONType))
 
     application: Mapped[Application] = relationship(back_populates="events")
+
+
+# Instantané présent (sans charger son contenu, colonne différée) : lien « Ce que j'ai envoyé » dans Mes process
+ApplicationEvent.has_snapshot = column_property(ApplicationEvent.__table__.c.snapshot.is_not(None))
 
 
 class UserProfile(TimestampMixin, Base):

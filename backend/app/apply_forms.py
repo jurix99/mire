@@ -678,8 +678,12 @@ def extract_with_llm(llm, page_html: str) -> tuple[list[FormField], dict]:
 # --- Lecture complète et cache ----------------------------------------------------------------------
 
 
-def fetch(job: Job, llm=None, get=http_get) -> FetchedForm:
-    """Formulaire d'une offre : adaptateur de l'ATS, sinon Gemini sur la page, sinon formulaire standard."""
+def fetch(job: Job, llm=None, get=None) -> FetchedForm:
+    """Formulaire d'une offre : adaptateur de l'ATS, sinon Gemini sur la page, sinon formulaire standard.
+
+    get(url, api=False, params=None) -> texte : accès réseau (GET), http_get par défaut (remplacé dans les tests).
+    """
+    get = get or http_get
     target = locate(job)
     if target.ats in ("yc", "welcome"):
         return FetchedForm(target.ats, target.apply_url, standard_form(), "standard",
@@ -719,7 +723,7 @@ def get_form(db: Session, job_id: int) -> ApplicationForm | None:
     return db.scalar(select(ApplicationForm).where(ApplicationForm.job_id == job_id))
 
 
-def ensure_form(db: Session, job: Job, llm=None, *, force: bool = False, get=http_get) -> tuple[ApplicationForm, dict]:
+def ensure_form(db: Session, job: Job, llm=None, *, force: bool = False, get=None) -> tuple[ApplicationForm, dict]:
     """Formulaire en cache s'il a moins de 7 jours (sauf force), sinon relu et enregistré (commit).
 
     Retourne (formulaire, tokens Gemini utilisés pour le lire : {} si aucun).

@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Annotated, Any
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, HTTPException
 from sqlalchemy import func, select
@@ -29,6 +30,7 @@ from .db import get_db
 from .models import (
     ACTIVE_STATUSES,
     Application,
+    ApplicationGeneration,
     ChatConversation,
     ChatMessage,
     Company,
@@ -64,6 +66,9 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "market_top": 5,
         "market_open_indicators": ["skills", "roles", "timeline"],  # courbes : vitrine, ouvertes en Free
         "market_me": False,
+        # Candidatures préparées (page Candidature) : réservées au Pro (0 = fenêtre Pro)
+        "prepare_application_per_day": 0,
+        "regenerate_field_per_day": 0,
     },
     "pro": {
         "visible_jobs": None,
@@ -80,6 +85,8 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "market_top": 10,
         "market_open_indicators": None,  # tous
         "market_me": True,
+        "prepare_application_per_day": 5,  # préparations (CV adapté, lettre, réponses) par jour, heure de Paris
+        "regenerate_field_per_day": 30,  # régénérations d'un champ par jour
         # Prix affichés (TTC). Les montants facturés sont ceux des prix Stripe (STRIPE_PRICE_MONTHLY / _PASS_3M).
         "price_monthly_label": "10 € TTC / mois",
         "price_pass_3m_label": "25 € TTC pour 3 mois",
@@ -87,6 +94,7 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
     },
 }
 
+PARIS = ZoneInfo("Europe/Paris")
 PAST_DUE_GRACE = timedelta(days=3)  # abonnement impayé : encore Pro pendant ce délai (mise à jour de la carte)
 PASS_DURATION = timedelta(days=PLAN_LIMITS["pro"]["pass_days"])
 RECENT_FUNDING_DAYS = 183  # « levées récentes » du bandeau Entreprises
@@ -101,12 +109,16 @@ QUOTAS = {
     "imports": "imports_total",
     "processes": "active_processes",
     "assessments": "assessments_per_week",
+    "prepare": "prepare_application_per_day",
+    "regenerate": "regenerate_field_per_day",
 }
 QUOTA_MESSAGES = {
     "chat": "messages à l'assistant ce mois-ci",
     "imports": "import de profil",
     "processes": "process actifs",
     "assessments": "évaluations cette semaine",
+    "prepare": "candidatures préparées aujourd'hui",
+    "regenerate": "réponses régénérées aujourd'hui",
 }
 
 
@@ -219,6 +231,12 @@ def _month_start(at: datetime) -> datetime:
     return at.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
 
+def day_start(at: datetime | None = None) -> datetime:
+    """Début du jour civil en cours, heure de Paris (quotas « par jour »)."""
+    local = (at or now()).astimezone(PARIS)
+    return local.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
 def week_start(at: datetime | None = None) -> datetime:
     return (at or now()) - timedelta(days=7)
 
@@ -243,6 +261,11 @@ def usage_of(db: Session, user: User, kind: str) -> int:
             return db.scalar(select(func.count(JobAssessment.id)).where(
                 JobAssessment.user_id == user.id, JobAssessment.assessed_at >= week_start(at),
                 JobAssessment.model.not_in(("regles", "manuel")))) or 0
+        case "prepare" | "regenerate":
+            # Journal des générations : une ligne par préparation mise en file / régénération réussie
+            return db.scalar(select(func.count(ApplicationGeneration.id)).where(
+                ApplicationGeneration.user_id == user.id, ApplicationGeneration.kind == kind,
+                ApplicationGeneration.created_at >= day_start(at))) or 0
     raise ValueError(kind)
 
 
@@ -279,6 +302,14 @@ def check_quota(db: Session, user: User, kind: str) -> None:
         prefix = "Limite Free atteinte" if plan == "free" else "Limite atteinte"
         raise PlanError({"code": "quota", "kind": kind, "limit": limit, "used": used, "plan": plan,
                          "message": f"{prefix} ({used}/{limit} {what})"})
+
+
+def check_generation(db: Session, user: User, kind: str) -> None:
+    """Préparation / régénération d'une candidature : 402 pro_required si le plan n'y a pas accès (limite 0),
+    402 quota si la limite du jour est atteinte."""
+    if limits(plan_of(db, user))[QUOTAS[kind]] == 0:
+        raise pro_required("La préparation des candidatures est réservée à l'offre Pro")
+    check_quota(db, user, kind)
 
 
 def check_process_change(db: Session, user: User, before: ProcessStatus | None, after: ProcessStatus) -> None:
