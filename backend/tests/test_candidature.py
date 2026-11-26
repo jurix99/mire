@@ -337,6 +337,13 @@ def test_invented_items_are_removed_with_warnings(base):
     assert out["skills"] == ["Python", "Kubernetes"] and "15" not in out["summary"]
 
 
+@pytest.mark.parametrize("label", ["When would you be able to start a new role?", "When can you start?",
+                                   "Date de prise de poste souhaitée", "Quand pourriez-vous commencer ?",
+                                   "Notice period"])
+def test_availability_questions_are_categorized(label):
+    assert apply_forms.categorize(label, None, "text") == "disponibilite"
+
+
 def test_numbers_and_language_helpers():
     assert prep.numbers("1 200 € et 1,5 M€ et 40 %") == {"1200", "1.5", "40"}
     assert prep.detect_language("We are looking for an engineer to join our team and you will work with the data") == "en"

@@ -133,8 +133,9 @@ _RULES: list[tuple[str, re.Pattern]] = [
         r"authori[sz]ed to work|work authori|right to work|work permit|sponsor|visa|autorisation de travail|"
         r"permis de travail|droit de travailler|legally (?:able|eligible)|eligible to work|citizenship|nationalit")),
     ("disponibilite", re.compile(
-        r"start date|when can you start|earliest start|notice period|preavis|disponib|available|availability|"
-        r"date de debut|quand pouvez")),
+        r"start date|when (?:can|could|would) you (?:be able to )?start|able to start|earliest start|start a new role|"
+        r"notice period|preavis|disponib|available|availability|date de debut|prise de poste|quand pouvez|"
+        r"commencer")),
     ("liens", re.compile(r"linkedin|github|gitlab|portfolio|website|site web|personal site|\burl\b|twitter|blog")),
     ("contact", re.compile(
         r"e-?mail|courriel|\bphone|telephone|\bmobile\b|\btel\b|\blocation\b|\blocated\b|\bcity\b|\bville\b|"
