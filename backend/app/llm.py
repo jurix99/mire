@@ -83,6 +83,13 @@ class LLM(Protocol):
 
     def select_trial_companies(self, instruction: str, contents: str, model_cls: type[BaseModel]) -> Any: ...
 
+    # Candidatures : (sortie validée, {model, tokens_in, tokens_out})
+    def extract_apply_form(self, instruction: str, contents: str) -> tuple[Any, dict]: ...
+
+    def prepare_application(self, instruction: str, contents: str, model_cls: type[BaseModel]) -> tuple[Any, dict]: ...
+
+    def regenerate_field(self, instruction: str, contents: str, model_cls: type[BaseModel]) -> tuple[Any, dict]: ...
+
     def chat(
         self,
         system: str,
@@ -253,10 +260,22 @@ class GeminiClient:
 
         models : liste de modèles à utiliser à la place de la chaîne par défaut (ex. le moins cher d'abord).
         """
+        return self.structured_usage(instruction, contents, model_cls, label=label, rounds=rounds,
+                                     max_tokens=max_tokens, models=models)[0]
+
+    def structured_usage(self, instruction: str, contents: str, model_cls: type[BaseModel], *, label: str,
+                         rounds: int = 2, max_tokens: int = 8_000, models: list[str] | None = None,
+                         private: bool = False) -> tuple[BaseModel, dict]:
+        """Comme structured, et renvoie aussi {model, tokens_in, tokens_out} (coût de l'appel).
+
+        private : contenu personnel (CV, candidature) : une sortie invalide n'est jamais écrite dans les journaux
+        (le message d'erreur de Pydantic cite la valeur reçue), seulement le nombre d'erreurs.
+        """
         t = self.types
+        turn: dict = {}
         try:
             response = self._generate(
-                {}, rounds=rounds, models=models, contents=contents,
+                turn, rounds=rounds, models=models, contents=contents,
                 config=t.GenerateContentConfig(
                     system_instruction=instruction,
                     response_mime_type="application/json",
@@ -265,13 +284,38 @@ class GeminiClient:
                 ),
             )
         except Exception as exc:
-            log.warning("Gemini %s: %s", label, exc)
+            log.warning("Gemini %s: %s", label, exc if not private else type(exc).__name__)
             raise friendly_error(exc) from None
+        chain = list(dict.fromkeys(models)) if models else self.models
+        meta = getattr(response, "usage_metadata", None)
+        usage = {"model": chain[min(turn.get("index", 0), len(chain) - 1)],
+                 "tokens_in": int(getattr(meta, "prompt_token_count", 0) or 0),
+                 "tokens_out": int((getattr(meta, "candidates_token_count", 0) or 0)
+                                   + (getattr(meta, "thoughts_token_count", 0) or 0))}
         try:
-            return model_cls.model_validate_json(response.text or "")
+            return model_cls.model_validate_json(response.text or ""), usage
         except ValidationError as exc:
-            log.warning("Gemini %s: sortie invalide: %s", label, exc)
+            log.warning("Gemini %s: sortie invalide: %s", label, f"{exc.error_count()} erreur(s)" if private else exc)
             raise LLMError("La réponse de Gemini ne respecte pas le format attendu, réessayez.") from None
+
+    # --- Candidatures (apply_forms.py, application_prep.py) ----------------------------
+
+    def extract_apply_form(self, instruction: str, contents: str):
+        """Repli : champs du formulaire de candidature lus dans le HTML de la page (modèles bon marché)."""
+        from .apply_forms import ExtractedForm
+
+        return self.structured_usage(instruction, contents, ExtractedForm, label="extract_apply_form", rounds=1,
+                                     models=GEMINI_EVAL_MODELS, max_tokens=8_000)
+
+    def prepare_application(self, instruction: str, contents: str, model_cls: type[BaseModel]):
+        """Appel « gros » de la préparation : CV adapté, lettre et réponses aux questions, en une seule sortie."""
+        return self.structured_usage(instruction, contents, model_cls, label="prepare_application", rounds=2,
+                                     max_tokens=16_000, private=True)
+
+    def regenerate_field(self, instruction: str, contents: str, model_cls: type[BaseModel]):
+        """Régénération d'une réponse (consigne courte de l'utilisateur)."""
+        return self.structured_usage(instruction, contents, model_cls, label="regenerate_field", rounds=1,
+                                     max_tokens=4_000, private=True)
 
     def analyze_profile(self, profile_json: str):
         from .analysis import ANALYZE_INSTRUCTION, ProfileAnalysis

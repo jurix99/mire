@@ -9,10 +9,13 @@ assess_user    évaluation Gemini {user_id, job_ids?, similarity?}
 classify_jobs  classement sur la liste fermée des offres en attente (CLASSIFY_MAX_PER_RUN), relancée tant
                qu'il en reste ; sur quota Gemini, reprise 30 min plus tard
 daily          enchaînement complet (comme `python -m app.jobs daily`)
+fetch_apply_form  formulaire de candidature d'une offre {job_id, force?, application_id?} (apply_forms.py, GET
+               publics), puis prepare_application si application_id est donné
 """
 
 import logging
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import assessments, collector, matching, tasks
@@ -101,6 +104,27 @@ def classify_jobs(db: Session, payload: dict) -> None:
         from . import market
 
         market.refresh_facts(db)
+
+
+@tasks.handler("fetch_apply_form")
+def fetch_apply_form(db: Session, payload: dict) -> None:
+    from . import apply_forms
+    from .models import ApplicationDraft, Job
+
+    job = db.get(Job, int(payload["job_id"]))
+    if job is None:
+        return
+    _form, usage = apply_forms.ensure_form(db, job, get_llm(), force=bool(payload.get("force")))
+    app_id = payload.get("application_id")
+    if app_id is None:
+        return
+    draft = db.scalar(select(ApplicationDraft).where(ApplicationDraft.application_id == int(app_id)))
+    if draft is not None and usage:  # lecture du formulaire par Gemini : comptée dans le coût de la préparation
+        draft.tokens_in = (draft.tokens_in or 0) + usage.get("tokens_in", 0)
+        draft.tokens_out = (draft.tokens_out or 0) + usage.get("tokens_out", 0)
+        db.commit()
+    tasks.enqueue(db, "prepare_application", {"application_id": int(app_id)},
+                  dedup_key=f"prepare_application:{app_id}")
 
 
 @tasks.handler("daily")
