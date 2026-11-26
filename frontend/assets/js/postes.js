@@ -1,5 +1,5 @@
 import {
-  $, AUTO_LABEL, ICONS, STATUSES, api, attempt, boot, confirmDelete, fmtAgo, html, isLocked, loadMe, lockedBlock, logo,
+  $, AUTO_LABEL, ICONS, STATUSES, api, applicationButton, attempt, boot, confirmDelete, fmtAgo, html, isLocked, loadMe, lockedBlock, logo,
   openFeedback, openForm, openJobDialog, plain, proBar, refreshCounts, renderPaged, renderValue, score, shown, statusSelect,
   toast,
 } from "./app.js";
@@ -101,6 +101,7 @@ const row = (j) => j.locked ? lockedRow(j) : html`
         aria-pressed="${j.feedback === "like"}" title="${j.feedback === "like" ? "Vous aimez cette offre (offre de référence)" : "J'aime (offre de référence)"}">${ICONS.heart}</button>
       <button class="icon-btn fb-dislike ${j.feedback === "dislike" ? "is-on" : ""}" type="button" data-action="dislike"
         aria-pressed="${j.feedback === "dislike"}" title="${j.feedback === "dislike" ? "Marquée « pas intéressé »" : "Pas intéressé"}">${ICONS.thumbDown}</button>
+      ${applicationButton(j, { icon: true })}
       ${j.url && !isLocked(j.url) ? html`<a class="icon-btn" href="${j.url}" target="_blank" rel="noopener" title="Voir l'offre originale">${ICONS.link}</a>` : ""}
       <button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>
     </span>

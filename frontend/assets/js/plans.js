@@ -14,6 +14,7 @@ export function planFeatures(free = {}, pro = {}) {
       [true, `${plural(free.imports_total ?? 1, "import")} de profil, ${plural(free.chat_per_month ?? 10, "message")} à l'assistant par mois`],
       [false, "Levées de fonds, investisseurs et ATS"],
       [false, "Analyse du profil et synthèse des règles"],
+      [false, "Candidatures préparées (formulaire pré-rempli, CV adapté, lettre)"],
     ],
     pro: [
       [true, "Toutes les offres, la plus pertinente comprise"],
@@ -23,6 +24,7 @@ export function planFeatures(free = {}, pro = {}) {
       [true, "Process et imports de profil illimités"],
       [true, "Analyse du profil et synthèse des règles"],
       [true, `${pro.chat_per_month ?? 300} messages à l'assistant par mois`],
+      [true, `${pro.prepare_application_per_day ?? 5} candidatures préparées par jour : formulaire pré-rempli, CV adapté, lettre`],
     ],
   };
 }

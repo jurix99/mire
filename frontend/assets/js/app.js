@@ -17,6 +17,8 @@ export const STATUSES = [
   ["abandonne", "Abandonné"],
 ];
 export const STATUS_LABEL = Object.fromEntries(STATUSES);
+/** Statuts proposés dans les listes : « Prête à envoyer » se pose depuis la page Candidature (bouton dédié). */
+export const manualStatuses = (current) => STATUSES.filter(([k]) => k !== "prete" || k === current);
 
 // --- HTML sûr ---------------------------------------------------------------
 
@@ -107,9 +109,59 @@ export const pill = (status) => html`<span class="pill st-${status}">${DISPLAY_L
 export function statusSelect(current, attrs = "") {
   return html`<select class="status-select st-${current}" aria-label="Statut" ${raw(attrs)}>
     ${AUTO_LABEL[current] ? html`<option value="${current}" selected disabled>${AUTO_LABEL[current]}</option>` : ""}
-    ${STATUSES.map(([k, l]) => html`<option value="${k}" ${raw(k === current ? "selected" : "")}>${l}</option>`)}
+    ${manualStatuses(current).map(([k, l]) => html`<option value="${k}" ${raw(k === current ? "selected" : "")}>${l}</option>`)}
   </select>`;
 }
+
+// --- Candidature préparée (page Candidature) -----------------------------------------------------
+// Mire prépare le formulaire ; l'utilisateur copie-colle et envoie lui-même sur le site de l'entreprise.
+
+export const candidatureUrl = (jobId) => `/candidature?job=${encodeURIComponent(jobId)}`;
+const DOC_ICON = raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h4"/></svg>`);
+
+/**
+ * Bouton « Préparer ma candidature » (ou « Voir ma candidature » une fois préparée).
+ * job : { id, score, draft_status } ; icon : version icône (lignes de la page Postes).
+ */
+export function applicationButton(job, { icon = false, cls = "btn ghost sm" } = {}) {
+  const ready = !!job.draft_status;
+  const label = ready ? "Voir ma candidature" : "Préparer ma candidature";
+  const score = isLocked(job.score) ? "" : job.score ?? "";
+  if (ready) {
+    return icon
+      ? html`<a class="icon-btn cand-ready" href="${candidatureUrl(job.id)}" title="${label}" aria-label="${label}">${DOC_ICON}</a>`
+      : html`<a class="${cls}" href="${candidatureUrl(job.id)}">${DOC_ICON} ${label}</a>`;
+  }
+  return icon
+    ? html`<button type="button" class="icon-btn" data-prepare="${job.id}" data-score="${score}" title="${label}" aria-label="${label}">${DOC_ICON}</button>`
+    : html`<button type="button" class="${cls}" data-prepare="${job.id}" data-score="${score}">${DOC_ICON} ${label}</button>`;
+}
+
+/** Lance la préparation : Free -> fenêtre Pro (aperçu flouté) ; note sous 5 -> avertissement ; puis page Candidature. */
+export async function prepareApplication(jobId, { score = null } = {}) {
+  let billing = null;
+  try { billing = (await loadMe()).billing; } catch { /* le serveur tranchera (402) */ }
+  if (billing && billing.limits?.prepare_application_per_day === 0) return openProModal({ preview: "candidature" });
+  if (score != null && score !== "" && Number(score) < 5
+    && !window.confirm(`Cette offre est notée ${Number(score).toLocaleString("fr-FR")}/10 pour vous. Préparer quand même la candidature ?`)) return null;
+  try {
+    await api(`/jobs/${jobId}/application/prepare`, { method: "POST" });
+  } catch (err) {
+    if (!err.handled) toast(err.message, true);
+    return null;
+  }
+  location.href = candidatureUrl(jobId);
+  return true;
+}
+
+document.addEventListener("click", (e) => {
+  const btn = e.target.closest?.("[data-prepare]");
+  if (!btn) return;
+  e.preventDefault();
+  e.stopPropagation();
+  btn.disabled = true;
+  prepareApplication(btn.dataset.prepare, { score: btn.dataset.score }).finally(() => (btn.disabled = false));
+});
 
 function hue(text) {
   let h = 0;
@@ -268,8 +320,23 @@ function planError(detail) {
   else openProModal();
 }
 
-/** Fenêtre « Passer Pro » : ce qui est débloqué, les deux prix, la renonciation au droit de rétractation. */
-export async function openProModal() {
+/** Aperçu flouté d'une candidature exemple (fenêtre Pro ouverte depuis « Préparer ma candidature »). Texte factice. */
+const CANDIDATURE_PREVIEW = html`
+  <div class="pro-preview" aria-hidden="true">
+    <div class="locked-block-content">
+      <p class="label">// Candidature · Backend Engineer</p>
+      <div class="cand-sample"><span>Prénom</span><span>Camille</span></div>
+      <div class="cand-sample"><span>Pourquoi nous ?</span><span>Votre produit de planification répond à un problème que j'ai traité pendant trois ans…</span></div>
+      <div class="cand-sample"><span>CV adapté</span><span>CV_Camille_Durand_Acme.pdf · 2 expériences mises en avant</span></div>
+      <div class="cand-sample"><span>Lettre</span><span>Acme vient de lever pour industrialiser…</span></div>
+    </div>
+    <p class="small"><strong>Préparer ma candidature</strong> : formulaire de l'offre pré-rempli, CV adapté et lettre, à relire
+      et copier-coller. Réservé au Pro.</p>
+  </div>`;
+
+/** Fenêtre « Passer Pro » : ce qui est débloqué, les deux prix, la renonciation au droit de rétractation.
+ * preview : « candidature » ajoute l'aperçu flouté d'une candidature préparée. */
+export async function openProModal({ preview = null } = {}) {
   if ($("dialog.pro-dialog")) return;
   let billing = null;
   try { billing = (await loadMe()).billing; } catch { /* affichée sans les chiffres */ }
@@ -294,6 +361,7 @@ export async function openProModal() {
         </div>
         <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
       </div>
+      ${preview === "candidature" ? CANDIDATURE_PREVIEW : ""}
       <div class="pro-plans">
         <article class="plan">
           <p class="plan-name">Free ${isPro ? "" : html`<span class="plan-current">Votre offre</span>`}</p>
@@ -595,7 +663,8 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
         </div>
         <div class="right">
           ${onEdit && !job.locked ? html`<button type="button" class="btn ghost" data-edit data-admin>Modifier</button>` : ""}
-          <button type="button" class="btn" data-close>Fermer</button>
+          ${job.locked ? "" : applicationButton(job, { cls: "btn" })}
+          <button type="button" class="btn ghost" data-close>Fermer</button>
         </div>
       </div>`.s;
   };
