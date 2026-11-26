@@ -145,3 +145,21 @@ def test_taxonomy_loaded_and_market_view_refreshes(pg, pgdb):
     assert [tuple(r) for r in rows] == [("sales", "gtm_ventes", "ote"), ("platform_devops_sre", "tech", "inconnu")]
     facts = market.load_facts(pgdb)
     assert {s for skills in facts.skills.values() for s in skills} >= {"hubspot", "kubernetes", "terraform"}
+
+
+def test_migration_adds_prete_status_in_order(pg, pgdb):
+    """ALTER TYPE … ADD VALUE hors transaction : la valeur existe, à sa place, et s'utilise dans une autre transaction."""
+    labels = pgdb.scalars(text("SELECT enumlabel FROM pg_enum JOIN pg_type ON pg_type.oid = enumtypid "
+                               "WHERE typname = 'process_status' ORDER BY enumsortorder")).all()
+    assert labels.index("a_postuler") + 1 == labels.index("prete") == labels.index("postule") - 1
+    insp = inspect(pgdb.get_bind())
+    assert {"application_forms", "application_drafts", "generated_files", "application_generations"} <= set(
+        insp.get_table_names())
+    assert "snapshot" in {c["name"] for c in insp.get_columns("application_events")}
+    pgdb.execute(text("INSERT INTO users (linkedin_sub) VALUES ('pg-prete')"))
+    pgdb.execute(text("INSERT INTO companies (name, slug) VALUES ('Acme', 'acme-prete')"))
+    pgdb.execute(text("INSERT INTO jobs (company_id, title) SELECT id, 'Backend' FROM companies WHERE slug = 'acme-prete'"))
+    pgdb.execute(text("INSERT INTO applications (user_id, job_id, status) SELECT u.id, j.id, 'prete' FROM users u, jobs j "
+                      "WHERE u.linkedin_sub = 'pg-prete' AND j.title = 'Backend'"))
+    assert pgdb.scalar(text("SELECT status::text FROM applications")) == "prete"
+    pgdb.rollback()

@@ -1,0 +1,17 @@
+{"data": {"jobPosting": {"id": "8fb1615c-34bf-47c4-a1d1-b7b2f836bbd3", "applicationForm": {"id": "c5fd14c0-44ad-4c81-8636-2bd3fc788e4f", "sections": [
+  {"title": null, "fieldEntries": [
+    {"id": "e1", "isRequired": true, "descriptionHtml": null, "isHidden": null, "field": {"id": "f1", "path": "_systemfield_name", "humanReadablePath": "Name", "title": "Legal Name", "type": "String", "isDeactivated": false}},
+    {"id": "e2", "isRequired": true, "descriptionHtml": null, "isHidden": null, "field": {"id": "f2", "path": "_systemfield_email", "humanReadablePath": "Email", "title": "Email", "type": "Email", "isDeactivated": false}},
+    {"id": "e3", "isRequired": true, "descriptionHtml": null, "isHidden": null, "field": {"id": "f3", "path": "_systemfield_resume", "humanReadablePath": "Resume", "title": "Resume", "type": "File", "isDeactivated": false}},
+    {"id": "e4", "isRequired": false, "descriptionHtml": null, "isHidden": null, "field": {"id": "f4", "path": "20f8883c-d278-427c-9465-dc614f612e1f", "humanReadablePath": "", "title": "Phone Number", "type": "Phone", "isDeactivated": false}},
+    {"id": "e5", "isRequired": true, "descriptionHtml": null, "isHidden": null, "field": {"id": "f5", "path": "_systemfield_location", "humanReadablePath": "Location", "title": "Where are you currently located?", "type": "Location", "locationTypes": ["City"], "isDeactivated": false}},
+    {"id": "e6", "isRequired": true, "descriptionHtml": null, "isHidden": null, "field": {"id": "f6", "path": "3f4e05d4-dd62-48ef-96ca-d9f293ae18d4", "humanReadablePath": "", "title": "When can you start a new role?", "type": "Date", "isDeactivated": false}},
+    {"id": "e7", "isRequired": true, "descriptionHtml": null, "isHidden": null, "field": {"id": "f7", "path": "bed95633-1b6e-4cd0-9eaf-c5a9f75ac301", "humanReadablePath": "", "title": "Are you authorized to work in the country where the job is located?", "type": "Boolean", "isDeactivated": false}},
+    {"id": "e8", "isRequired": true, "descriptionHtml": "<p>Tell us about <b>one</b> project.</p>", "isHidden": null, "field": {"id": "f8", "path": "f189fed2-624b-41a1-a76f-0c67a2611d02", "humanReadablePath": "", "title": "What is the most complex system you have built?", "type": "LongText", "isDeactivated": false}},
+    {"id": "e9", "isRequired": false, "descriptionHtml": null, "isHidden": null, "field": {"id": "f9", "path": "9a1b2c3d-0000-4000-8000-000000000009", "humanReadablePath": "", "title": "Which team interests you most?", "type": "ValueSelect", "isDeactivated": false, "selectableValues": [{"label": "Platform", "value": "platform", "isArchived": false}, {"label": "Data", "value": "data", "isArchived": false}, {"label": "Old team", "value": "old", "isArchived": true}]}},
+    {"id": "e10", "isRequired": false, "descriptionHtml": null, "isHidden": true, "field": {"id": "f10", "path": "hidden-field", "humanReadablePath": "", "title": "Internal referral code", "type": "String", "isDeactivated": false}}
+  ]},
+  {"title": null, "fieldEntries": [
+    {"id": "e11", "isRequired": true, "descriptionHtml": null, "isHidden": null, "field": {"id": "f11", "path": "a90e16d2-baaf-4c31-b3e5-70b53f261002", "humanReadablePath": "", "title": "Applicant Privacy Acknowledgement", "type": "MultiValueSelect", "isDeactivated": false, "selectableValues": [{"label": "I acknowledge that I have read the privacy notice.", "value": "ack", "isArchived": false}]}}
+  ]}
+]}}}}

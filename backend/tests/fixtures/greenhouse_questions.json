@@ -1,0 +1,41 @@
+{
+  "id": 4012345,
+  "title": "Backend Engineer",
+  "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/4012345",
+  "questions": [
+    {"description": null, "label": "First Name", "required": true, "fields": [{"name": "first_name", "type": "input_text", "values": []}]},
+    {"description": null, "label": "Last Name", "required": true, "fields": [{"name": "last_name", "type": "input_text", "values": []}]},
+    {"description": null, "label": "Email", "required": true, "fields": [{"name": "email", "type": "input_text", "values": []}]},
+    {"description": null, "label": "Phone", "required": false, "fields": [{"name": "phone", "type": "input_text", "values": []}]},
+    {"description": null, "label": "Resume/CV", "required": true, "fields": [
+      {"name": "resume", "type": "input_file", "values": []},
+      {"name": "resume_text", "type": "textarea", "values": []}]},
+    {"description": null, "label": "Cover Letter", "required": false, "fields": [
+      {"name": "cover_letter", "type": "input_file", "values": []},
+      {"name": "cover_letter_text", "type": "textarea", "values": []}]},
+    {"description": null, "label": "LinkedIn Profile", "required": false, "fields": [{"name": "question_1001", "type": "input_text", "values": []}]},
+    {"description": "&lt;p&gt;A few sentences are enough.&lt;/p&gt;", "label": "Why do you want to join Acme?", "required": true, "fields": [{"name": "question_1002", "type": "textarea", "values": []}]},
+    {"description": null, "label": "How many years of backend experience do you have?", "required": true, "fields": [
+      {"name": "question_1003", "type": "multi_value_single_select", "values": [{"label": "Less than 3 years", "value": 1}, {"label": "3 to 6 years", "value": 2}, {"label": "More than 6 years", "value": 3}]}]},
+    {"description": null, "label": "What are your salary expectations?", "required": true, "fields": [{"name": "question_1004", "type": "input_text", "values": []}]},
+    {"description": null, "label": "Are you legally authorized to work in the country where the job is located?", "required": true, "fields": [
+      {"name": "question_1005", "type": "multi_value_single_select", "values": [{"label": "Yes, I am authorized", "value": 1}, {"label": "No, I am not authorized", "value": 0}]}]},
+    {"description": null, "label": "Will you now or in the future require visa sponsorship?", "required": true, "fields": [
+      {"name": "question_1006", "type": "multi_value_single_select", "values": [{"label": "Yes", "value": 1}, {"label": "No", "value": 0}]}]},
+    {"description": null, "label": "Before submitting your application please review the points below", "required": true, "fields": [
+      {"name": "question_1007[]", "type": "multi_value_multi_select", "values": [{"label": "I acknowledge receipt of the Acme Candidate Privacy Notice", "value": 77}]}]},
+    {"description": null, "label": "Gender", "required": false, "fields": [
+      {"name": "question_1008", "type": "multi_value_single_select", "values": [{"label": "Male", "value": 1}, {"label": "Female", "value": 2}, {"label": "Decline to self identify", "value": 3}]}]}
+  ],
+  "location_questions": [
+    {"description": null, "label": "Longitude", "required": true, "fields": [{"name": "longitude", "type": "input_hidden", "values": []}]},
+    {"description": null, "label": "Latitude", "required": true, "fields": [{"name": "latitude", "type": "input_hidden", "values": []}]},
+    {"description": null, "label": "Location", "required": true, "fields": [{"name": "location", "type": "input_text", "values": []}]}
+  ],
+  "compliance": [
+    {"type": "eeoc", "description": "&lt;p&gt;Voluntary self-identification&lt;/p&gt;", "questions": [
+      {"required": false, "label": "VeteranStatus", "fields": [{"name": "veteran_status", "type": "multi_value_single_select", "values": [{"label": "I don't wish to answer", "value": "3"}, {"label": "I am not a protected veteran", "value": "1"}]}]}
+    ]}
+  ],
+  "demographic_questions": null
+}

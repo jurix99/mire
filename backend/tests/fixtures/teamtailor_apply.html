@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Apply - Integration Specialist - Acme</title></head>
+<body>
+<div id="cookie-preferences">
+  <input type="checkbox" disabled="disabled" id="strictly_necessary" checked="checked">
+  <label class="font-semibold" for="strictly_necessary">Strictly necessary</label>
+  <input type="checkbox" id="analytics"><label for="analytics">Analytics</label>
+</div>
+<form id="job-application-form" novalidate="novalidate" action="https://acme.teamtailor.com/applications" accept-charset="UTF-8" method="post">
+  <input type="hidden" name="authenticity_token" value="xyz" autocomplete="off" />
+  <div data-question-mandatory="true" data-question-multiple-choice="false">
+    <input type="hidden" value="6421870" name="candidate[answers_attributes][0][question_id]" id="candidate_answers_attributes_0_question_id" />
+    <fieldset id="id_3045704">
+      <legend><span>Do you have hands-on experience working with APIs and webhooks?<sup data-asterisk="true" aria-hidden="true">*</sup><span class="sr-only">Required</span></span></legend>
+      <div><input id="boolean-1-true" type="radio" value="true" name="candidate[answers_attributes][0][boolean]" /><label for="boolean-1-true"> Yes </label></div>
+      <div><input id="boolean-1-false" type="radio" value="false" name="candidate[answers_attributes][0][boolean]" /><label for="boolean-1-false"> No </label></div>
+    </fieldset>
+  </div>
+  <div data-question-mandatory="true">
+    <label for="candidate_answers_attributes_1_range">How many years of experience do you have in a similar role?</label>
+    <input value="0" min="0" max="6" required="required" type="range" name="candidate[answers_attributes][1][range]" id="candidate_answers_attributes_1_range" />
+    <input type="number" name="range-custom_number" min="0" max="6" value="0">
+  </div>
+  <div>
+    <label for="candidate_answers_attributes_2_text">What are your salary expectations for the role?</label>
+    <input type="text" name="candidate[answers_attributes][2][text]" id="candidate_answers_attributes_2_text" />
+  </div>
+  <label for="candidate_first_name">First name<sup data-asterisk="true" aria-hidden="true">*</sup></label>
+  <input autocomplete="given-name" maxlength="50" type="text" name="candidate[first_name]" id="candidate_first_name" />
+  <label for="candidate_last_name">Last name<sup data-asterisk="true" aria-hidden="true">*</sup></label>
+  <input autocomplete="family-name" maxlength="50" type="text" name="candidate[last_name]" id="candidate_last_name" />
+  <label for="candidate_email">Email<sup data-asterisk="true" aria-hidden="true">*</sup></label>
+  <input autocomplete="email" type="email" name="candidate[email]" id="candidate_email" />
+  <label for="candidate_phone">Phone</label>
+  <input type="tel" name="candidate[phone]" id="candidate_phone" />
+  <label for="candidate_resume_remote_url">Upload CV<sup data-asterisk="true" aria-hidden="true">*</sup></label>
+  <input value="" disabled="disabled" type="text" name="candidate[resume_remote_url]" id="candidate_resume_remote_url" />
+  <input disabled="disabled" value="0" type="hidden" name="candidate[delete_resume_remote_url]" id="candidate_delete_resume_remote_url" />
+  <label for="candidate_job_applications_attributes_0_cover_letter">Cover letter</label>
+  <textarea rows="3" name="candidate[job_applications_attributes][0][cover_letter]" id="candidate_job_applications_attributes_0_cover_letter"></textarea>
+  <input type="checkbox" value="1" name="candidate[consent_given]" id="candidate_consent_given" />
+  <label for="candidate_consent_given"><span>Required.</span><p>By submitting this application, I confirm that I have read the <a href="/privacy-policy">Privacy Policy</a>.</p><sup data-asterisk="true" aria-hidden="true">*</sup></label>
+  <input type="submit" value="Send application" />
+</form>
+</body>
+</html>

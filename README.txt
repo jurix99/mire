@@ -37,6 +37,10 @@ Architecture
                                     recherche Google), liens gardés 12 mois (trial_leads) ; export admin
                                     /api/admin/trial-leads?format=csv ; limites TRIAL_PER_IP, TRIAL_DAILY_CAP
               - app/engine_health.py  santé du moteur (offres, évaluations, bascule de modèle, file, alertes)
+              - app/apply_forms.py  formulaires de candidature des offres (un adaptateur par ATS, GET publics)
+              - app/application_prep.py  préparation d'une candidature : CV adapté, contrôle anti-invention,
+                                    lettre, réponses ; app/pdf.py : PDF (WeasyPrint, image worker) ;
+                                    app/application_api.py : API de la page Candidature
               - app/restore_check.py  test de restauration de la sauvegarde (workflow restore-test.yml)
               - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau) ; test_postgres.py
                                     (marqueur postgres) : seulement avec TEST_POSTGRES_URL
@@ -63,7 +67,12 @@ Tables :
   sources               où chercher (ATS, job boards, fonds VC, radars de levées, requêtes Google…), partagées
   search_runs           passages de recherche de l'agent (compteurs, résumé, top par utilisateur)
   applications          process de candidature : un utilisateur x un poste, avec statut
-  application_events    historique des changements de statut
+  application_events    historique des changements de statut (+ instantané de ce qui a été envoyé)
+  application_forms     formulaire de candidature d'une offre lu sur l'ATS (partagé, relu après 7 jours)
+  application_drafts    candidature préparée d'un process : réponses, CV adapté (structuré + texte), lettre, statut,
+                        avertissements, tokens Gemini
+  generated_files       PDF générés (CV adapté, lettre) ; exportés (RGPD) et supprimés avec le compte
+  application_generations  journal des préparations / régénérations (quotas par jour, tokens)
   user_profiles         profil riche (1-1 avec users, créé à la volée) : identité pro, positionnement,
                         expériences, formation, compétences (points forts / à développer), préférences
                         (dont déplacements), règles « éviter / préférer » (origine, exemples, active),
@@ -86,7 +95,8 @@ Tables :
                         daily) : statut, tentatives, exécution différée, erreur
   (pgvector)            jobs.embedding / user_profiles.embedding (384 dimensions), job_assessments.similarity
 
-Statuts posés par l'utilisateur : nouveau, à regarder, postulé, relance, entretien, offre, refusé,
+Statuts posés par l'utilisateur : nouveau, à regarder, prête à envoyer (uniquement par « Marquer prête à envoyer »
+de la page Candidature), postulé, relance, entretien, offre, refusé,
 pas intéressé, abandonné. Statut affiché : celui posé par l'utilisateur, sinon « Offre fermée » si l'offre n'est plus ouverte, sinon le
 verdict de l'évaluation (« Nouveau » ou « Écartée (auto) »). Couleurs : variables --st-* dans frontend/assets/app.css.
 
@@ -167,6 +177,13 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/profile/rules/synthesize                POST, règles déduites des retours -> proposition
          /api/jobs/{id}/feedback                      POST {sentiment: like|dislike, reasons, text}
          /api/jobs/{id}/similar                       GET, 5 offres ouvertes les plus proches (pgvector, sans LLM)
+         /api/jobs/{id}/application/prepare           POST {refresh?, want_letter?} : prépare la candidature (Pro)
+         /api/jobs/{id}/application/draft             GET, PATCH {answers: [{field_id, value}], cv_text, cover_letter}
+         /api/jobs/{id}/application/draft/fields/{field_id}/regenerate   POST {instruction} (« cover_letter » : la lettre)
+         /api/jobs/{id}/application/files/{cv|lettre} GET, PDF (propriétaire seulement)
+         /api/jobs/{id}/application/ready | /sent     POST : « Prête à envoyer » / « Postulé » + instantané
+         /api/applications/{id}/events/{event_id}/snapshot   GET, ce qui a été envoyé
+         /api/profile/application-defaults            PUT, réponses types des candidatures
          /api/feedback, /api/feedback/reasons         GET, retours récents (nombre de nouveaux), raisons
          /api/jobs/{id}/assessment/manual             PUT {score|null}, correction manuelle de la note
          /api/assessments/status, /api/assessments/run   GET état, POST évaluer tout de suite (10 offres)
@@ -419,3 +436,38 @@ Agrégats : vue matérialisée mv_market_jobs (une ligne par offre classée), RE
 daily ; indicateurs calculés depuis ces faits (market.py), sans LLM à l'affichage. Seuils (market.py) :
 catégorie cachée sous 5 offres, « peu de données » sous 20 ; comptage par entreprise (défaut) ou par offre.
 Free : compétences et postes en clair sur 90 jours (top 5), le reste flouté (PLAN_LIMITS market_*).
+
+------------------------------------------------------------------
+Candidatures préparées (page Candidature, Pro)
+------------------------------------------------------------------
+Mire PRÉPARE la candidature ; il n'envoie RIEN. L'utilisateur ouvre la page de candidature de l'entreprise (bouton
+« Ouvrir la page de candidature »), colle chaque réponse (bouton Copier), joint les PDF et clique lui-même sur
+« Envoyer ». Ni extension de navigateur, ni automatisation, ni connexion à un compte de l'utilisateur sur un ATS.
+
+Parcours : « Préparer ma candidature » (Postes, fiche d'une offre, cartes « À regarder » / « Prête » de Mes process)
+-> tâche fetch_apply_form (sauf formulaire en cache de moins de 7 jours) -> tâche prepare_application -> PDF
+-> page /candidature?job=<id> (le front interroge l'API toutes les 2 s, 2 min au plus).
+  1. Formulaire (apply_forms.py), uniquement des GET publics, même client que ats.py :
+     - Greenhouse : API du job board, /v1/boards/{board}/jobs/{id}?questions=true ;
+     - Ashby : le formulaire n'est ni dans posting-api ni dans le HTML de la page (application React). Mire fait la
+       requête GraphQL de LECTURE « ApiJobPosting » de la page (jobs.ashbyhq.com/api/non-user-graphql), en GET ;
+     - Lever : HTML de /apply ; Teamtailor : HTML de /applications/new ;
+     - Welcome to the Jungle, YC (workatastartup.com) : candidature depuis un compte sur la plateforme -> formulaire
+       standard, lien vers l'offre ;
+     - repli : Gemini lit le HTML nettoyé et tronqué (sortie structurée), sinon formulaire standard (« Formulaire non
+       lu : questions types »).
+  2. Préparation (application_prep.py) : réponses types et profil d'abord ; UN appel Gemini pour le CV adapté, la
+     lettre (seulement si le formulaire en demande une, ou sur demande) et les questions. Offre et pages = données non
+     fiables, tronquées ; ni le nom, ni l'email, ni le téléphone ne sont envoyés à Gemini.
+     Contrôle anti-invention du CV (check_cv) : employeur, école, intitulé, dates, compétence hors profil, puce sans
+     source, chiffre absent des sources, compétence manquante citée -> retiré avec un avertissement visible.
+     Champs sensibles : diversité et consentement jamais remplis ; salaire, autorisation de travail, disponibilité
+     seulement depuis les réponses types (Mon profil > Réponses types pour les candidatures) ; listes à choix limitées
+     à leurs options ; sinon « À toi ». Sans assez de puces dans les expériences, le CV n'est pas généré.
+  3. « Marquer prête à envoyer » : refusé tant qu'un champ obligatoire est vide ou « À toi » ; « J'ai envoyé ma
+     candidature » : statut Postulé, date de candidature, instantané (réponses, CV, lettre) consultable dans Mes process.
+Quotas (PLAN_LIMITS) : prepare_application_per_day 0 en Free (fenêtre Pro), 5 en Pro ; regenerate_field_per_day
+0 / 30. Jour civil, heure de Paris ; une préparation échouée (Gemini indisponible) n'est pas comptée.
+Coût : tokens enregistrés sur le brouillon (application_drafts.tokens_in / tokens_out) et dans application_generations.
+PDF : WeasyPrint (groupe uv « worker ») et Pango ne sont que dans l'image worker. En local (docker compose, sans ce
+groupe), les PDF sont indisponibles : la page le signale et propose de copier le texte.

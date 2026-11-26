@@ -141,6 +141,36 @@ class FakeLLM:
         self.last_analysis_input = profile_json
         return getattr(self, "analysis", None) or ProfileAnalysis()
 
+    # --- Candidatures : (sortie, {model, tokens_in, tokens_out}) ; une exception simule une panne de Gemini ---
+
+    usage = {"model": "fake-gemini", "tokens_in": 9000, "tokens_out": 2500}
+
+    def _scripted(self, attr: str, contents: str, model_cls):
+        value = getattr(self, attr, None)
+        if isinstance(value, Exception):
+            raise value
+        data = value(contents) if callable(value) else (value or {})
+        return model_cls.model_validate(data)
+
+    def extract_apply_form(self, instruction, contents):
+        """Repli « Gemini lit la page » : self.apply_form ({fields: […]}), absent = panne."""
+        from app.apply_forms import ExtractedForm
+
+        self.form_pages = getattr(self, "form_pages", []) + [contents]
+        if getattr(self, "apply_form", None) is None:
+            raise RuntimeError("Gemini indisponible")
+        return self._scripted("apply_form", contents, ExtractedForm), {**self.usage, "tokens_in": 1500,
+                                                                          "tokens_out": 300}
+
+    def prepare_application(self, instruction, contents, model_cls):
+        """Préparation : self.prepared (dict ou callable(contents) -> dict au format PreparedApplication)."""
+        self.prepare_calls = getattr(self, "prepare_calls", []) + [contents]
+        return self._scripted("prepared", contents, model_cls), dict(self.usage)
+
+    def regenerate_field(self, instruction, contents, model_cls):
+        self.regenerate_calls = getattr(self, "regenerate_calls", []) + [contents]
+        return self._scripted("regenerated", contents, model_cls), {**self.usage, "tokens_in": 4000, "tokens_out": 300}
+
     def chat(self, system, history, tools, execute):
         self.calls.append({"system": system, "history": history, "tools": [t.name for t in tools]})
         tool_calls, text = self.script.pop(0) if self.script else ([], "D'accord.")
