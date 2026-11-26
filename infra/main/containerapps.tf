@@ -2,7 +2,10 @@
 # - mire-api      API + front, mise à zéro quand personne ne s'en sert ;
 # - mire-migrate  job manuel : alembic upgrade head, lancé par la CI avant chaque mise à jour de l'API ;
 # - mire-daily    job planifié (cron, UTC) : collecte, embeddings, présélection, évaluation ;
-# - mire-worker   job déclenché par KEDA (scaler postgresql) quand des tâches sont en file.
+# - mire-worker   job déclenché par KEDA (scaler postgresql) quand des tâches sont en file ;
+# - mire-agent-*  jobs planifiés de l'agent de recherche (si agent_enabled) : Claude Code, plafond de dépense ;
+# - mire-restore-check  job manuel : vérifie la base restaurée par le test de restauration mensuel
+#                 (.github/workflows/restore-test.yml), en lecture seule.
 # Images sur GHCR (privées) : tirées avec un PAT read:packages lu dans Key Vault (secret ghcr-pat).
 
 resource "azurerm_container_app_environment" "main" {
@@ -28,6 +31,7 @@ resource "azurerm_container_app_environment" "main" {
 locals {
   api_image    = "ghcr.io/${var.ghcr_owner}/mire-api:${var.api_image_tag}"
   worker_image = "ghcr.io/${var.ghcr_owner}/mire-worker:${var.worker_image_tag}"
+  agent_image  = "ghcr.io/${var.ghcr_owner}/mire-agent:${var.agent_image_tag}"
   public_url   = var.custom_domain != "" ? "https://${var.custom_domain}" : "https://mire-api.${azurerm_container_app_environment.main.default_domain}"
 
   # Configuration commune (non secrète) de l'API et des jobs
@@ -38,6 +42,7 @@ locals {
     GEMINI_FALLBACK_MODEL  = var.gemini_fallback_model
     GEMINI_EVAL_MODEL      = var.gemini_eval_model
     BILLING_ENABLED        = tostring(var.billing_enabled)
+    TRIAL_DAYS             = tostring(var.trial_days)
     MATCH_TOP_K            = tostring(var.match_top_k)
   }
   # Adresses (variables sensibles) : blocs env statiques, un for_each ne peut pas porter de valeur sensible
@@ -67,6 +72,11 @@ locals {
     GEMINI_API_KEY = "gemini-api-key"
   }
   daily_secret_env = merge(local.job_secret_env, { HEALTHCHECK_DAILY_URL = "healthcheck-daily-url" })
+  # Agent : aucun accès à la base ni à Gemini, seulement l'API de l'agent (jeton) et l'API Anthropic
+  agent_secret_env = {
+    MIRE_AGENT_TOKEN  = "agent-token"
+    ANTHROPIC_API_KEY = "anthropic-api-key"
+  }
 }
 
 # --- API ------------------------------------------------------------------------------------------
@@ -113,7 +123,7 @@ resource "azurerm_container_app" "api" {
   }
 
   template {
-    min_replicas = 0 # mise à zéro : dans le quota gratuit tant que l'API est peu utilisée
+    min_replicas = var.api_min_replicas # 0 : mise à zéro (quota gratuit) ; 1 : pas de démarrage à froid
     max_replicas = 2
 
     http_scale_rule {
@@ -145,6 +155,14 @@ resource "azurerm_container_app" "api" {
       env {
         name  = "PRO_USER_EMAILS"
         value = var.pro_user_emails
+      }
+      env {
+        name  = "BETA_EMAILS" # bêta privée (users.py) : vide avec BETA_INVITE_CODE = inscription ouverte
+        value = var.beta_emails
+      }
+      env {
+        name  = "BETA_INVITE_CODE"
+        value = var.beta_invite_code
       }
       env {
         name  = "ADMIN_EMAILS"
@@ -428,4 +446,154 @@ resource "azurerm_container_app_job" "worker" {
     azurerm_key_vault_secret.database_url,
     azurerm_key_vault_secret.keda_postgres,
   ]
+}
+
+# --- Agent de recherche ---------------------------------------------------------------------------
+# Un job planifié par type de passage (var.agent_schedules). Il ne touche pas la base : il passe par l'API de
+# l'agent (URL publique + jeton agent-token), exactement comme depuis un poste (agent/run_agent.py).
+
+resource "azurerm_container_app_job" "agent" {
+  for_each                     = var.apps_enabled && var.agent_enabled ? var.agent_schedules : {}
+  name                         = "mire-agent-${each.key}"
+  resource_group_name          = local.rg
+  location                     = local.location
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  workload_profile_name        = "Consumption"
+  replica_timeout_in_seconds   = 10800 # un passage approfondi peut durer plus d'une heure
+  replica_retry_limit          = 0     # une nouvelle tentative paierait le passage une deuxième fois
+  tags                         = local.tags
+
+  schedule_trigger_config {
+    cron_expression          = each.value
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.runtime.id]
+  }
+
+  registry {
+    server               = "ghcr.io"
+    username             = var.ghcr_owner
+    password_secret_name = "ghcr-pat"
+  }
+
+  dynamic "secret" {
+    for_each = toset(concat(values(local.agent_secret_env), ["ghcr-pat"]))
+    content {
+      name                = secret.value
+      key_vault_secret_id = local.secret_id[secret.value]
+      identity            = azurerm_user_assigned_identity.runtime.id
+    }
+  }
+
+  template {
+    container {
+      name   = "agent"
+      image  = local.agent_image
+      args   = [each.key]
+      cpu    = 1
+      memory = "2Gi"
+
+      env {
+        name  = "MIRE_URL"
+        value = local.public_url
+      }
+      env {
+        name  = "AGENT_MODEL"
+        value = var.agent_model
+      }
+      env {
+        name  = "AGENT_MAX_BUDGET_USD"
+        value = tostring(var.agent_max_budget_usd)
+      }
+      env {
+        name  = "AGENT_TOTAL_BUDGET_USD"
+        value = tostring(var.agent_total_budget_usd)
+      }
+      dynamic "env" {
+        for_each = local.agent_secret_env
+        content {
+          name        = env.key
+          secret_name = env.value
+        }
+      }
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.runtime_key_vault]
+}
+
+# --- Test de restauration de la sauvegarde PostgreSQL ------------------------------------------------
+# Le workflow restore-test.yml restaure la base (PITR) vers un serveur temporaire au nom FIXE
+# (local.pg_restore_test_name, dans le même sous-réseau privé), lance ce job, puis supprime le serveur. Le job
+# tourne dans le VNet (la base n'a pas d'accès public) et vérifie la base restaurée en lecture seule
+# (backend/app/restore_check.py). Sans serveur restauré, il échoue sans rien toucher.
+
+locals {
+  pg_restore_test_name = "psql-mire-restore-${local.suffix}"
+}
+
+resource "azurerm_container_app_job" "restore_check" {
+  count                        = var.apps_enabled ? 1 : 0
+  name                         = "mire-restore-check"
+  resource_group_name          = local.rg
+  location                     = local.location
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  workload_profile_name        = "Consumption"
+  replica_timeout_in_seconds   = 600
+  replica_retry_limit          = 0
+  tags                         = local.tags
+
+  manual_trigger_config {
+    parallelism              = 1
+    replica_completion_count = 1
+  }
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.runtime.id]
+  }
+
+  registry {
+    server               = "ghcr.io"
+    username             = var.ghcr_owner
+    password_secret_name = "ghcr-pat"
+  }
+
+  dynamic "secret" {
+    for_each = toset(["database-url", "ghcr-pat"])
+    content {
+      name                = secret.value
+      key_vault_secret_id = local.secret_id[secret.value]
+      identity            = azurerm_user_assigned_identity.runtime.id
+    }
+  }
+
+  template {
+    container {
+      name    = "restore-check"
+      image   = local.api_image # migrations du code déployé : révision attendue du schéma
+      command = ["python", "-m", "app.jobs", "restore-check"]
+      cpu     = 0.25
+      memory  = "0.5Gi"
+
+      env {
+        name        = "DATABASE_URL" # identifiants de la base d'origine, copiés par la restauration
+        secret_name = "database-url"
+      }
+      env {
+        name  = "RESTORE_HOST"
+        value = "${local.pg_restore_test_name}.postgres.database.azure.com"
+      }
+      env {
+        name  = "LOG_FORMAT"
+        value = "json"
+      }
+    }
+  }
+
+  depends_on = [azurerm_role_assignment.runtime_key_vault, azurerm_key_vault_secret.database_url]
 }

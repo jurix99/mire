@@ -275,7 +275,7 @@ export async function openProModal() {
   const free = billing?.limits ?? {};
   const pro = billing?.pro_limits ?? {};
   const prices = billing?.prices ?? {};
-  const isPro = billing && billing.plan === "pro";
+  const isPro = billing && billing.plan === "pro" && !billing.trial; // en essai : on peut déjà s'abonner
   const list = planFeatures(free, pro);
   const feats = (items) => html`<ul class="plan-feats">${items.map(([on, text]) => html`<li class="${on ? "" : "off"}">${text}</li>`)}</ul>`;
   // « 10 € TTC / mois » -> montant en grand, le reste en petit (comme sur la landing)

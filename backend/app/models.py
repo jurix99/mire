@@ -519,7 +519,7 @@ class SearchRun(Base):
     __tablename__ = "search_runs"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    kind: Mapped[str] = mapped_column(String(20))  # planifie | manuel | approfondi
+    kind: Mapped[str] = mapped_column(String(20))  # decouverte | approfondi | offres | recherche | collecte…
     status: Mapped[str] = mapped_column(String(20), default="en_cours")  # en_cours | termine | echec
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

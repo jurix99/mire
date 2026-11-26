@@ -23,7 +23,21 @@ const next = new URLSearchParams(location.search).get("next");
 const APP_HOME = "/tableau-de-bord";
 const safeNext = next && next.startsWith("/") && !next.startsWith("//") && !["/", "/bienvenue"].includes(next)
   ? next : APP_HOME;
-for (const a of $$("[data-login]")) a.href = `/auth/login?next=${encodeURIComponent(safeNext)}`;
+// Bêta privée : lien d'invitation /?invitation=<code>, transmis à la connexion (vérifié par le serveur)
+const params = new URLSearchParams(location.search);
+const invitation = params.get("invitation");
+const inviteParam = invitation ? `&invitation=${encodeURIComponent(invitation)}` : "";
+for (const a of $$("[data-login]")) a.href = `/auth/login?next=${encodeURIComponent(safeNext)}${inviteParam}`;
+
+// Connexion refusée par la bêta privée (nouveau compte sans invitation)
+if (params.get("acces") === "beta") {
+  const note = document.createElement("div");
+  note.className = "beta-note";
+  note.setAttribute("role", "status");
+  note.innerHTML = `<strong>Mire est en bêta privée.</strong> L'inscription se fait pour l'instant sur invitation :
+    utilisez le lien qui vous a été envoyé, ou revenez bientôt.`;
+  $("main")?.prepend(note);
+}
 
 // Déjà connecté : « Ouvrir Mire » à la place des boutons de connexion ; « Passer Pro » ouvre directement l'offre
 fetch("/auth/me", { headers: { Accept: "application/json" } }).then((res) => {

@@ -158,9 +158,8 @@ async function checkCompany(company, btn) {
     toast(`${company.name} : ${summary}. Aucune nouvelle offre.`);
     return reload();
   }
-  const old = (p) => p.published_on && (Date.now() - new Date(p.published_on)) / 86400000 > 61;
-  const fmt = (p) => [p.title, p.location, p.published_on ? `publiée le ${fmtDate(p.published_on)}` : "",
-    old(p) ? "ancienne (plus de 2 mois) : ne sera pas ajoutée" : ""].filter(Boolean).join(" · ");
+  const fmt = (p) => [p.title, p.location, p.published_on ? `publiée le ${fmtDate(p.published_on)}` : ""]
+    .filter(Boolean).join(" · ");
   const values = await openForm({
     title: `${company.name} : nouvelles offres`,
     fields: [{ name: "ids", label: `${res.new_postings.length} offre${res.new_postings.length > 1 ? "s" : ""} pas encore dans Mire`,
@@ -172,8 +171,7 @@ async function checkCompany(company, btn) {
   if (values?.ids?.length) {
     const out = await attempt(() => api(`/companies/${company.id}/postings/import`, { method: "POST", body: { ats_job_ids: values.ids } }));
     toast(`${out.created.length} offre${out.created.length > 1 ? "s" : ""} ajoutée${out.created.length > 1 ? "s" : ""}`
-      + (out.duplicates.length ? ` · ${out.duplicates.length} déjà connue${out.duplicates.length > 1 ? "s" : ""}` : "")
-      + (out.too_old.length ? ` · ${out.too_old.length} trop ancienne${out.too_old.length > 1 ? "s" : ""}` : ""));
+      + (out.duplicates.length ? ` · ${out.duplicates.length} déjà connue${out.duplicates.length > 1 ? "s" : ""}` : ""));
     refreshCounts();
   }
   reload();

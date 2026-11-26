@@ -121,14 +121,16 @@ class FakeLLM:
         synthesis = getattr(self, "synthesis", None) or {}
         return RulesSynthesis.model_validate(synthesis(contents) if callable(synthesis) else synthesis)
 
-    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models=None):
+    def evaluate_jobs(self, profile_context: str, jobs: list[dict], models=None, variant="v1"):
         """Évaluation simulée : self.grade(job_payload) -> dict de champs JobEvaluation (défaut : 0.7 partout)."""
-        from app.assessments import EvaluationBatch
+        from app.assessments import EvaluationBatch, EvaluationBatchV2
 
-        self.eval_calls = getattr(self, "eval_calls", []) + [{"context": profile_context, "jobs": jobs}]
+        batch_model = EvaluationBatchV2 if variant == "v2" else EvaluationBatch
+        self.eval_calls = getattr(self, "eval_calls", []) + [
+            {"context": profile_context, "jobs": jobs, "variant": variant}]
         grade = getattr(self, "grade", None) or (lambda job: {})
         keys = ("competences", "stade", "ownership", "ia_concrete", "xp", "references")
-        return EvaluationBatch.model_validate({"evaluations": [
+        return batch_model.model_validate({"evaluations": [
             {"job_id": j["job_id"], **dict.fromkeys(keys, 0.7), "why": f"Intéressant : {j['titre']}", **grade(j)}
             for j in jobs if grade(j) is not None
         ]})

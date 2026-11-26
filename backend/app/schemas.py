@@ -63,6 +63,9 @@ class BillingOut(BaseModel):
 
     enabled: bool  # BILLING_ENABLED : sinon tout le monde est Pro
     plan: Literal["free", "pro"]
+    trial: bool = False  # Pro grâce à l'essai seulement (TRIAL_DAYS)
+    trial_until: datetime | None = None
+    trial_days: int = 0
     pro_until: datetime | None = None
     cancel_at_period_end: bool = False
     kind: Literal["subscription", "pass"] | None = None

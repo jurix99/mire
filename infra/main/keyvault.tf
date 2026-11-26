@@ -4,7 +4,9 @@
 # Secrets posés À LA MAIN (az keyvault secret set, voir docs/deploiement-azure.md) : Terraform n'en connaît
 # que les noms, jamais les valeurs.
 #   session-secret, linkedin-client-id, linkedin-client-secret, gemini-api-key, agent-token, ghcr-pat,
-#   healthcheck-daily-url, et si billing_enabled : stripe-secret-key, stripe-webhook-secret.
+#   healthcheck-daily-url, et si billing_enabled : stripe-secret-key, stripe-webhook-secret ; si agent_enabled :
+#   anthropic-api-key (clé de l'API Anthropic de l'agent de recherche, avec une limite de dépense mensuelle
+#   posée dans la console Anthropic).
 # Secrets posés PAR TERRAFORM (dérivés du mot de passe PostgreSQL généré, voir postgres.tf) :
 #   database-url, keda-postgres-connection.
 
@@ -26,6 +28,7 @@ locals {
     ["session-secret", "linkedin-client-id", "linkedin-client-secret", "gemini-api-key", "agent-token", "ghcr-pat",
     "healthcheck-daily-url"],
     var.billing_enabled ? ["stripe-secret-key", "stripe-webhook-secret"] : [],
+    var.agent_enabled ? ["anthropic-api-key"] : [],
   )
   # ID SANS version : les Container Apps relisent la dernière version du secret (sous 30 min environ)
   secret_id = { for name in concat(local.manual_secrets, ["database-url", "keda-postgres-connection"]) :

@@ -41,7 +41,7 @@ from .public_api import router as public_router
 from .trial import router as trial_router
 from .radar_api import router as radar_router
 from .seed import seed_catalog, seed_sources
-from .users import DEV_LOGIN_BYPASS, SEED_DEMO, normalize_locale, upsert_user
+from .users import DEV_LOGIN_BYPASS, SEED_DEMO, invite_matches, normalize_locale, signup_allowed, upsert_user
 
 LINKEDIN_AUTHORIZE_URL = "https://www.linkedin.com/oauth/v2/authorization"
 LINKEDIN_TOKEN_URL = "https://www.linkedin.com/oauth/v2/accessToken"
@@ -132,9 +132,15 @@ app.add_middleware(
 app.add_middleware(BodySizeLimit)
 
 
-def _save_user(info: dict) -> int:
+def _save_user(info: dict, invited: bool = False) -> int | None:
+    """Crée / met à jour l'utilisateur ; None si la bêta privée refuse un nouveau compte (voir users.py)."""
     with SessionLocal() as db:
+        if not signup_allowed(db, info, invited):
+            return None
         return upsert_user(db, info).id
+
+
+BETA_WAITLIST = "/?acces=beta"  # la landing explique que l'accès se fait sur invitation
 
 
 APP_HOME = "/tableau-de-bord"  # « / » est la landing publique
@@ -173,9 +179,11 @@ def check(request: Request) -> Response:
 
 
 @app.get("/auth/login")
-def login(request: Request, next: str | None = None) -> RedirectResponse:
+def login(request: Request, next: str | None = None, invitation: str | None = None) -> RedirectResponse:
     if not CLIENT_ID or not CLIENT_SECRET:
         raise HTTPException(500, "LINKEDIN_CLIENT_ID / LINKEDIN_CLIENT_SECRET manquants dans .env")
+    if invite_matches(invitation):  # lien d'invitation de la bêta privée : retenu jusqu'au retour de LinkedIn
+        request.session["invited"] = True
     state = secrets.token_urlsafe(32)
     request.session["oauth_state"] = state
     request.session["next"] = _safe_next(next)
@@ -227,7 +235,7 @@ async def callback(
             raise HTTPException(502, f"Lecture du profil LinkedIn échouée : {userinfo_resp.text}")
         info = userinfo_resp.json()
 
-    request.session["user"] = {
+    user = {
         "sub": info.get("sub"),
         "name": info.get("name"),
         "given_name": info.get("given_name"),
@@ -239,7 +247,10 @@ async def callback(
     if not info.get("sub"):
         raise HTTPException(502, "Profil LinkedIn sans identifiant (sub)")
     # Crée / met à jour la ligne de la table users (sync : exécuté hors de la boucle d'événements)
-    user_id = await run_in_threadpool(_save_user, request.session["user"])
+    user_id = await run_in_threadpool(_save_user, user, bool(request.session.pop("invited", False)))
+    if user_id is None:  # bêta privée : pas de session, page d'explication
+        return RedirectResponse(BETA_WAITLIST, status_code=303)
+    request.session["user"] = user
     request.session["user_id"] = user_id
     return RedirectResponse(request.session.pop("next", APP_HOME), status_code=303)
 

@@ -1,12 +1,15 @@
 # syntax=docker/dockerfile:1.7
-# Images de production de Mire : deux cibles, un seul Dockerfile (contexte = racine du dépôt).
+# Images de production de Mire : trois cibles, un seul Dockerfile (contexte = racine du dépôt).
 #
 #   docker build --platform linux/amd64 --target api    --build-arg ASSET_VERSION=$(git rev-parse --short HEAD) -t mire-api .
 #   docker build --platform linux/amd64 --target worker -t mire-worker .
+#   docker build --platform linux/amd64 --target agent  -t mire-agent .
 #
 # api     API FastAPI + front (frontend/), sans modèle d'embeddings : légère, démarrage à froid rapide.
 #         Sert aussi au job mire-migrate (python -m app.jobs migrate).
 # worker  jobs mire-daily et mire-worker : fastembed + modèle multilingue téléchargé AU BUILD.
+# agent   jobs mire-agent-* : agent de recherche (Claude Code non interactif, agent/run_agent.py), sans le
+#         backend : il ne parle à Mire que par l'API de l'agent (HTTPS + jeton).
 # linux/amd64 : seule architecture exécutée par Container Apps (profil Consumption).
 # Le développement local n'utilise pas ce fichier (docker-compose.yml monte le code dans l'image uv).
 
@@ -71,3 +74,26 @@ ENV RUN_BACKGROUND_THREADS=false \
     HF_HUB_OFFLINE=1
 USER mire
 CMD ["python", "-m", "app.jobs", "worker"]
+
+FROM ${UV_IMAGE} AS agent
+# Node.js pour Claude Code (version figée : une mise à jour est un changement d'image, testé comme le reste)
+ARG CLAUDE_CODE_VERSION=2.1.301
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends nodejs npm ca-certificates \
+    && npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
+    && npm cache clean --force \
+    && apt-get purge -y npm && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
+# Claude Code écrit sa configuration dans $HOME : utilisateur non root avec un dossier personnel
+RUN groupadd --system --gid 10002 agent && useradd --system --uid 10002 --gid agent --create-home agent
+WORKDIR /app
+COPY --chown=agent:agent agent/run_agent.py agent/mire_api.py agent/prompt.md agent/prompt-offres.md \
+     agent/prompt-recherche.md ./agent/
+RUN mkdir -p agent/tmp && chown agent:agent agent/tmp
+ENV PYTHONUNBUFFERED=1 \
+    UV_PYTHON_DOWNLOADS=never \
+    DISABLE_AUTOUPDATER=1 \
+    DISABLE_TELEMETRY=1 \
+    HOME=/home/agent
+USER agent
+ENTRYPOINT ["python", "agent/run_agent.py"]
+CMD ["decouverte"]

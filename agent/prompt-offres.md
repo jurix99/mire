@@ -33,8 +33,9 @@ page publique de leurs offres et qui les enregistres dans Mire. Mire les évalue
    3. Sinon, lis la liste des offres ouvertes, puis la page de chaque offre **tech ou produit** (ingénierie,
       data, ML/IA, infra, produit technique, CTO…). Ignore les offres commerciales, marketing, RH, finance, et les
       stages / alternances.
-   4. Pour chaque offre retenue, absente de `offres_connues` (même URL ou même titre pour la même entreprise) et
-      publiée il y a moins de 2 mois : `POST jobs` avec
+   4. Pour chaque offre retenue, absente de `offres_connues` (même URL ou même titre pour la même entreprise),
+      QUELLE QUE SOIT sa date de publication (elle est dans la liste actuelle de l'entreprise : elle est ouverte) :
+      `POST jobs` avec
       `{"run_id": <id>, "company_id": <id>, "title": "...", "url": "<page de l'offre>", "location": "...",
         "work_mode": "sur_site|hybride|remote", "salary": "<si affiché>", "published_on": "AAAA-MM-JJ",
         "summary": "<texte complet de l'annonce : missions, profil, stack>", "stack": "...",

@@ -214,3 +214,10 @@ def test_liked_job_is_never_excluded_by_a_rule(db, alice, catalog, as_user, fake
     jobs = {j["id"]: j for j in client.get("/api/jobs").json()}
     assert jobs[liked.id]["display_status"] == "nouveau" and jobs[liked.id]["score"] < 6
     assert jobs[catalog["jobs"][0].id]["display_status"] == "ecartee"
+
+
+def test_name_is_not_sent_for_scoring(db, alice, catalog, as_user, fake_llm):
+    """Minimisation des données : le nom n'est pas utile pour noter une offre, il ne part pas chez Gemini."""
+    setup_profile(as_user, alice)
+    assess_user(db, alice, fake_llm)
+    assert fake_llm.eval_calls and all("Alice" not in c["context"] for c in fake_llm.eval_calls)

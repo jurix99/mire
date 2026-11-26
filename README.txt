@@ -33,13 +33,18 @@ Architecture
               - app/taxonomy.py     LISTE FERMÉE des catégories (familles de postes, compétences, secteurs)
               - app/classify.py     classement de chaque offre sur la liste (règles, puis Gemini à énumérations)
               - app/market.py       agrégats du marché (page Analytics, baromètre public) ; analytics_api.py
-              - app/trial.py        essai gratuit de la landing sans compte : lien LinkedIn -> 5 startups (Gemini +
+              - app/trial.py        essai gratuit de la landing sans compte : lien LinkedIn -> 3 startups (Gemini +
                                     recherche Google), liens gardés 12 mois (trial_leads) ; export admin
                                     /api/admin/trial-leads?format=csv ; limites TRIAL_PER_IP, TRIAL_DAILY_CAP
+              - app/engine_health.py  santé du moteur (offres, évaluations, bascule de modèle, file, alertes)
+              - app/restore_check.py  test de restauration de la sauvegarde (workflow restore-test.yml)
               - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau) ; test_postgres.py
                                     (marqueur postgres) : seulement avec TEST_POSTGRES_URL
               - scripts/eval_reference.py  évaluation de référence avec le vrai Gemini (voir plus bas)
-  agent/      agent de recherche local : prompt.md, run-agent.ps1, install-task.ps1, mire_api.py
+              - app/relevance_eval.py + scripts/export_judged.py, eval_relevance.py : mesure de la
+                                    pertinence de la notation sur les offres jugées (voir plus bas)
+  agent/      agent de recherche : prompt.md, prompt-offres.md, mire_api.py ; run_agent.py (serveur : jobs
+              mire-agent-*, plafond de dépense) ; run-agent.ps1, install-task.ps1 (poste Windows)
   docs/       processus de recherche (processus-recherche.md), API de l'agent (agent.md), exemple de profil,
               déploiement sur Azure (deploiement-azure.md)
               - migrations/         migrations Alembic (local : au démarrage ; production : job mire-migrate)
@@ -188,6 +193,17 @@ Tests (depuis backend/, sans Docker) : uv run pytest
   docker compose exec backend uv run python scripts/eval_reference.py
   -> rejoue les retours de docs/processus-recherche.md (§7), vérifie que les règles proposées couvrent les
      thèmes de docs/exemple-profil.txt et que Remanence est mieux notée qu'Ooak Data et Bluesand.
+Mesure de la pertinence de la notation (à refaire avant / après chaque changement du moteur) :
+  1. figer les offres jugées d'un utilisateur (J'aime, Pas intéressé, Postulé…), une fois, sur la vraie base :
+     docker compose exec backend uv run python scripts/export_judged.py        -> eval_data/user-<id>.json
+     (contient le profil : eval_data/ est ignoré par git, ne pas partager)
+  2. rejouer la notation de production (exclusions dures + Gemini) en base temporaire et mesurer :
+     docker compose exec backend uv run python scripts/eval_relevance.py eval_data/user-1.json --name avant
+     -> précision @5/@10/@20 (part d'offres retenues ou aimées parmi les mieux notées), AUC, positives
+        écartées et négatives retenues (avec leurs raisons) ; --repeat 3 : stabilité des notes ;
+        --models : autre modèle ; --variant v2 : notation v2 (voir assessments.py, SCORING_VARIANT) ;
+        validation croisée sur 2 plis par défaut (--folds 1 : profil tel quel)
+  3. comparer deux mesures : scripts/eval_relevance.py --compare avant apres
 
 ------------------------------------------------------------------
 Importer son profil LinkedIn
@@ -257,9 +273,10 @@ Radar et agent de recherche (voir docs/processus-recherche.md et docs/agent.md)
 - Vérification par les ATS (Ashby, Lever, Greenhouse, Recruitee) : bouton « Vérifier les offres » d'une
   entreprise (ATS + identifiant renseignés). Offre absente de la liste -> « Offre fermée » chez ceux qui ne
   l'ont pas traitée (plus évaluée). Une liste vide ou une erreur ne ferme rien. Les nouvelles offres listées
-  peuvent être ajoutées (publiées il y a plus de 2 mois : refusées).
+  peuvent être ajoutées, quelle que soit leur date de publication (encore listées = ouvertes).
 Trois processus :
-  1. Découverte (chaque lundi à 7h43, agent Claude Code local) : entreprises françaises qui ont levé des fonds
+  1. Découverte (chaque lundi à 7h43, agent Claude Code ; en production : job mire-agent-decouverte, voir
+     docs/deploiement-azure.md, sinon tâche planifiée locale) : entreprises françaises qui ont levé des fonds
      + identifiant de leur ATS, testé par Mire avant d'être enregistré.
        powershell -ExecutionPolicy Bypass -File agent\install-task.ps1             installer la tâche
        powershell -ExecutionPolicy Bypass -File agent\run-agent.ps1                découverte à la demande

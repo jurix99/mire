@@ -1,5 +1,5 @@
 # Contexte de build du Dockerfile (racine) : liste blanche, rien d'autre n'entre dans les images
-# (pas de .env, pas de .git, pas d'infra/, pas d'agent/).
+# (pas de .env, pas de .git, pas d'infra/ ; de agent/, seulement ce que l'image « agent » exécute).
 *
 !backend/pyproject.toml
 !backend/uv.lock
@@ -7,5 +7,10 @@
 !backend/app/
 !backend/migrations/
 !frontend/
+!agent/run_agent.py
+!agent/mire_api.py
+!agent/prompt.md
+!agent/prompt-offres.md
+!agent/prompt-recherche.md
 **/__pycache__
 **/*.pyc

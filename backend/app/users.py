@@ -31,6 +31,40 @@ def normalize_locale(value) -> str | None:
     return value.strip().replace("-", "_")[:20]
 
 
+# Bêta privée : inactive si BETA_INVITE_CODE et BETA_EMAILS sont vides (inscription ouverte). Sinon, un NOUVEAU
+# compte n'est créé que pour une adresse de BETA_EMAILS, ou après un lien d'invitation /auth/login?invitation=<code>.
+# Les comptes existants gardent toujours l'accès.
+
+
+def beta_invite_code() -> str:
+    return os.environ.get("BETA_INVITE_CODE", "").strip()
+
+
+def beta_emails() -> set[str]:
+    return {e.strip().lower() for e in os.environ.get("BETA_EMAILS", "").split(",") if e.strip()}
+
+
+def beta_gate_active() -> bool:
+    return bool(beta_invite_code() or beta_emails())
+
+
+def invite_matches(code: str | None) -> bool:
+    import secrets
+
+    expected = beta_invite_code()
+    return bool(expected and code and secrets.compare_digest(code.strip().encode(), expected.encode()))
+
+
+def signup_allowed(db: Session, info: dict, invited: bool = False) -> bool:
+    """Connexion LinkedIn réussie : peut-elle ouvrir (ou rouvrir) une session ?"""
+    if not beta_gate_active() or invited:
+        return True
+    if db.scalar(select(User.id).where(User.linkedin_sub == info.get("sub"))) is not None:
+        return True  # compte existant
+    email = (info.get("email") or "").strip().lower()
+    return bool(email and email in beta_emails())
+
+
 def upsert_user(db: Session, info: dict) -> User:
     """Crée ou met à jour l'utilisateur à partir du profil OpenID Connect."""
     user = db.scalar(select(User).where(User.linkedin_sub == info["sub"]))
