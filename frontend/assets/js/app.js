@@ -7,6 +7,7 @@ import { planFeatures } from "./plans.js";
 export const STATUSES = [
   ["nouveau", "Nouveau"],
   ["a_postuler", "À regarder"],
+  ["prete", "Prête à envoyer"],
   ["postule", "Postulé"],
   ["relance", "Relance"],
   ["entretien", "Entretien"],

@@ -274,6 +274,7 @@ def create_application(body: ApplicationIn, db: DB, user: Me) -> ApplicationOut:
     job = _get_or_404(db, Job, body.job_id)
     if entitlements.access_for(db, user).job_is_locked(job):  # Free : offre floutée (voir set_job_status)
         raise entitlements.pro_required("Offre réservée à l'offre Pro")
+    services.check_manual_status(body.status)
     entitlements.check_process_change(db, user, None, body.status)
     app = Application(user_id=user.id, **body.model_dump())
     app.events.append(ApplicationEvent(from_status=None, to_status=body.status))
@@ -319,6 +320,9 @@ def analytics(db: DB, user: Me) -> AnalyticsOut:
     applied_stages = ACTIVE_STATUSES | {ProcessStatus.refuse}
     funnel = [
         FunnelStep(label="Postes suivis", count=len(jobs)),
+        # Candidatures préparées (« Prête à envoyer »), ou déjà envoyées : chaque étape inclut les suivantes
+        FunnelStep(label="Prêtes à envoyer",
+                   count=sum(1 for s in reached.values() if s & (applied_stages | {ProcessStatus.prete}))),
         FunnelStep(label="Candidatures", count=sum(1 for s in reached.values() if s & applied_stages)),
         FunnelStep(label="Entretiens", count=sum(1 for s in reached.values() if ProcessStatus.entretien in s)),
         FunnelStep(label="Offres", count=sum(1 for s in reached.values() if ProcessStatus.offre in s)),

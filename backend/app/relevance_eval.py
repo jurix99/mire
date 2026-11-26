@@ -53,7 +53,7 @@ from .profile import ProfileData, _norm, get_profile, profile_data, save_fields
 DATASET_VERSION = 2  # 2 : compétences classées de chaque offre (job_skills)
 READABLE_VERSIONS = (1, 2)
 
-POSITIVE_STATUSES = {ProcessStatus.postule, ProcessStatus.relance, ProcessStatus.entretien, ProcessStatus.offre,
+POSITIVE_STATUSES = {ProcessStatus.prete, ProcessStatus.postule, ProcessStatus.relance, ProcessStatus.entretien, ProcessStatus.offre,
                      ProcessStatus.refuse}
 NEUTRAL_STATUSES = {ProcessStatus.a_postuler, ProcessStatus.abandonne}
 

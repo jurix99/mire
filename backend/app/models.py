@@ -1,8 +1,11 @@
 """Modèle de données.
 
 users ──< applications >── jobs >── companies
-  │           │
-  │           └──< application_events (historique des changements de statut)
+  │           │                   └── application_forms   formulaire de candidature lu sur l'ATS (partagé, par offre)
+  │           ├──< application_events (historique des changements de statut ; instantané de ce qui a été envoyé)
+  │           ├── application_drafts  candidature préparée (réponses, CV adapté, lettre), 1-1
+  │           └──< generated_files    PDF générés (CV adapté, lettre)
+  ├──< application_generations  journal des générations Gemini d'une candidature (quotas par jour, coût)
   ├── user_profiles      profil riche (1-1, créé à la volée), contexte du chat
   ├──< profile_imports   aperçus d'import de profil en attente de confirmation
   ├──< chat_conversations ──< chat_messages   conversations avec l'assistant Gemini
@@ -61,6 +64,10 @@ from .db import Base
 class ProcessStatus(str, enum.Enum):
     nouveau = "nouveau"
     a_postuler = "a_postuler"  # libellé « À regarder »
+    # Candidature préparée et relue (page Candidature) : posé UNIQUEMENT par l'action « Marquer prête à envoyer »
+    # de l'utilisateur (POST /api/jobs/{id}/application/ready), jamais par l'automatisation ni par un changement
+    # de statut générique (voir services.check_manual_status)
+    prete = "prete"
     postule = "postule"
     relance = "relance"
     entretien = "entretien"
@@ -73,6 +80,7 @@ class ProcessStatus(str, enum.Enum):
 STATUS_LABELS: dict[ProcessStatus, str] = {
     ProcessStatus.nouveau: "Nouveau",
     ProcessStatus.a_postuler: "À regarder",
+    ProcessStatus.prete: "Prête à envoyer",
     ProcessStatus.postule: "Postulé",
     ProcessStatus.relance: "Relance",
     ProcessStatus.entretien: "Entretien",
@@ -81,7 +89,7 @@ STATUS_LABELS: dict[ProcessStatus, str] = {
     ProcessStatus.pas_interesse: "Pas intéressé",
     ProcessStatus.abandonne: "Abandonné",
 }
-TODO_STATUSES = {ProcessStatus.nouveau, ProcessStatus.a_postuler}
+TODO_STATUSES = {ProcessStatus.nouveau, ProcessStatus.a_postuler, ProcessStatus.prete}
 ACTIVE_STATUSES = {ProcessStatus.postule, ProcessStatus.relance, ProcessStatus.entretien, ProcessStatus.offre}
 
 status_enum = Enum(
@@ -273,6 +281,9 @@ class Application(TimestampMixin, Base):
     events: Mapped[list["ApplicationEvent"]] = relationship(
         back_populates="application", cascade="all, delete-orphan", order_by="ApplicationEvent.created_at"
     )
+    # Candidature préparée (page Candidature) et PDF générés : supprimés avec le process
+    draft: Mapped["ApplicationDraft | None"] = relationship(cascade="all, delete-orphan", passive_deletes=True)
+    files: Mapped[list["GeneratedFile"]] = relationship(cascade="all, delete-orphan", passive_deletes=True)
 
     @property
     def company(self) -> Company:
@@ -288,6 +299,10 @@ class ApplicationEvent(Base):
     to_status: Mapped[ProcessStatus] = mapped_column(status_enum)
     note: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    # « J'ai envoyé ma candidature » : instantané de ce qui a été envoyé (réponses, CV, lettre), pour préparer
+    # l'entretien ; None pour les autres changements de statut
+    snapshot: Mapped[dict | None] = deferred(mapped_column(JSONType))
 
     application: Mapped[Application] = relationship(back_populates="events")
 
@@ -669,4 +684,90 @@ class TrialLead(Base):
     understood: Mapped[str | None] = mapped_column(String(300))  # une phrase : le profil tel que compris
     results: Mapped[list | None] = mapped_column(JSONType)  # [{company_id, name, reason, …}]
     ip_hash: Mapped[str] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)
+
+
+# --- Candidature préparée (apply_forms.py, application_prep.py, application_api.py) ------------------------------
+
+
+class ApplicationForm(TimestampMixin, Base):
+    """Formulaire de candidature d'une offre, lu sur l'ATS (GET publics, sans connexion), PARTAGÉ entre utilisateurs.
+
+    fields : liste ORDONNÉE de champs normalisés (apply_forms.FormField) : field_id, label, kind, required, options,
+    max_length, category. source : ats (adaptateur), html_llm (page lue par Gemini), standard (questions types).
+    Relu au-delà de apply_forms.FORM_MAX_AGE (7 jours) ou à la demande (« Tout recharger »).
+    """
+
+    __tablename__ = "application_forms"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), unique=True)
+    ats: Mapped[str | None] = mapped_column(String(30))
+    apply_url: Mapped[str | None] = mapped_column(String(1000))  # page de candidature, ouverte dans un nouvel onglet
+    fields: Mapped[list] = mapped_column(JSONType, default=list)
+    source: Mapped[str] = mapped_column(String(20), default="standard")  # ats | html_llm | standard
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)  # dernière erreur de lecture (le repli a été utilisé)
+
+
+class ApplicationDraft(TimestampMixin, Base):
+    """Candidature préparée pour un process : réponses au formulaire, CV adapté, lettre. Propre à l'utilisateur.
+
+    answers : [{field_id, value, origin: profil|genere|defaut|a_toi, sources: [ids du profil], warning, edited}]
+    cv : CV adapté structuré (application_prep, après le contrôle anti-invention) ; cv_text : sa version texte
+    (copiée dans les formulaires, base du PDF, modifiable par l'utilisateur).
+    status : en_preparation -> brouillon -> prete -> envoyee (erreur : la préparation a échoué, voir error).
+    Jamais écrit dans les journaux (données personnelles).
+    """
+
+    __tablename__ = "application_drafts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), unique=True)
+    form_snapshot: Mapped[list] = mapped_column(JSONType, default=list)
+    answers: Mapped[list] = mapped_column(JSONType, default=list)
+    cv: Mapped[dict | None] = mapped_column(JSONType)
+    cv_text: Mapped[str | None] = mapped_column(Text)
+    cover_letter: Mapped[str | None] = mapped_column(Text)
+    want_letter: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")  # demandée par l'utilisateur
+    language: Mapped[str] = mapped_column(String(5), default="fr")  # langue de l'offre : fr | en
+    status: Mapped[str] = mapped_column(String(20), default="en_preparation")
+    warnings: Mapped[list] = mapped_column(JSONType, default=list)  # [{kind, message}] affichés sur la page
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    model: Mapped[str | None] = mapped_column(String(60))
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    error: Mapped[str | None] = mapped_column(Text)
+
+
+class GeneratedFile(Base):
+    """PDF généré pour une candidature (CV adapté ou lettre). Exporté (RGPD) et supprimé avec le compte."""
+
+    __tablename__ = "generated_files"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    application_id: Mapped[int] = mapped_column(ForeignKey("applications.id", ondelete="CASCADE"), index=True)
+    kind: Mapped[str] = mapped_column(String(10))  # cv | lettre
+    filename: Mapped[str] = mapped_column(String(255))
+    content: Mapped[bytes] = deferred(mapped_column(LargeBinary))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ApplicationGeneration(Base):
+    """Journal des générations Gemini d'une candidature : quotas par jour (entitlements.py) et coût (tokens).
+
+    Une ligne est écrite dès la mise en file (le quota ne peut pas être contourné en cliquant plusieurs fois) ;
+    les tokens sont complétés à la fin de la génération.
+    """
+
+    __tablename__ = "application_generations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    application_id: Mapped[int | None] = mapped_column(ForeignKey("applications.id", ondelete="SET NULL"), index=True)
+    kind: Mapped[str] = mapped_column(String(20))  # prepare | regenerate
+    model: Mapped[str | None] = mapped_column(String(60))
+    tokens_in: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    tokens_out: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), index=True)

@@ -248,11 +248,23 @@ def load_application(db: Session, app_id: int, user: User) -> Application:
     return app
 
 
-def apply_status(app: Application, status: ProcessStatus, note: str | None = None) -> None:
-    """Change le statut d'un process et l'historise dans application_events."""
+READY_MESSAGE = ("« Prête à envoyer » se pose depuis la page Candidature (bouton « Marquer prête à envoyer »), "
+                 "une fois les champs obligatoires remplis.")
+
+
+def check_manual_status(status: ProcessStatus | None) -> None:
+    """Changement de statut générique (liste des postes, Mes process, assistant) : tous les statuts sauf « prete »,
+    posé uniquement par l'action « Marquer prête à envoyer » (application_api.mark_ready), qui vérifie le formulaire."""
+    if status == ProcessStatus.prete:
+        raise ServiceError(400, READY_MESSAGE)
+
+
+def apply_status(app: Application, status: ProcessStatus, note: str | None = None,
+                 snapshot: dict | None = None) -> None:
+    """Change le statut d'un process et l'historise dans application_events (snapshot : ce qui a été envoyé)."""
     if app.status == status:
         return
-    app.events.append(ApplicationEvent(from_status=app.status, to_status=status, note=note))
+    app.events.append(ApplicationEvent(from_status=app.status, to_status=status, note=note, snapshot=snapshot))
     app.status = status
     if status == ProcessStatus.postule and app.applied_on is None:
         app.applied_on = date.today()
@@ -347,6 +359,7 @@ def create_job(db: Session, body: JobIn, **extra) -> JobOut:
 
 def set_job_status(db: Session, user: User, job_id: int, status: ProcessStatus, note: str | None = None) -> JobOut:
     """Change le statut d'un poste pour l'utilisateur (crée le process si besoin)."""
+    check_manual_status(status)
     job = get_or_404(db, Job, job_id)
     app = user_apps(db, user).get(job_id)
     # Free : pas de process sur une offre floutée (il la mettrait en clair : voir entitlements.access_for)
@@ -378,7 +391,8 @@ def update_application(db: Session, user: User, app_id: int, body: ApplicationPa
     app = load_application(db, app_id, user)
     changes = body.model_dump(exclude_unset=True)
     status = changes.pop("status", None)
-    if status is not None:
+    if status is not None and status != app.status:
+        check_manual_status(status)
         entitlements.check_process_change(db, user, app.status, status)
     for field, value in changes.items():
         setattr(app, field, value)

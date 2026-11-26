@@ -6,6 +6,7 @@ import {
 const HELP = {
   nouveau: "Poste repéré, pas encore étudié",
   a_postuler: "Poste retenu, à regarder de près",
+  prete: "Candidature préparée et relue, à envoyer sur le site de l'entreprise",
   postule: "Candidature envoyée",
   relance: "Pas de réponse : relance à faire ou faite",
   entretien: "Un ou plusieurs entretiens en cours",

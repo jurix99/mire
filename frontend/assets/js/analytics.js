@@ -394,7 +394,7 @@ async function renderTracking() {
       <span>${f.label}</span>
       <div class="funnel-bar" style="width:${Math.max(8, (f.count / top) * 100)}%">${f.count}</div>
     </div>`)}`.s;
-  const [, applied, interviews] = data.funnel;
+  const [, , applied, interviews] = data.funnel; // postes suivis, prêtes à envoyer, candidatures, entretiens…
   $("#rate").textContent = applied.count
     ? `${Math.round((interviews.count / applied.count) * 100)} % des candidatures mènent à un entretien`
     : "";

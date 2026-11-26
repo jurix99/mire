@@ -20,6 +20,7 @@
   /* Couleurs des statuts de process : fond doux / texte / point */
   --st-nouveau-bg: #f1f5f9;    --st-nouveau-fg: #475569;    --st-nouveau-dot: #94a3b8;
   --st-a_postuler-bg: #f3e8ff; --st-a_postuler-fg: #7e22ce; --st-a_postuler-dot: #a855f7;
+  --st-prete-bg: #ccfbf1;      --st-prete-fg: #0f766e;      --st-prete-dot: #14b8a6;
   --st-postule-bg: #eef2ff;    --st-postule-fg: #2f5bff;    --st-postule-dot: #2f5bff;
   --st-relance-bg: #fef3c7;    --st-relance-fg: #a16207;    --st-relance-dot: #f59e0b;
   --st-entretien-bg: #ffedd5;  --st-entretien-fg: #c2410c;  --st-entretien-dot: #f97316;
@@ -147,6 +148,7 @@ img { display: block; }
 
 .st-nouveau    { --bg: var(--st-nouveau-bg);    --fg: var(--st-nouveau-fg);    --dot: var(--st-nouveau-dot); }
 .st-a_postuler { --bg: var(--st-a_postuler-bg); --fg: var(--st-a_postuler-fg); --dot: var(--st-a_postuler-dot); }
+.st-prete      { --bg: var(--st-prete-bg);      --fg: var(--st-prete-fg);      --dot: var(--st-prete-dot); }
 .st-postule    { --bg: var(--st-postule-bg);    --fg: var(--st-postule-fg);    --dot: var(--st-postule-dot); }
 .st-relance    { --bg: var(--st-relance-bg);    --fg: var(--st-relance-fg);    --dot: var(--st-relance-dot); }
 .st-entretien  { --bg: var(--st-entretien-bg);  --fg: var(--st-entretien-fg);  --dot: var(--st-entretien-dot); }
@@ -290,9 +292,10 @@ img { display: block; }
 .funnel { display: grid; gap: 10px; }
 .funnel-step { display: grid; grid-template-columns: 120px minmax(0, 1fr); align-items: center; gap: 12px; font-size: 13px; }
 .funnel-bar { height: 34px; border-radius: 8px; background: var(--accent); color: var(--white); display: flex; align-items: center; padding: 0 12px; font-weight: 600; min-width: 34px; }
-.funnel-step:nth-child(2) .funnel-bar { background: var(--st-postule-dot); opacity: .85; }
-.funnel-step:nth-child(3) .funnel-bar { background: var(--st-entretien-dot); }
-.funnel-step:nth-child(4) .funnel-bar { background: var(--st-offre-dot); }
+.funnel-step:nth-child(2) .funnel-bar { background: var(--st-prete-dot); }
+.funnel-step:nth-child(3) .funnel-bar { background: var(--st-postule-dot); opacity: .85; }
+.funnel-step:nth-child(4) .funnel-bar { background: var(--st-entretien-dot); }
+.funnel-step:nth-child(5) .funnel-bar { background: var(--st-offre-dot); }
 
 .weeks { display: grid; grid-template-columns: repeat(8, 1fr); gap: 10px; align-items: end; height: 160px; }
 .week { display: grid; gap: 6px; justify-items: center; align-content: end; height: 100%; font-size: 11px; color: var(--muted); }

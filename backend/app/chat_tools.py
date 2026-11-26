@@ -357,6 +357,8 @@ def _plan_set_job_status(db: Session, user: User, args: dict) -> Plan:
         status = ProcessStatus(args.get("status"))
     except ValueError:
         raise ToolError(f"Statut inconnu. Valeurs possibles : {STATUS_HELP}") from None
+    if status == ProcessStatus.prete:
+        raise ToolError(services.READY_MESSAGE)
     job = services.get_job(db, user, int(args["job_id"]))
     if job.status == status:
         raise ToolError(f"Le poste est déjà au statut « {_status_label(status)} ».")

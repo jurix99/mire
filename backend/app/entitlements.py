@@ -93,7 +93,7 @@ RECENT_FUNDING_DAYS = 183  # « levées récentes » du bandeau Entreprises
 PUBLIC_DELAY_DAYS = 7  # landing (visiteur non connecté) : entreprises ayant une offre de plus de N jours
 
 # Statuts qui comptent dans le quota de process (les statuts terminaux restent toujours possibles)
-PROCESS_QUOTA_STATUSES = ACTIVE_STATUSES | {ProcessStatus.a_postuler}
+PROCESS_QUOTA_STATUSES = ACTIVE_STATUSES | {ProcessStatus.a_postuler, ProcessStatus.prete}
 
 # Quota -> clé de PLAN_LIMITS
 QUOTAS = {
