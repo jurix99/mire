@@ -11,6 +11,7 @@ classify_jobs  classement sur la liste fermée des offres en attente (CLASSIFY_M
 daily          enchaînement complet (comme `python -m app.jobs daily`)
 fetch_apply_form  formulaire de candidature d'une offre {job_id, force?, application_id?} (apply_forms.py, GET
                publics), puis prepare_application si application_id est donné
+prepare_application  candidature préparée {application_id} (application_prep.py) : réponses, CV adapté, lettre
 """
 
 import logging
@@ -125,6 +126,14 @@ def fetch_apply_form(db: Session, payload: dict) -> None:
         db.commit()
     tasks.enqueue(db, "prepare_application", {"application_id": int(app_id)},
                   dedup_key=f"prepare_application:{app_id}")
+
+
+@tasks.handler("prepare_application")
+def prepare_application(db: Session, payload: dict) -> None:
+    """Candidature préparée {application_id} : un appel Gemini (CV, lettre, questions), contrôle anti-invention."""
+    from . import application_prep
+
+    application_prep.run(db, int(payload["application_id"]), get_llm())
 
 
 @tasks.handler("daily")
