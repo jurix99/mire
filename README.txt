@@ -12,7 +12,10 @@ Architecture
                                     (/mon-profil), Sources (admin : sources, passages, santé du moteur) ;
                                     /tableau-de-bord et /analytics (supprimées) redirigent vers /postes
               - index.html          landing publique à la racine « / », connecté ou non (assets/landing.css,
-                                    assets/js/landing.js) ; l'app commence à /tableau-de-bord (tableau-de-bord.html).
+                                    assets/js/landing.js) ; l'app commence à /postes.
+              - démarrage           profil encore vide : au-dessus des offres, CV (PDF ou export LinkedIn) puis trois
+                                    questions (métiers, où, salaire minimum) et la liste se reclasse
+                                    (assets/js/demarrage.js ; « Plus tard » le masque ; /postes?demarrage=1 le rouvre)
                                     Un visiteur non connecté sur une page de l'app est renvoyé vers « / » (nginx en local,
                                     app/frontend.py en production) ;
                                     le bouton LinkedIn ramène à la page demandée. La déconnexion revient sur « / ».

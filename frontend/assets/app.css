@@ -313,6 +313,20 @@ img { display: block; }
 }
 .notice.warn { background: #fff7ed; border-color: #fed7aa; color: #9a3412; }
 .notice.setup { justify-content: space-between; margin-bottom: 20px; font-size: 14px; }
+
+/* Démarrage (demarrage.js) : CV puis trois questions, au-dessus de la liste d'un profil vide */
+.start { display: grid; gap: 16px; margin-bottom: 20px; border-color: #c7d2fe; }
+.start-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.start-head h2 { margin: 0; font-size: 18px; }
+.start-steps { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 0; padding: 0; list-style: none; counter-reset: step; color: var(--muted); }
+.start-steps li { counter-increment: step; }
+.start-steps li::before { content: counter(step) ". "; }
+.start-steps li.on { color: var(--text); font-weight: 600; }
+.start-steps li.done { text-decoration: line-through; }
+.start-step { display: grid; gap: 12px; }
+.start-step p { margin: 0; }
+.start .check { display: flex; gap: 8px; align-items: center; }
+.start .search-form legend { margin-bottom: 10px; }
 .rerank { position: fixed; left: 50%; bottom: 78px; transform: translateX(-50%); z-index: 80; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
 .main.ready .rerank { left: calc(50% + 130px); }
 

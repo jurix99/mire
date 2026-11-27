@@ -5,6 +5,7 @@ import {
   logo, matchBadge, openForm, openJobDialog, plain, proBar, reactToJob, reactionButtons, reasonList, refreshCounts,
   renderPaged, renderValue, shown, toast,
 } from "./app.js";
+import { drawStart, needsStart } from "./demarrage.js";
 
 const VIEWS = ["pour-vous", "aimees", "ecartees"];
 // Offres déjà dans les candidatures : elles sortent de « Pour vous »
@@ -23,6 +24,7 @@ let companies = [];
 let options = { families: [], seniority: [] };
 let profile = null;
 let pollTimer;
+let starting = false; // panneau de démarrage affiché (profil vide) : pas redessiné à chaque rechargement
 
 const jobDate = (j) => j.published_on ?? j.created_at.slice(0, 10);
 /** Écartée par l'utilisateur lui-même (et non par une exclusion automatique). */
@@ -205,13 +207,35 @@ async function reload() {
   $("#q").value = state.q;
   $("#sort").value = state.sort;
   draw({ keep: !first });
+  await drawStartPanel();
   drawSetup();
   drawAssessmentStatus();
   drawProBanner().catch(() => {});
 }
 
+/** Profil jamais rempli : CV puis trois questions, au-dessus de la liste (demarrage.js). */
+async function drawStartPanel() {
+  if (starting || !needsStart(profile)) return;
+  starting = true;
+  const ai = (await api("/chat/status").catch(() => ({ enabled: false }))).enabled;
+  drawStart($("#start"), {
+    profile, options, ai,
+    onLater: () => { starting = false; drawSetup(); },
+    onDone: async () => {
+      starting = false;
+      state.view = "pour-vous";
+      state.sort = "match";
+      order = []; // nouveau profil : la liste repart de l'ordre du serveur
+      await reload();
+      scrollTo({ top: 0, behavior: "smooth" });
+      toast("Vos offres sont classées pour vous. Aimez ou écartez-en quelques-unes : le classement s'affine.");
+    },
+  });
+}
+
 /** Profil trop vide pour un bon classement : ce qui manque, en une ligne. */
 function drawSetup() {
+  if (starting) return void ($("#setup").innerHTML = "");
   const p = profile.preferences;
   const missing = [!p.roles.length && "vos métiers visés", profile.skills.length < 3 && "vos compétences",
     !p.locations.length && "vos lieux"].filter(Boolean);
