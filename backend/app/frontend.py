@@ -84,7 +84,10 @@ def mount_frontend(app: FastAPI, directory: Path, asset_version: str | None = No
             query = request.url.query
             return RedirectResponse("/" + (f"?{query}" if query else ""), status_code=301)
         if url_path not in PUBLIC_PAGES and not request.session.get("user"):
-            return RedirectResponse(f"/?next={quote(url_path, safe='/')}", status_code=302)
+            # Paramètres gardés : un lien du récapitulatif (/postes?offre=…&retour=like) mène à l'offre après connexion
+            query = request.url.query
+            target = url_path + (f"?{query}" if query else "")
+            return RedirectResponse(f"/?next={quote(target, safe='/')}", status_code=302)
         if url_path.removesuffix(".html") in REMOVED_PAGES:  # anciens liens et favoris : les offres
             query = request.url.query
             return RedirectResponse("/postes" + (f"?{query}" if query else ""), status_code=302)

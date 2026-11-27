@@ -35,6 +35,7 @@ from .assessments_api import router as assessments_router
 from .billing import router as billing_router
 from .chat import router as chat_router
 from .db import SessionLocal
+from .digest import router as digest_router
 from .feedback import router as feedback_router
 from .llm import get_llm
 from .models import Job
@@ -129,6 +130,7 @@ app.include_router(account_router)  # /api/me/export, DELETE /api/me : droits RG
 app.include_router(analytics_router)  # /api/analytics/market, /api/analytics/me, /api/admin/taxonomy-health
 app.include_router(application_router)  # /api/jobs/{id}/application/... : page Candidature (rien n'est envoyé)
 app.include_router(application_events_router)  # /api/applications/{id}/events/{event_id}/snapshot
+app.include_router(digest_router)  # /api/me/digest, /api/public/email/desabonnement (récapitulatif par e-mail)
 app.add_middleware(
     SessionMiddleware,
     secret_key=SESSION_SECRET,

@@ -133,6 +133,11 @@ class User(TimestampMixin, Base):
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Client Stripe (créé au premier paiement, voir billing.py)
     stripe_customer_id: Mapped[str | None] = mapped_column(String(255), unique=True)
+    # Récapitulatif des nouvelles offres par e-mail (digest.py) : weekly | daily | off ; dernier envoi ; jeton
+    # aléatoire du lien de désabonnement (créé au premier envoi, sans session ni secret partagé)
+    digest_frequency: Mapped[str] = mapped_column(String(10), default="weekly", server_default="weekly")
+    digest_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    email_token: Mapped[str | None] = mapped_column(String(64), unique=True)
 
     applications: Mapped[list["Application"]] = relationship(back_populates="user", cascade="all, delete-orphan")
     profile: Mapped["UserProfile | None"] = relationship(back_populates="user", cascade="all, delete-orphan")

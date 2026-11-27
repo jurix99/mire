@@ -44,6 +44,9 @@ def test_app_pages_require_session(site):
     r = site.get("/entreprises")
     assert r.status_code == 302 and r.headers["location"] == "/?next=/entreprises"
     assert site.get("/tableau-de-bord.html").headers["location"] == "/?next=/tableau-de-bord.html"
+    # Lien du récapitulatif par e-mail : les paramètres survivent à la connexion (encodés dans next)
+    r = site.get("/postes?offre=12&retour=like")
+    assert r.headers["location"] == "/?next=/postes%3Foffre%3D12%26retour%3Dlike"
     # Fichier inexistant : même règle que nginx (session d'abord), puis 404
     assert site.get("/nexiste-pas").status_code == 302
     site.get("/auth/test-login")

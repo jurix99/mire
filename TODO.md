@@ -26,8 +26,30 @@ Les emplacements sont marqués `[À compléter]` (surlignés en jaune sur les pa
 
 - [ ] Secrets GitHub `BETA_INVITE_CODE` (et/ou `BETA_EMAILS`), puis *Deploy* ; envoyer le lien
       `https://<domaine>/?invitation=<code>` aux testeurs.
-- [ ] Demander à chaque testeur de remplir ses critères personnels (barème du profil) et de juger ses offres
-      (J'aime / Pas intéressé) ; suivre « Pertinence par profil » sur la page Analytics (administrateurs).
+- [ ] Demander à chaque testeur de remplir « Ma recherche » (Profil) et de juger ses offres
+      (J'aime / Pas intéressé) ; suivre « Pertinence par profil » sur la page Sources (administrateurs).
+
+## Classement (backend/app/ranking.py)
+
+- [ ] Mesurer la pertinence du nouveau classement sur des jugements réels (précision@10) avant d'ajuster ses poids.
+- [ ] Premier déploiement : les embeddings de toutes les offres sont recalculés par le job `mire-daily` (la
+      migration les efface) ; vérifier qu'il tient dans son délai (1 h).
+- [ ] Code serveur sans page depuis le retrait d'Analytics et du tableau de bord (`/api/analytics*`,
+      `/api/dashboard`) : à supprimer ou à réutiliser.
+
+## Récapitulatif par e-mail (backend/app/digest.py, désactivé tant que SMTP_HOST est vide)
+
+- [x] Fournisseur : Cloudflare Email Service, domaine `notifications.kingjulian.fr` actif (SPF, DKIM, DMARC posés
+      par Cloudflare ; DNS de kingjulian.fr chez Cloudflare depuis le 27/11/2026, enregistrements en « DNS only »).
+- [ ] Offre Workers Free : envoi seulement aux destinataires vérifiés (Email Routing > Destination addresses, 200 au
+      plus). Passer à Workers Paid (3 000 e-mails/mois inclus) avant d'ouvrir à des utilisateurs non vérifiés.
+- [ ] Production : variables GitHub `MIRE_DIGEST_ENABLED=true`, `SMTP_HOST=smtp.mx.cloudflare.net`, `SMTP_PORT=465`,
+      `SMTP_USER=api_token`, `SMTP_FROM=Mire <recapitulatif@notifications.kingjulian.fr>`, secret Key Vault
+      `smtp-password` (jeton d'API « mire-smtp-recapitulatif »), puis *Deploy* (docs/deploiement-azure.md).
+- [ ] Bêta : suivre dans les journaux de `mire-daily` (`step = digest`) les envois, et les retours venus des
+      e-mails (clics J'aime / Pas intéressé) ; ajuster `MIN_SCORE` et la fréquence par défaut si besoin.
+- [ ] En local avec nginx (port 8080), la redirection vers la connexion perd les paramètres d'un lien
+      (`/postes?offre=…`) : seul le front servi par FastAPI (production) les garde.
 
 ## Essai Pro (TRIAL_DAYS, désactivé par défaut)
 

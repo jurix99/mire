@@ -59,7 +59,9 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "profile_analysis": False,  # /api/profile/analyze
         "rules_synthesis": False,  # /api/profile/rules/synthesize
         "chat_per_month": 10,  # messages à l'assistant par mois civil
-        "digest_email": False,  # (plus tard) e-mail récapitulatif
+        # Récapitulatif des nouvelles offres par e-mail (digest.py) : ouvert au Free, avec le même masquage que
+        # l'app (offres floutées seulement comptées) ; c'est ce qui fait revenir, et un argument pour passer Pro
+        "digest_email": True,
         # Analytics « Marché » : période, taille des listes, indicateurs en clair ; le reste est flouté
         # (nombre d'éléments cachés seulement) ; « Toi face au marché » réservé au Pro
         "market_periods": ["90j"],  # listes (pas de tuples) : identiques une fois passées en JSON (/api/me)

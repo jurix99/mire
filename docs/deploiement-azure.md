@@ -102,6 +102,7 @@ Dans *Settings → Secrets and variables → Actions → Variables* (onglet « R
 | `MIRE_TRIAL_DAYS` | facultatif : essai Pro offert à l'inscription, sans carte, en jours (défaut 0 = aucun) ; à annoncer dans les CGV |
 | `MIRE_API_MIN_REPLICAS` | facultatif : `1` supprime le démarrage à froid de l'API, mais sort du quota gratuit (défaut 0) |
 | `MIRE_AGENT_ENABLED`, `MIRE_AGENT_MODEL` | facultatif : agent de recherche côté serveur (voir « Agent de recherche planifié ») |
+| `MIRE_DIGEST_ENABLED`, `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_FROM`, `SMTP_REPLY_TO` | facultatif : récapitulatif des nouvelles offres par e-mail (voir « Récapitulatif par e-mail ») |
 
 Ce sont des identifiants, pas des secrets : l'authentification passe par OIDC, sans secret client.
 
@@ -145,6 +146,8 @@ az keyvault secret set --vault-name $KV -n stripe-secret-key       --value "sk_l
 az keyvault secret set --vault-name $KV -n stripe-webhook-secret   --value "whsec_…"
 # Seulement si MIRE_AGENT_ENABLED=true (agent de recherche côté serveur, voir « Exploitation ») :
 az keyvault secret set --vault-name $KV -n anthropic-api-key       --value "sk-ant-…"
+# Seulement si MIRE_DIGEST_ENABLED=true (récapitulatif par e-mail) : mot de passe / clé SMTP du fournisseur
+az keyvault secret set --vault-name $KV -n smtp-password           --value "<jeton d'API Cloudflare Email Sending>"
 ```
 
 Ne réutilisez pas le `session-secret` ni l'`agent-token` du `.env` local. Pour éviter que la valeur reste dans
@@ -309,6 +312,34 @@ ContainerAppConsoleLogs_CL
 | where tostring(j.message) startswith "Alerte moteur"
 | project TimeGenerated, message = tostring(j.message)
 ```
+
+### Récapitulatif par e-mail
+
+`mire-daily` envoie, après l'évaluation, le récapitulatif des nouvelles offres pertinentes à chaque utilisateur
+dont c'est le tour (chaque semaine par défaut, réglable dans Profil > Compte ; voir `backend/app/digest.py`).
+Désactivé tant que `MIRE_DIGEST_ENABLED` n'est pas `true`.
+
+1. Fournisseur : Cloudflare Email Service, domaine d'envoi `notifications.kingjulian.fr` (SPF, DKIM et DMARC
+   posés par Cloudflare). Offre Workers Free : seulement vers les destinataires vérifiés du compte ; Workers Paid
+   pour écrire à tous les utilisateurs.
+2. Variables GitHub : `MIRE_DIGEST_ENABLED=true`, `SMTP_HOST=smtp.mx.cloudflare.net`, `SMTP_PORT=465` (Cloudflare
+   refuse 587), `SMTP_USER=api_token`, `SMTP_FROM` (ex. `Julien de Mire <recapitulatif@notifications.kingjulian.fr>` :
+   le nom signe le message ; pas de virgule), `SMTP_REPLY_TO` facultatif (adresse lue, pour les réponses) ; secret Key Vault
+   `smtp-password` = jeton d'API Cloudflare « Email Sending: Edit » (étape 4), puis *Deploy*.
+3. Fournisseur déjà indiqué dans la politique de confidentialité (section 5).
+4. Vérifier après le passage suivant (ou `az containerapp job start -g rg-mire-prod -n mire-daily`) :
+
+```kusto
+ContainerAppConsoleLogs_CL
+| where ContainerJobName_s == "mire-daily"
+| extend j = parse_json(Log_s)
+| where tostring(j.step) == "digest"
+| project TimeGenerated, message = tostring(j.message)
+```
+
+`sent` : e-mails envoyés ; `empty` : rien de nouveau (aucun e-mail) ; `failed` : envois refusés par le serveur
+SMTP (ligne `Récapitulatif non envoyé…` avec l'utilisateur). Le lien de désabonnement et le désabonnement « en un
+clic » des messageries (`List-Unsubscribe-Post`) passent par `/api/public/email/desabonnement`, sans session.
 
 ### Test de restauration de la sauvegarde
 

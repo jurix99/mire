@@ -45,6 +45,8 @@ Architecture
               - app/application_prep.py  préparation d'une candidature : CV adapté, contrôle anti-invention,
                                     lettre, réponses ; app/pdf.py : PDF (WeasyPrint, image worker) ;
                                     app/application_api.py : API de la page Candidature
+              - app/digest.py       récapitulatif des nouvelles offres par e-mail (job quotidien), réglage et
+                                    désabonnement ; app/mailer.py : envoi SMTP (SMTP_HOST vide = aucun e-mail)
               - app/restore_check.py  test de restauration de la sauvegarde (workflow restore-test.yml)
               - tests/              tests pytest (SQLite, Gemini simulé : aucun appel réseau) ; test_postgres.py
                                     (marqueur postgres) : seulement avec TEST_POSTGRES_URL
@@ -63,7 +65,8 @@ Architecture
   .github/    CI (tests, terraform plan) et déploiement (deploy.yml)
 
 Tables :
-  users                 un compte par identifiant LinkedIn (créé à la première connexion)
+  users                 un compte par identifiant LinkedIn (créé à la première connexion) ; récapitulatif par
+                        e-mail : fréquence (weekly par défaut, daily, off), dernier envoi, jeton de désabonnement
   companies             entreprises (site web, levée, logo mis en cache, ATS + identifiant, page carrières,
                         dernière vérification, « vérifiée sans offre pertinente », effectif)
   jobs                  postes, rattachés à une entreprise ; URL normalisée unique (dédoublonnage), source,
@@ -169,6 +172,9 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
                                                       chiffres du radar, logos des seules entreprises visibles en Free
          /api/me, /api/dashboard, /api/analytics, /api/statuses
          /api/me/export, DELETE /api/me               RGPD : export JSON de toutes vos données, suppression du compte
+         /api/me/digest                               GET, PUT {frequency: weekly|daily|off} : récapitulatif par e-mail
+         /api/public/email/desabonnement?t=<jeton>    SANS session : GET page de confirmation (ne change rien),
+                                                      POST désabonnement (bouton, ou « en un clic » des messageries)
          /api/analytics/market?domain=&family=&period=&count_by=   onglet Marché (Free : masqué en partie)
          /api/analytics/me                            onglet « Toi face au marché » (Pro)
          /api/admin/taxonomy-health                   admin : part « autre », libellés hors liste, compétences absentes
@@ -339,6 +345,26 @@ Trois processus :
      son barème. Les passages et leur résumé apparaissent dans Sources > Passages et le bloc « Veille ».
 
 ------------------------------------------------------------------
+Récapitulatif des nouvelles offres par e-mail (backend/app/digest.py)
+------------------------------------------------------------------
+Ce qui fait revenir dans Mire entre deux visites. Envoyé par le job quotidien, après l'évaluation :
+- à qui : comptes avec une adresse e-mail (celle de LinkedIn), selon la fréquence choisie dans Profil > Compte :
+  chaque semaine (défaut), chaque jour ou jamais ; Free compris (même masquage que l'app) ;
+- quoi : les offres AJOUTÉES depuis le dernier récapitulatif, ouvertes, sans process, proposées par le classement
+  (ni écartées, ni exclues) et pertinentes (pertinence >= 60) ; les 5 meilleures, avec lieu, mode, salaire,
+  « vérifiée il y a X h sur le site de l'entreprise » et, en Pro, les raisons du classement. Free : les offres
+  floutées sont seulement comptées (ni titre ni entreprise), avec un lien vers « Passer Pro » ;
+- rien de nouveau : pas d'e-mail ;
+- boutons Voir l'offre / J'aime / Pas intéressé : des liens /postes?offre=<id>&retour=like|dislike. La page, une fois
+  connecté, ouvre l'offre et applique le retour (annulable) ; sans session, rien n'est enregistré, et la connexion
+  ramène au lien ;
+- désabonnement : lien avec un jeton propre à l'utilisateur (users.email_token) et en-têtes List-Unsubscribe /
+  List-Unsubscribe-Post (désabonnement en un clic des messageries).
+Configuration : SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM, SMTP_REPLY_TO (voir .env.example) ; SMTP_HOST vide =
+aucun e-mail. En production : variable GitHub MIRE_DIGEST_ENABLED et secret smtp-password (docs/deploiement-azure.md).
+Réglages (seuil, nombre d'offres, fréquences) en tête de digest.py.
+
+------------------------------------------------------------------
 Offres Free / Pro et paiement Stripe
 ------------------------------------------------------------------
 Prix (TTC, TVA française via Stripe Tax) : Pro mensuel 15 €/mois sans engagement (abonnement Stripe), Pass
@@ -352,7 +378,8 @@ suivantes sont en clair avec leur note, toutes les autres sont floutées (seule 
 une offre suivie (process) reste en clair, et ne libère pas sa place dans le classement ; pas de process
 sur une offre floutée (402). Entreprise sans aucune offre en clair : carte entièrement floutée sauf le
 secteur. Levées, investisseurs, effectif, ATS, page carrières toujours verrouillés ; « pourquoi » et
-compétences toujours verrouillés ; 20 évaluations Gemini par semaine, après les utilisateurs Pro ; 10
+compétences toujours verrouillés ; récapitulatif par e-mail (offres floutées seulement comptées) ;
+20 évaluations Gemini par semaine, après les utilisateurs Pro ; 10
 process actifs ; 1 import de profil ; ni analyse du profil ni synthèse des règles ; 10 messages à
 l'assistant par mois (Pro : 300). Landing (visiteur non connecté) : entreprises ayant une offre de plus
 de 7 jours.

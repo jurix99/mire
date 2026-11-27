@@ -2,8 +2,8 @@
 
   daily              collecte sur les ATS, embeddings des nouvelles offres, classement sur la liste fermée
                      (CLASSIFY_MAX_PER_RUN offres, le reste en tâche classify_jobs), présélection (match_user) pour
-                     chaque utilisateur, évaluation Gemini (Pro d'abord), puis rafraîchissement des agrégats du
-                     marché. Ping HEALTHCHECK_DAILY_URL (healthchecks.io) à la fin s'il est défini, /fail sinon.
+                     chaque utilisateur, évaluation Gemini (Pro d'abord), récapitulatifs par e-mail (digest.py),
+                     puis rafraîchissement des agrégats du marché. Ping HEALTHCHECK_DAILY_URL (healthchecks.io) à la fin s'il est défini, /fail sinon.
   worker             traite la file de tâches (table tasks) jusqu'à ce qu'elle soit vide, ou --max-seconds.
   migrate            alembic upgrade head (lancé par la CI avant chaque mise à jour de l'API).
   taxonomy           charge la liste fermée (taxonomy.py) dans les tables de référence.
@@ -78,6 +78,16 @@ def daily(db: Session, llm=None, fetch=None, embedder=None) -> dict:
             summary["errors"] += 1
             log.warning("Évaluation utilisateur %s en échec : %s", user.id, exc, extra={"user_id": user.id})
             tasks.enqueue(db, "assess_user", {"user_id": user.id, **candidates})
+    # Récapitulatif des nouvelles offres par e-mail (après l'évaluation : les offres du jour sont notées) ; une
+    # panne d'envoi ne fait jamais échouer le passage quotidien
+    from . import digest
+
+    try:
+        summary["digest"] = digest.send_digests(db)
+        log.info("Récapitulatifs : %s", summary["digest"], extra={"step": "digest", **summary["digest"]})
+    except Exception as exc:
+        db.rollback()
+        log.warning("Récapitulatifs indisponibles : %s", type(exc).__name__, extra={"step": "digest"})
     # Agrégats du marché (page Analytics, baromètre) : vue matérialisée rafraîchie une fois par jour
     from . import market
 

@@ -888,6 +888,30 @@ $("#sections").addEventListener("click", (e) => {
   history.replaceState(null, "", `#${btn.dataset.section}`);
 });
 
+// --- Récapitulatif par e-mail (digest.py) --------------------------------------------------------------
+
+async function renderDigest() {
+  const settings = await api("/me/digest").catch(() => null);
+  if (!settings) return;
+  const select = $("#digest-frequency");
+  select.value = settings.frequency;
+  const note = $("#digest-note");
+  const reason = !settings.email ? "LinkedIn ne nous a pas communiqué votre adresse e-mail : aucun récapitulatif ne peut vous être envoyé."
+    : !settings.available ? "L'envoi d'e-mails n'est pas encore activé sur ce serveur."
+    : `Envoyé à ${settings.email}.`;
+  note.textContent = reason;
+  note.hidden = false;
+  select.disabled = !settings.email;
+}
+
+$("#digest-frequency").addEventListener("change", async (e) => {
+  const frequency = e.target.value;
+  await attempt(() => api("/me/digest", { method: "PUT", body: { frequency } }),
+    frequency === "off" ? "Récapitulatif désactivé" : "Fréquence enregistrée").catch(() => renderDigest());
+});
+
+renderDigest();
+
 // --- Vos données : suppression du compte (droit à l'effacement) ---------------------------------------
 // L'export est un simple lien (/api/me/export, fichier JSON téléchargé).
 

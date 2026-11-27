@@ -45,8 +45,15 @@ locals {
     TRIAL_DAYS             = tostring(var.trial_days)
     MATCH_TOP_K            = tostring(var.match_top_k)
   }
+  # Récapitulatif par e-mail (digest.py) : envoyé par mire-daily ; l'API ne lit que SMTP_HOST (réglage affiché)
+  digest_env = var.digest_enabled ? merge({
+    SMTP_HOST = var.smtp_host
+    SMTP_PORT = tostring(var.smtp_port)
+    SMTP_USER = var.smtp_user
+    SMTP_FROM = var.smtp_from
+  }, var.smtp_reply_to != "" ? { SMTP_REPLY_TO = var.smtp_reply_to } : {}) : {}
   # Adresses (variables sensibles) : blocs env statiques, un for_each ne peut pas porter de valeur sensible
-  api_env = merge(local.common_env, {
+  api_env = merge(local.common_env, local.digest_env, {
     PUBLIC_URL           = local.public_url
     DEV_LOGIN_BYPASS     = "false"
     SEED_DEMO            = "false"
@@ -54,6 +61,8 @@ locals {
     STRIPE_PRICE_MONTHLY = var.stripe_price_monthly
     STRIPE_PRICE_PASS_3M = var.stripe_price_pass_3m
   })
+  # Job quotidien : PUBLIC_URL pour les liens des récapitulatifs
+  daily_env = merge(local.common_env, local.digest_env, { PUBLIC_URL = local.public_url })
 
   # Variable d'environnement -> secret (référence Key Vault)
   api_secret_env = merge({
@@ -71,7 +80,8 @@ locals {
     DATABASE_URL   = "database-url"
     GEMINI_API_KEY = "gemini-api-key"
   }
-  daily_secret_env = merge(local.job_secret_env, { HEALTHCHECK_DAILY_URL = "healthcheck-daily-url" })
+  daily_secret_env = merge(local.job_secret_env, { HEALTHCHECK_DAILY_URL = "healthcheck-daily-url" },
+  var.digest_enabled ? { SMTP_PASSWORD = "smtp-password" } : {})
   # Agent : aucun accès à la base ni à Gemini, seulement l'API de l'agent (jeton) et l'API Anthropic
   agent_secret_env = {
     MIRE_AGENT_TOKEN  = "agent-token"

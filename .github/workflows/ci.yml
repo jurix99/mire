@@ -82,6 +82,12 @@ jobs:
       TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
       TF_VAR_billing_enabled: ${{ vars.BILLING_ENABLED || 'false' }}
       TF_VAR_trial_days: ${{ vars.MIRE_TRIAL_DAYS || '0' }}
+      TF_VAR_digest_enabled: ${{ vars.MIRE_DIGEST_ENABLED || 'false' }}
+      TF_VAR_smtp_host: ${{ vars.SMTP_HOST }}
+      TF_VAR_smtp_port: ${{ vars.SMTP_PORT || '587' }}
+      TF_VAR_smtp_user: ${{ vars.SMTP_USER }}
+      TF_VAR_smtp_from: ${{ vars.SMTP_FROM }}
+      TF_VAR_smtp_reply_to: ${{ vars.SMTP_REPLY_TO }}
       TF_VAR_api_min_replicas: ${{ vars.MIRE_API_MIN_REPLICAS || '0' }}
       TF_VAR_stripe_price_monthly: ${{ vars.STRIPE_PRICE_MONTHLY }}
       TF_VAR_stripe_price_pass_3m: ${{ vars.STRIPE_PRICE_PASS_3M }}

@@ -126,6 +126,46 @@ variable "billing_enabled" {
   default     = false
 }
 
+variable "digest_enabled" {
+  description = "Récapitulatif des nouvelles offres par e-mail (SMTP) : exige le secret smtp-password et smtp_host / smtp_from"
+  type        = bool
+  default     = false
+}
+
+variable "smtp_host" {
+  description = "Serveur SMTP du fournisseur d'envoi (ex. smtp-relay.brevo.com, smtp.azurecomm.net)"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_port" {
+  description = "587 (STARTTLS) ou 465 (TLS direct)"
+  type        = number
+  default     = 587
+  validation {
+    condition     = contains([465, 587], var.smtp_port)
+    error_message = "smtp_port : 465 ou 587"
+  }
+}
+
+variable "smtp_user" {
+  description = "Identifiant SMTP (le mot de passe est le secret Key Vault smtp-password)"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_from" {
+  description = "Expéditeur, ex. « Mire <bonjour@mire.fr> » : domaine authentifié (SPF, DKIM) chez le fournisseur"
+  type        = string
+  default     = ""
+}
+
+variable "smtp_reply_to" {
+  description = "Facultatif : adresse lue par une personne, où arrivent les réponses au récapitulatif (Reply-To)"
+  type        = string
+  default     = ""
+}
+
 variable "stripe_price_monthly" {
   type    = string
   default = ""

@@ -154,6 +154,52 @@ run "agent_desactive_par_defaut" {
     condition     = length(azurerm_container_app_job.agent) == 0
     error_message = "agent : aucun job tant que agent_enabled est faux (secret anthropic-api-key à poser)"
   }
+  assert {
+    condition = (!contains([for s in azurerm_container_app_job.daily[0].secret : s.name], "smtp-password")
+    && !contains([for e in azurerm_container_app_job.daily[0].template[0].container[0].env : e.name], "SMTP_HOST"))
+    error_message = "récapitulatif : ni SMTP ni secret smtp-password tant que digest_enabled est faux"
+  }
+  assert {
+    condition     = contains([for e in azurerm_container_app_job.daily[0].template[0].container[0].env : e.name], "PUBLIC_URL")
+    error_message = "mire-daily : PUBLIC_URL (liens des récapitulatifs)"
+  }
+}
+
+run "recapitulatif_par_email" {
+  command = plan
+
+  variables {
+    apps_enabled   = true
+    digest_enabled = true
+    smtp_host      = "smtp.example.invalid"
+    smtp_from      = "Mire <bonjour@example.invalid>"
+    smtp_reply_to  = "equipe@example.invalid"
+  }
+
+  assert {
+    condition     = contains([for e in azurerm_container_app_job.daily[0].template[0].container[0].env : e.value if e.name == "SMTP_REPLY_TO"], "equipe@example.invalid")
+    error_message = "mire-daily : SMTP_REPLY_TO"
+  }
+  assert {
+    condition     = contains([for s in azurerm_container_app_job.daily[0].secret : s.name], "smtp-password")
+    error_message = "mire-daily : secret smtp-password (référence Key Vault)"
+  }
+  assert {
+    condition     = contains([for e in azurerm_container_app_job.daily[0].template[0].container[0].env : e.secret_name if e.name == "SMTP_PASSWORD"], "smtp-password")
+    error_message = "mire-daily : SMTP_PASSWORD lu dans le secret"
+  }
+  assert {
+    condition     = contains([for e in azurerm_container_app_job.daily[0].template[0].container[0].env : e.value if e.name == "SMTP_HOST"], "smtp.example.invalid")
+    error_message = "mire-daily : SMTP_HOST"
+  }
+  assert {
+    condition     = contains([for e in azurerm_container_app.api[0].template[0].container[0].env : e.name], "SMTP_HOST")
+    error_message = "API : SMTP_HOST (réglage « envoi activé » de la page Profil)"
+  }
+  assert {
+    condition     = !contains([for s in azurerm_container_app.api[0].secret : s.name], "smtp-password")
+    error_message = "API : n'envoie rien, pas besoin du mot de passe SMTP"
+  }
 }
 
 run "agent_planifie" {

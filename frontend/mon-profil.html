@@ -53,6 +53,19 @@
           <div class="identity" id="identity"></div>
           <div class="rows" id="details"></div>
           <div id="billing" hidden></div>
+          <div class="data-rights" id="digest">
+            <p class="label">// Récapitulatif par e-mail</p>
+            <p class="small muted">Les nouvelles offres pertinentes pour vous, avec J'aime et Pas intéressé en un clic.
+              Rien n'est envoyé quand il n'y a rien de nouveau.</p>
+            <label class="small" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">Recevoir
+              <select id="digest-frequency">
+                <option value="weekly">chaque semaine</option>
+                <option value="daily">chaque jour</option>
+                <option value="off">jamais</option>
+              </select>
+            </label>
+            <p class="small muted" id="digest-note" hidden></p>
+          </div>
           <div><a class="btn ghost" href="/auth/logout">Se déconnecter</a></div>
           <div class="data-rights">
             <p class="label">// Vos données</p>

@@ -854,7 +854,27 @@ export async function boot(render) {
     history.replaceState(null, "", url);
     openProModal();
   }
+  // Lien du récapitulatif par e-mail : /postes?offre=<id>[&retour=like|dislike] (rien n'est enregistré sans session)
+  const offer = Number(url.searchParams.get("offre"));
+  if (offer > 0) {
+    const reaction = url.searchParams.get("retour");
+    url.searchParams.delete("offre");
+    url.searchParams.delete("retour");
+    history.replaceState(null, "", url);
+    await done;
+    openFromEmail(offer, ["like", "dislike"].includes(reaction) ? reaction : null);
+  }
   await done;
+}
+
+async function openFromEmail(jobId, reaction) {
+  if (reaction) {
+    const job = await api(`/jobs/${jobId}`).catch(() => null);
+    if (!job) { toast("Cette offre n'existe plus", true); return; }
+    if (job.feedback !== reaction && await reactToJob(job, reaction)) await refreshPage();
+    if (reaction === "dislike") return; // le toast propose « Dire pourquoi » et « Annuler »
+  }
+  openJobDialog(jobId);
 }
 
 // --- Assistant (chat flottant, Gemini) ----------------------------------------
