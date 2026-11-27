@@ -103,7 +103,8 @@ def _portal_url(client: stripe.StripeClient, customer_id: str) -> str:
 @router.post("/checkout")
 def checkout(body: CheckoutIn, db: DB, user: Me) -> UrlOut:
     if not body.waive_withdrawal:
-        # Envoyé par le front au clic sur « Passer Pro », sous la mention de renonciation (CGV art. 6)
+        # Envoyé par le front au clic sur « Prendre le Pass 3 mois » ou « S'abonner au mois », sous la mention de
+        # renonciation (CGV art. 6)
         raise HTTPException(422, "Demande d'accès immédiat et renonciation au droit de rétractation requises (CGV, art. 6)")
     price = os.environ.get(PRICE_ENV[body.plan], "")
     if not price:

@@ -352,8 +352,9 @@ export async function openProModal({ preview = null } = {}) {
   const isPro = billing && billing.plan === "pro" && !billing.trial; // en essai : on peut déjà s'abonner
   const list = planFeatures(free, pro);
   const feats = (items) => html`<ul class="plan-feats">${items.map(([on, text]) => html`<li class="${on ? "" : "off"}">${text}</li>`)}</ul>`;
-  // « 10 € TTC / mois » -> montant en grand, le reste en petit (comme sur la landing)
-  const [, amount = prices.monthly ?? "Pro", unit = ""] = (prices.monthly ?? "").match(/^(.*?€)\s*(.*)$/) ?? [];
+  // Le Pass 3 mois est mis en avant (le temps d'une recherche, sans renouvellement) ; « 25 € TTC pour 3 mois » ->
+  // montant en grand, le reste en petit (comme sur la landing)
+  const [, amount = prices.pass_3m ?? "Pass 3 mois", unit = ""] = (prices.pass_3m ?? "").match(/^(.*?€)\s*(.*)$/) ?? [];
   const dlg = document.createElement("dialog");
   dlg.className = "pro-dialog";
   dlg.setAttribute("aria-label", "Passer à l'offre Pro");
@@ -378,15 +379,19 @@ export async function openProModal({ preview = null } = {}) {
         <article class="plan pro">
           <p class="plan-name">Pro <span class="plan-tag">Radar complet</span></p>
           <p class="plan-price">${amount} <small>${unit}</small></p>
-          <p class="plan-sub">Sans engagement. Ou <strong>${prices.pass_3m ?? "le Pass 3 mois"}</strong>, sans renouvellement.</p>
+          <p class="plan-sub"><strong>Pass 3 mois</strong>${prices.pass_per_month ? `, soit ${prices.pass_per_month}` : ""} :
+            le temps d'une recherche, en un paiement, sans renouvellement${prices.pass_saving ? html`
+            <span class="plan-saving">${prices.pass_saving}</span>` : "."}</p>
           ${feats(list.pro)}
           ${isPro ? html`<p class="plan-sub"><strong>Vous avez déjà l'offre Pro.</strong></p>` : html`
+          <p class="pro-waiver">En cliquant sur « Prendre le Pass 3 mois » ou « S'abonner au mois », vous demandez l'accès
+            immédiat à Mire Pro et renoncez à votre droit de rétractation de 14 jours
+            (<a href="/cgv#retractation" target="_blank" rel="noopener">CGV, art. 6</a>).</p>
           <div class="plan-ctas">
-            <button type="button" class="plan-cta" data-checkout="monthly">Passer Pro</button>
-            <button type="button" class="plan-cta ghost" data-checkout="pass_3m">Pass 3 mois</button>
+            <button type="button" class="plan-cta" data-checkout="pass_3m">Prendre le Pass 3 mois</button>
+            <button type="button" class="plan-cta ghost" data-checkout="monthly">S'abonner au mois${prices.monthly
+              ? ` · ${prices.monthly}` : ""}</button>
           </div>
-          <p class="pro-waiver">En cliquant sur « Passer Pro » ou « Pass 3 mois », vous demandez l'accès immédiat à Mire Pro
-            et renoncez à votre droit de rétractation de 14 jours (<a href="/cgv#retractation" target="_blank" rel="noopener">CGV, art. 6</a>).</p>
           <p class="form-error" hidden></p>`}
         </article>
       </div>

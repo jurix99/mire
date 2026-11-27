@@ -114,8 +114,19 @@ def test_me_exposes_billing(alice, as_user, billing_on):
     b = as_user(alice).get("/api/me").json()["billing"]
     assert b["enabled"] is True and b["plan"] == "free"
     assert b["limits"] == entitlements.PLAN_LIMITS["free"]
-    assert b["prices"]["monthly"] == entitlements.PLAN_LIMITS["pro"]["price_monthly_label"]
+    assert b["prices"] == entitlements.price_labels()
     assert set(b["usage"]) == {"chat", "imports", "processes", "assessments", "prepare", "regenerate"}
+
+
+def test_price_labels_put_the_pass_forward(monkeypatch):
+    # Prix des CGV : 10 €/mois, Pass 25 € ; le Pass ramené au mois et ce qu'il fait économiser
+    assert entitlements.price_labels() == {
+        "monthly": "10 € TTC / mois", "pass_3m": "25 € TTC pour 3 mois", "pass_per_month": "8,33 € par mois",
+        "pass_days": "90", "pass_saving": "5 € de moins que trois mois d'abonnement"}
+    # Un Pass qui ne fait rien économiser ne le prétend pas
+    monkeypatch.setitem(entitlements.PLAN_LIMITS["pro"], "price_pass_3m_ttc", 30)
+    assert "pass_saving" not in entitlements.price_labels()
+    assert entitlements.price_labels()["pass_per_month"] == "10 € par mois"
 
 
 # --- Stripe simulé ---------------------------------------------------------------------------------

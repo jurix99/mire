@@ -89,9 +89,10 @@ PLAN_LIMITS: dict[str, dict[str, Any]] = {
         "market_me": True,
         "prepare_application_per_day": 5,  # préparations (CV adapté, lettre, réponses) par jour, heure de Paris
         "regenerate_field_per_day": 30,  # régénérations d'un champ par jour
-        # Prix affichés (TTC). Les montants facturés sont ceux des prix Stripe (STRIPE_PRICE_MONTHLY / _PASS_3M).
-        "price_monthly_label": "10 € TTC / mois",
-        "price_pass_3m_label": "25 € TTC pour 3 mois",
+        # Prix affichés, en euros TTC (libellés : price_labels). Les montants facturés sont ceux des prix Stripe
+        # (STRIPE_PRICE_MONTHLY / _PASS_3M) : les garder égaux, et les CGV (art. 3) à jour.
+        "price_monthly_ttc": 10,
+        "price_pass_3m_ttc": 25,
         "pass_days": 90,  # durée d'un Pass (prolongée si un Pass est racheté avant la fin)
     },
 }
@@ -509,5 +510,27 @@ def billing_summary(db: Session, user: User) -> dict:
         "usage": usage(db, user),
         "locked_jobs": locked_jobs,
         "locked_fundings": locked_fundings,
-        "prices": {"monthly": pro["price_monthly_label"], "pass_3m": pro["price_pass_3m_label"]},
+        "prices": price_labels(),
     }
+
+
+def _eur(value: float) -> str:
+    """10 -> « 10 € », 8.333 -> « 8,33 € »."""
+    text = f"{value:.2f}".replace(".", ",").removesuffix(",00")
+    return f"{text} €"
+
+
+def price_labels() -> dict[str, str]:
+    """Libellés des prix (app et landing). Le Pass 3 mois est l'offre mise en avant : son prix par mois et ce qu'il
+    fait économiser sur trois mois d'abonnement (absent s'il n'en fait pas économiser)."""
+    pro = PLAN_LIMITS["pro"]
+    monthly, pass_3m = pro["price_monthly_ttc"], pro["price_pass_3m_ttc"]
+    labels = {
+        "monthly": f"{_eur(monthly)} TTC / mois",
+        "pass_3m": f"{_eur(pass_3m)} TTC pour 3 mois",
+        "pass_per_month": f"{_eur(pass_3m / 3)} par mois",
+        "pass_days": str(pro["pass_days"]),
+    }
+    if (saving := 3 * monthly - pass_3m) > 0:
+        labels["pass_saving"] = f"{_eur(saving)} de moins que trois mois d'abonnement"
+    return labels

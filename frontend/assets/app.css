@@ -631,7 +631,10 @@ dialog.pro-dialog { width: min(860px, calc(100vw - 32px)); border-radius: 28px; 
 .pro-waiver { margin: 0; font-size: 12px; line-height: 1.5; color: rgba(255, 255, 255, .7); }
 .pro-waiver a { color: #a8cbff; }
 .pro-note a { color: inherit; }
-.plan-ctas { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+/* Le Pass 3 mois d'abord (bouton plein), l'abonnement mensuel en dessous, plus discret */
+.plan-ctas { display: grid; gap: 8px; }
+.plan-ctas .plan-cta.ghost { height: 40px; font-weight: 500; font-size: 14px; }
+.pro-dialog .plan-saving { display: block; margin-top: 4px; color: #a8cbff; }
 .plan-cta {
   height: 46px; border-radius: 100px; border: 1px solid var(--white); background: var(--white); color: #1a1a1a;
   font: inherit; font-weight: 600; cursor: pointer; transition: transform .12s, box-shadow .12s, opacity .12s;

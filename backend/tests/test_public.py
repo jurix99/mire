@@ -4,7 +4,7 @@ from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
 
-from app.entitlements import PLAN_LIMITS
+from app.entitlements import PLAN_LIMITS, price_labels
 from app.main import app
 from app.models import Company, Job
 
@@ -33,7 +33,7 @@ def test_landing_is_public_and_hides_pro_data(db, monkeypatch):
     assert [c["name"] for c in data["companies"]] == ["Ancienne Corp"]
     for secret in ("Toute Neuve", "Founding Engineer Confidentiel", "Fonds Secret", "12.5"):
         assert secret not in body
-    assert data["prices"]["monthly"] == PLAN_LIMITS["pro"]["price_monthly_label"]
+    assert data["prices"] == price_labels() and data["prices"]["pass_3m"] == "25 € TTC pour 3 mois"
     assert data["limits"]["free"]["chat_per_month"] == PLAN_LIMITS["free"]["chat_per_month"]
     assert data["stats"] == {"companies": 2, "jobs_open": 2, "jobs_week": 2}
 

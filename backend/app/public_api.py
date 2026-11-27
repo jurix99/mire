@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, undefer
 
 from . import logos
 from .db import get_db
-from .entitlements import PLAN_LIMITS, public_company_ids
+from .entitlements import PLAN_LIMITS, price_labels, public_company_ids
 from .models import Company, Job
 
 router = APIRouter(prefix="/api/public")
@@ -44,7 +44,6 @@ class LandingOut(BaseModel):
 
 @router.get("/landing")
 def landing(db: DB) -> LandingOut:
-    pro = PLAN_LIMITS["pro"]
     week_ago = datetime.now(UTC) - timedelta(days=7)
     public = public_company_ids(db)
     rows = db.execute(
@@ -57,8 +56,7 @@ def landing(db: DB) -> LandingOut:
         .limit(LOGO_STRIP)
     ).all()
     return LandingOut(
-        prices={"monthly": pro["price_monthly_label"], "pass_3m": pro["price_pass_3m_label"],
-                "pass_days": str(pro["pass_days"])},
+        prices=price_labels(),
         limits={plan: {k: PLAN_LIMITS[plan][k] for k in PUBLIC_LIMITS} for plan in ("free", "pro")},
         stats={
             "companies": db.scalar(select(func.count(Company.id))) or 0,

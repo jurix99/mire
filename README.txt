@@ -370,10 +370,14 @@ Réglages (seuil, nombre d'offres, fréquences) en tête de digest.py.
 ------------------------------------------------------------------
 Offres Free / Pro et paiement Stripe
 ------------------------------------------------------------------
-Prix (TTC, TVA française via Stripe Tax) : Pro mensuel 15 €/mois sans engagement (abonnement Stripe), Pass
-3 mois 39 € en paiement unique (90 jours, sans renouvellement ; un Pass acheté pendant un autre le prolonge
-de 90 jours à partir de sa fin). Pas d'essai gratuit. Toutes les limites sont dans PLAN_LIMITS
-(backend/app/entitlements.py), nulle part ailleurs.
+Prix (TTC, TVA française via Stripe Tax) : Pro mensuel 10 €/mois sans engagement (abonnement Stripe), Pass
+3 mois 25 € en paiement unique (90 jours, sans renouvellement ; un Pass acheté pendant un autre le prolonge
+de 90 jours à partir de sa fin). Pas d'essai gratuit. Toutes les limites et les prix affichés sont dans
+PLAN_LIMITS (backend/app/entitlements.py, price_monthly_ttc / price_pass_3m_ttc), nulle part ailleurs ;
+entitlements.price_labels en tire les libellés. À changer en même temps : les prix Stripe et les CGV (art. 3).
+Le Pass 3 mois est l'offre mise en avant (landing et fenêtre Pro) : le temps d'une recherche, sans
+renouvellement, avec son prix ramené au mois (8,33 €) et l'économie sur trois mois d'abonnement (5 €) ;
+l'abonnement mensuel est proposé en dessous.
 
 Free : les offres ouvertes sont classées par pertinence pour l'utilisateur (retenues avant écartées, note,
 similarité, date ; entitlements.rank_jobs). La plus pertinente reste floutée (aperçu du Pro), les 2
@@ -408,8 +412,8 @@ et la collecte continuent d'alimenter le radar. Restent ouverts à tous : statut
 
 Configuration du tableau de bord Stripe (mode test, puis à refaire en mode live) :
   1. Produits : créer le produit « Mire Pro » avec deux prix, TTC (« Inclure la taxe dans le prix ») :
-       - 15,00 € récurrent mensuel           -> son identifiant price_… dans STRIPE_PRICE_MONTHLY
-       - 39,00 € paiement unique             -> STRIPE_PRICE_PASS_3M
+       - 10,00 € récurrent mensuel           -> son identifiant price_… dans STRIPE_PRICE_MONTHLY
+       - 25,00 € paiement unique             -> STRIPE_PRICE_PASS_3M
      Catégorie fiscale : « Logiciel en tant que service (SaaS) - usage personnel ».
   2. Stripe Tax : activer, renseigner l'adresse de l'entreprise et l'immatriculation TVA France.
   3. Customer Portal (Paramètres > Billing > Portail client) : autoriser la mise à jour du moyen de paiement,
@@ -425,9 +429,10 @@ Configuration du tableau de bord Stripe (mode test, puis à refaire en mode live
   6. Paramètres > Checkout : coordonnées de l'entreprise, conditions générales, politique de remboursement.
 nginx laisse /api/billing/webhook passer sans auth_request (sur 8080 et 8081) : seule la signature compte.
 
-Droit de rétractation : la fenêtre « Passer Pro » impose de cocher la renonciation (accès immédiat à un
-service numérique) avant la redirection ; elle est horodatée sur la ligne subscriptions et rappelée sous
-le bouton de paiement de Checkout.
+Droit de rétractation : dans la fenêtre « Passer Pro », la mention de renonciation (accès immédiat à un
+service numérique) est affichée juste au-dessus des boutons « Prendre le Pass 3 mois » et « S'abonner au
+mois » ; le clic vaut renonciation (CGV art. 6), horodatée sur la ligne subscriptions et rappelée sous le
+bouton de paiement de Checkout.
 
 Tester en local (Stripe CLI, mode test) :
   stripe login
