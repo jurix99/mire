@@ -24,16 +24,33 @@ function nextStep(a) {
   return html`<span class="next ${soon ? "soon" : ""}">${a.next_step ?? "Étape"}${when}</span>`;
 }
 
+/** Relance conseillée (followups.py) : 10 jours sans réponse, deux relances au plus, puis « sans réponse ». */
+function followUp(a, locked) {
+  const f = a.follow_up;
+  if (!f || locked) return "";
+  if (f.kind === "due") {
+    return html`<span class="next soon">${f.number === 1 ? "Relance conseillée" : "Dernière relance conseillée"} · ${f.days} j sans réponse</span>
+      <span class="p-card-action"><button type="button" class="btn sm" data-follow-up="${a.id}">Préparer la relance</button></span>`;
+  }
+  if (f.kind === "no_answer") {
+    return html`<span class="next">Sans réponse après ${f.sent} relances</span>
+      <span class="p-card-action"><button type="button" class="btn sm ghost" data-no-answer="${a.id}">Classer sans réponse</button></span>`;
+  }
+  return "";
+}
+
 const card = (a) => {
   // Offre ou entreprise réservée au Pro : un seul repère sur la carte, les valeurs floutées n'ont pas de badge
   const locked = isLocked(a.company.name) || isLocked(a.job.title);
-  const prepare = !locked && (["a_postuler", "prete"].includes(a.status) || a.draft_status);
+  const relance = followUp(a, locked); // une seule action sur la carte : la relance passe avant « Voir ma candidature »
+  const prepare = !locked && !relance && (["a_postuler", "prete"].includes(a.status) || a.draft_status);
   return html`
   <div class="p-card ${locked ? "pro-quiet" : ""}" role="button" tabindex="0" draggable="true" data-id="${a.id}" id="process-${a.id}">
     <span class="co">${logo(a.company, "sm")}${renderValue(a.company.name)}</span>
     <span class="small">${renderValue(a.job.title)}${locked ? html` <span data-pro style="cursor:pointer">${proTag}</span>` : ""}</span>
     <span class="p-card-meta">${pill(a.status)}${a.applied_on ? html`<span class="small muted">${fmtDate(a.applied_on)}</span>` : ""}</span>
     ${nextStep(a)}
+    ${relance}
     ${prepare ? html`<span class="p-card-action">${applicationButton({ id: a.job.id, draft_status: a.draft_status })}</span>` : ""}
   </div>`;
 };
@@ -48,6 +65,8 @@ function summary() {
     parts.push(`${interviews.length} entretien${interviews.length > 1 ? "s" : ""} obtenu${interviews.length > 1 ? "s" : ""} `
       + `(${Math.round((interviews.length / sent.length) * 100)} %)`);
   } else if (sent.length) parts.push("pas encore d'entretien");
+  const due = apps.filter((a) => a.follow_up?.kind === "due").length;
+  if (due) parts.push(`${due} relance${due > 1 ? "s" : ""} à faire`);
   return parts.join(" · ");
 }
 
@@ -89,7 +108,8 @@ const timeline = (a) =>
     ? html`<div class="timeline"><p class="label">Historique</p>
         ${a.events.slice().reverse().map((e) => html`
           <div class="ev"><span class="small muted" style="min-width:56px">${fmtDate(e.created_at)}</span>
-            ${e.from_status ? html`${pill(e.from_status)} →` : ""} ${pill(e.to_status)}
+            ${e.from_status && e.from_status !== e.to_status ? html`${pill(e.from_status)} →` : ""} ${pill(e.to_status)}
+            ${/^(Relance|Sans réponse)/.test(e.note ?? "") ? html`<span class="small muted">${e.note}</span>` : ""}
             ${e.has_snapshot ? html`<button type="button" class="link-btn small" data-snapshot="${e.id}" data-app="${a.id}">Ce que j'ai envoyé</button>` : ""}</div>`)}
       </div>`
     : "";
@@ -106,7 +126,16 @@ async function openSnapshot(appId, eventId) {
   const dlg = document.createElement("dialog");
   dlg.className = "job-dialog";
   dlg.setAttribute("aria-label", "Ce que j'ai envoyé");
-  dlg.innerHTML = html`
+  if (snap.follow_up != null) { // relance envoyée (followups.py)
+    dlg.innerHTML = html`
+      <div class="dialog-body">
+        <div class="job-head"><div class="grow"><h2>Relance envoyée</h2>
+          <p class="muted small">le ${fmtDate(snap.sent_at)}</p></div>
+          <button type="button" class="icon-btn close" data-close aria-label="Fermer">×</button></div>
+        <div class="job-text prewrap small">${snap.follow_up}</div>
+      </div>
+      <div class="dialog-foot"><div class="right"><button type="button" class="btn" data-close>Fermer</button></div></div>`.s;
+  } else dlg.innerHTML = html`
     <div class="dialog-body">
       <div class="job-head"><div class="grow"><h2>Ce que j'ai envoyé</h2>
         <p class="muted small">${snap.job.title} · ${snap.job.company} · le ${fmtDate(snap.sent_at)}</p></div>
@@ -123,6 +152,74 @@ async function openSnapshot(appId, eventId) {
   dlg.addEventListener("close", () => dlg.remove());
   dlg.addEventListener("click", (e) => { if (e.target === dlg || e.target.closest("[data-close]")) dlg.close(); });
   dlg.showModal();
+}
+
+/**
+ * Relance : texte proposé (Gemini à partir de ce qui a été envoyé, ou modèle écrit), modifiable, à copier dans sa
+ * messagerie. Mire n'envoie rien ; « J'ai envoyé la relance » l'enregistre (statut Relancé, historique).
+ */
+async function openFollowUp(a) {
+  const dlg = document.createElement("dialog");
+  dlg.className = "job-dialog";
+  dlg.setAttribute("aria-label", "Relance");
+  const head = html`<div class="job-head"><div class="grow"><h2>Relancer ${plain(a.company.name)}</h2>
+      <p class="muted small">${plain(a.job.title)} · ${a.follow_up?.days ?? "?"} jours sans réponse</p></div>
+      <button type="button" class="icon-btn close" data-close aria-label="Fermer">×</button></div>`;
+  dlg.innerHTML = html`<div class="dialog-body">${head}<p class="small" role="status">Rédaction de la relance…</p></div>`.s;
+  document.body.append(dlg);
+  dlg.addEventListener("close", () => dlg.remove());
+  dlg.showModal();
+  let text;
+  try {
+    text = await api(`/applications/${a.id}/follow-up/draft`, { method: "POST" });
+  } catch (err) {
+    dlg.close();
+    return toast(err.message, true);
+  }
+  const last = text.number >= 2;
+  dlg.innerHTML = html`
+    <div class="dialog-body">${head}
+      <p class="small muted">${text.generated ? "Rédigée à partir de ce que vous avez envoyé. " : ""}Relisez, puis envoyez-la
+        vous-même, de préférence en réponse au message de confirmation de votre candidature, ou à la personne qui
+        recrute. ${last ? "C'est la dernière : sans réponse ensuite, mieux vaut passer à d'autres offres." : ""}</p>
+      <label class="field">Objet <input class="input" name="subject" maxlength="150" value="${text.subject}"></label>
+      <label class="field">Message <textarea class="input" name="body" rows="11">${text.body}</textarea></label>
+    </div>
+    <div class="dialog-foot">
+      <button type="button" class="btn ghost" data-copy>Copier le message</button>
+      <div class="right">
+        <button type="button" class="btn ghost" data-close>Plus tard</button>
+        <button type="button" class="btn" data-sent>J'ai envoyé la relance</button>
+      </div>
+    </div>`.s;
+  const field = (name) => dlg.querySelector(`[name="${name}"]`).value.trim();
+  dlg.addEventListener("click", async (e) => {
+    if (e.target === dlg || e.target.closest("[data-close]")) return dlg.close();
+    if (e.target.closest("[data-copy]")) {
+      try {
+        await navigator.clipboard.writeText(`${field("subject")}\n\n${field("body")}`);
+        toast("Objet et message copiés");
+      } catch { toast("Copie impossible : sélectionnez le texte à la main", true); }
+      return;
+    }
+    const btn = e.target.closest("[data-sent]");
+    if (!btn) return;
+    btn.disabled = true;
+    try {
+      await attempt(() => api(`/applications/${a.id}/follow-up/sent`, { method: "POST", body: { body: field("body") } }),
+        "Relance enregistrée");
+      dlg.close();
+      await reload();
+      refreshCounts();
+    } catch { btn.disabled = false; }
+  });
+}
+
+async function classifyNoAnswer(a) {
+  await attempt(() => api(`/applications/${a.id}/follow-up/no-answer`, { method: "POST" }),
+    "Classée sans réponse (modifiable depuis la candidature)");
+  await reload();
+  refreshCounts();
 }
 
 async function editApp(a) {
@@ -188,6 +285,10 @@ board.addEventListener("drop", (e) => {
   if (app && !statuses.includes(app.status)) setStatus(id, target).catch(() => {});
 });
 board.addEventListener("click", (e) => {
+  const relance = e.target.closest("[data-follow-up]");
+  if (relance) return openFollowUp(apps.find((a) => a.id === Number(relance.dataset.followUp)));
+  const none = e.target.closest("[data-no-answer]");
+  if (none) return classifyNoAnswer(apps.find((a) => a.id === Number(none.dataset.noAnswer))).catch(() => {});
   if (e.target.closest("[data-prepare], a")) return; // bouton de la carte : page Candidature
   const c = e.target.closest(".p-card");
   if (c) editApp(apps.find((a) => a.id === Number(c.dataset.id)));

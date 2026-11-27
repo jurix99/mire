@@ -274,7 +274,10 @@ def jobs_count_by_company(db: Session, access: Access = FULL_ACCESS) -> dict[int
 
 def application_out(app: Application, access: Access) -> ApplicationOut:
     """Process de l'utilisateur ; en Free, le poste et l'entreprise d'une offre floutée restent masqués."""
+    from .followups import follow_up_state  # followups importe services
+
     out = ApplicationOut.model_validate(app)
+    out.follow_up = follow_up_state(app)
     if access.full:
         return out
     if access.job_is_locked(app.job):

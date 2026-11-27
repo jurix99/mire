@@ -171,6 +171,11 @@ class FakeLLM:
         self.regenerate_calls = getattr(self, "regenerate_calls", []) + [contents]
         return self._scripted("regenerated", contents, model_cls), {**self.usage, "tokens_in": 4000, "tokens_out": 300}
 
+    def draft_follow_up(self, instruction, contents, model_cls):
+        """Relance : self.follow_up (dict {subject, body} ou callable(contents) -> dict)."""
+        self.follow_up_calls = getattr(self, "follow_up_calls", []) + [contents]
+        return self._scripted("follow_up", contents, model_cls), {**self.usage, "tokens_in": 2000, "tokens_out": 150}
+
     def chat(self, system, history, tools, execute):
         self.calls.append({"system": system, "history": history, "tools": [t.name for t in tools]})
         tool_calls, text = self.script.pop(0) if self.script else ([], "D'accord.")

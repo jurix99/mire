@@ -30,6 +30,7 @@ from .agent_api import router as agent_router
 from .analytics_api import router as analytics_router
 from .api import router as api_router
 from .application_api import events_router as application_events_router
+from .followups import router as follow_up_router
 from .application_api import router as application_router
 from .assessments_api import router as assessments_router
 from .billing import router as billing_router
@@ -130,6 +131,7 @@ app.include_router(account_router)  # /api/me/export, DELETE /api/me : droits RG
 app.include_router(analytics_router)  # /api/analytics/market, /api/analytics/me, /api/admin/taxonomy-health
 app.include_router(application_router)  # /api/jobs/{id}/application/... : page Candidature (rien n'est envoyé)
 app.include_router(application_events_router)  # /api/applications/{id}/events/{event_id}/snapshot
+app.include_router(follow_up_router)  # /api/applications/{id}/follow-up/... : relances guidées (rien n'est envoyé)
 app.include_router(digest_router)  # /api/me/digest, /api/public/email/desabonnement (récapitulatif par e-mail)
 app.add_middleware(
     SessionMiddleware,

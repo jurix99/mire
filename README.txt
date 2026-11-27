@@ -48,6 +48,9 @@ Architecture
               - app/application_prep.py  préparation d'une candidature : CV adapté, contrôle anti-invention,
                                     lettre, réponses ; app/pdf.py : PDF (WeasyPrint, image worker) ;
                                     app/application_api.py : API de la page Candidature
+              - app/followups.py    relances guidées : 10 jours sans réponse -> relance proposée (Gemini à partir
+                                    de ce qui a été envoyé pour le Pro, modèle écrit sinon), 2 au plus, puis
+                                    « Classer sans réponse » ; Mire n'envoie rien (page Candidatures)
               - app/digest.py       récapitulatif des nouvelles offres par e-mail (job quotidien), réglage et
                                     désabonnement ; app/mailer.py : envoi SMTP (SMTP_HOST vide = aucun e-mail)
               - app/restore_check.py  test de restauration de la sauvegarde (workflow restore-test.yml)
@@ -205,6 +208,12 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/jobs/{id}/application/files/{cv|lettre} GET, PDF (propriétaire seulement)
          /api/jobs/{id}/application/ready | /sent     POST : « Prête à envoyer » / « Postulé » + instantané
          /api/applications/{id}/events/{event_id}/snapshot   GET, ce qui a été envoyé
+         /api/applications/{id}/follow-up/draft       POST : relance proposée {subject, body, generated, number}
+                                                      (Pro : Gemini, quota des régénérations ; sinon modèle écrit)
+         /api/applications/{id}/follow-up/sent        POST {body?} : relance envoyée (Relancé, historisée ; 2 au plus)
+         /api/applications/{id}/follow-up/no-answer   POST : classée sans réponse (Abandonné, note)
+                                                      État dans GET /api/applications : follow_up {kind: waiting |
+                                                      due | no_answer, number, days, due_on, sent}
          /api/profile/application-defaults            PUT, réponses types des candidatures
          /api/feedback, /api/feedback/reasons         GET, retours récents (nombre de nouveaux), raisons
          /api/jobs/{id}/assessment/manual             PUT {score|null}, correction manuelle de la note

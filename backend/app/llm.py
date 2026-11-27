@@ -90,6 +90,8 @@ class LLM(Protocol):
 
     def regenerate_field(self, instruction: str, contents: str, model_cls: type[BaseModel]) -> tuple[Any, dict]: ...
 
+    def draft_follow_up(self, instruction: str, contents: str, model_cls: type[BaseModel]) -> tuple[Any, dict]: ...
+
     def chat(
         self,
         system: str,
@@ -316,6 +318,11 @@ class GeminiClient:
         """Régénération d'une réponse (consigne courte de l'utilisateur)."""
         return self.structured_usage(instruction, contents, model_cls, label="regenerate_field", rounds=1,
                                      max_tokens=4_000, private=True)
+
+    def draft_follow_up(self, instruction: str, contents: str, model_cls: type[BaseModel]):
+        """Relance d'une candidature sans réponse (followups.py) : un court e-mail."""
+        return self.structured_usage(instruction, contents, model_cls, label="draft_follow_up", rounds=1,
+                                     max_tokens=2_000, private=True)
 
     def analyze_profile(self, profile_json: str):
         from .analysis import ANALYZE_INSTRUCTION, ProfileAnalysis

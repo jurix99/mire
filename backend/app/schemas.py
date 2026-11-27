@@ -349,6 +349,8 @@ class ApplicationOut(ORM):
     company: CompanyMini
     events: list[EventOut] = []
     draft_status: str | None = None  # candidature préparée (page Candidature)
+    # Relance conseillée (followups.follow_up_state) : {kind: waiting|due|no_answer, number, days, due_on, sent}
+    follow_up: dict | None = None
 
 
 # --- Tableau de bord / analytics --------------------------------------------
