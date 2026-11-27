@@ -558,7 +558,10 @@ def assess_user(db: Session, user: User, llm, limit: int = 20, models: list[str]
         jobs = sorted(jobs_to_assess(db, user, profile, before=before, job_ids=job_ids),
                       key=lambda j: order.get(j.id, len(order)))[:limit]
     else:
-        jobs = jobs_to_assess(db, user, profile, limit=limit, before=before)
+        from . import ranking  # ranking importe ce module : import différé
+
+        # Les offres les plus prometteuses d'abord (et non les dernières arrivées)
+        jobs = ranking.Ranker(db, user).order(jobs_to_assess(db, user, profile, before=before))[:limit]
     _row = _Rows(db, user, jobs)
 
     def row(job: Job) -> JobAssessment:

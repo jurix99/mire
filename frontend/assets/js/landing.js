@@ -19,8 +19,8 @@ const inView = (el) => { const r = el.getBoundingClientRect(); return r.top < in
 // --- Connexion : retour vers la page demandée (?next=/postes), chemins internes seulement ---------------
 
 const next = new URLSearchParams(location.search).get("next");
-// Par défaut (ou si la page demandée est la landing elle-même) : le tableau de bord
-const APP_HOME = "/tableau-de-bord";
+// Par défaut (ou si la page demandée est la landing elle-même) : les offres
+const APP_HOME = "/postes";
 const safeNext = next && next.startsWith("/") && !next.startsWith("//") && !["/", "/bienvenue"].includes(next)
   ? next : APP_HOME;
 // Bêta privée : lien d'invitation /?invitation=<code>, transmis à la connexion (vérifié par le serveur)

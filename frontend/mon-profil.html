@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mon profil · Mire</title>
+  <title>Profil · Mire</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/favicon.png" sizes="32x32">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -13,18 +13,44 @@
 <body>
   <div class="layout">
     <aside id="sidebar" class="sidebar"></aside>
-    <main class="main">
+    <main class="main profile">
       <header class="page-head">
         <div class="intro">
-          <p class="label">// Votre compte</p>
-          <h1>Mon profil</h1>
+          <h1>Profil</h1>
+          <p class="muted">Ce que vous cherchez classe les offres ; votre parcours sert à préparer vos candidatures.</p>
         </div>
-        <p class="small muted" style="max-width:420px">Ce profil sert de contexte à l'assistant : il l'utilise pour juger les postes selon vos compétences, vos préférences et vos règles.</p>
       </header>
 
-      <section class="grid-2">
-        <div class="card pad-lg" style="display:grid;gap:20px;align-content:start">
-          <div style="display:flex;align-items:center;gap:18px" id="identity"></div>
+      <nav class="tabs" role="tablist" aria-label="Sections du profil" id="sections">
+        <button type="button" role="tab" data-section="recherche">Ma recherche</button>
+        <button type="button" role="tab" data-section="parcours">Mon parcours</button>
+        <button type="button" role="tab" data-section="candidatures">Réponses types</button>
+        <button type="button" role="tab" data-section="compte">Compte</button>
+      </nav>
+
+      <section data-panel="recherche" hidden>
+        <div class="card pad-lg" id="search"></div>
+        <div class="card pad-lg section" id="rules"></div>
+        <details class="card pad-lg section advanced">
+          <summary>Réglages avancés de la notation par l'IA</summary>
+          <div id="scoring"></div>
+        </details>
+      </section>
+
+      <section data-panel="parcours" hidden>
+        <div class="card pad-lg" id="import"></div>
+        <div class="card pad-lg section" id="pro"></div>
+        <div class="card pad-lg section" id="experiences"></div>
+        <div class="card pad-lg section" id="education"></div>
+      </section>
+
+      <section data-panel="candidatures" hidden>
+        <div class="card pad-lg" id="apply-defaults"></div>
+      </section>
+
+      <section data-panel="compte" hidden>
+        <div class="card pad-lg account">
+          <div class="identity" id="identity"></div>
           <div class="rows" id="details"></div>
           <div id="billing" hidden></div>
           <div><a class="btn ghost" href="/auth/logout">Se déconnecter</a></div>
@@ -37,40 +63,6 @@
               <button type="button" class="btn ghost sm danger" id="delete-account">Supprimer mon compte</button>
             </div>
           </div>
-        </div>
-        <div class="card pad-lg" id="import"></div>
-      </section>
-
-      <section class="grid-2 section">
-        <div class="card pad-lg" id="pro"></div>
-        <div class="card pad-lg" id="prefs"></div>
-      </section>
-
-      <section class="grid-2 section">
-        <div class="card pad-lg" id="skills"></div>
-        <div class="card pad-lg" id="rules"></div>
-      </section>
-
-      <section class="grid-2 section">
-        <div class="card pad-lg" id="learned"></div>
-        <div class="card pad-lg" id="scoring"></div>
-      </section>
-
-      <section class="grid-2 section">
-        <div class="card pad-lg" id="experiences"></div>
-        <div class="card pad-lg" id="education"></div>
-      </section>
-
-      <section class="section" id="reponses-types">
-        <div class="card pad-lg" id="apply-defaults"></div>
-      </section>
-
-      <section class="section">
-        <div class="card pad-lg">
-          <div class="section-head">
-            <div class="intro"><p class="label">// Légende</p><h2>Statuts des process</h2></div>
-          </div>
-          <div class="legend" id="legend"></div>
         </div>
       </section>
     </main>

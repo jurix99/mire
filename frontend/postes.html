@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Postes · Mire</title>
+  <title>Offres · Mire</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/favicon.png" sizes="32x32">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -13,29 +13,47 @@
 <body>
   <div class="layout">
     <aside id="sidebar" class="sidebar"></aside>
-    <main class="main">
+    <main class="main feed">
       <header class="page-head">
         <div class="intro">
-          <p class="label">// Votre sélection</p>
-          <h1>Postes</h1>
-          <p class="muted">Changez le statut d'un poste pour l'ajouter à vos process.</p>
+          <h1>Offres</h1>
+          <p class="muted">Classées pour vous. Aimez ou écartez : le classement s'ajuste.</p>
         </div>
-        <button class="btn" type="button" id="add" data-admin>Ajouter un poste</button>
+        <button class="btn ghost" type="button" id="add" data-admin>Ajouter une offre</button>
       </header>
 
+      <div id="setup"></div>
       <div id="pro-banner"></div>
-      <div class="toolbar" id="filters" role="group" aria-label="Filtrer par statut"></div>
-      <div class="toolbar">
-        <input class="input" type="search" id="search" placeholder="Rechercher un poste, une stack…" aria-label="Rechercher" style="flex:1;max-width:360px">
-        <select id="company" aria-label="Entreprise"></select>
+
+      <nav class="tabs" role="tablist" aria-label="Vues" id="views">
+        <button type="button" role="tab" data-view="pour-vous">Pour vous <span class="n"></span></button>
+        <button type="button" role="tab" data-view="aimees">J'aime <span class="n"></span></button>
+        <button type="button" role="tab" data-view="ecartees">Écartées <span class="n"></span></button>
+      </nav>
+
+      <div class="toolbar filters" id="filters">
+        <input class="input search" type="search" id="q" placeholder="Poste, entreprise, techno…" aria-label="Rechercher">
+        <select id="f-metier" data-filter="metier" aria-label="Métier"></select>
+        <select id="f-lieu" data-filter="lieu" aria-label="Lieu"></select>
+        <select id="f-mode" data-filter="mode" aria-label="Mode de travail"></select>
+        <select id="f-niveau" data-filter="niveau" aria-label="Niveau"></select>
+        <select id="f-date" data-filter="date" aria-label="Date de publication"></select>
+        <select id="f-salaire" data-filter="salaire" aria-label="Salaire"></select>
+        <span id="f-entreprise"></span>
+        <button type="button" class="link-btn small" id="f-reset" hidden>Effacer les filtres</button>
       </div>
 
-      <div class="card table-card">
-        <div class="job-row head small muted">
-          <span></span><span>Poste</span><span class="col-company">Entreprise</span><span class="col-salary">Salaire</span><span class="col-score">Score</span><span>Statut</span><span></span>
-        </div>
-        <div id="list"></div>
+      <div class="list-head">
+        <span class="small muted" id="count"></span>
+        <span class="small muted" id="assess"></span>
+        <select id="sort" class="small" aria-label="Trier">
+          <option value="match">Les plus pertinentes</option>
+          <option value="date">Les plus récentes</option>
+        </select>
       </div>
+
+      <div class="job-list" id="list"></div>
+      <button type="button" class="btn rerank" id="rerank" hidden>Reclasser selon vos retours</button>
     </main>
   </div>
 </body>

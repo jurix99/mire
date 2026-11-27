@@ -1,4 +1,5 @@
 import { $, ICONS, api, attempt, boot, fmtDate, html, loadMe, openForm, toast } from "./app.js";
+import { renderHealth } from "./health.js";
 
 const KINDS = [
   ["ats", "ATS (logiciels de recrutement)"],
@@ -142,9 +143,10 @@ $("#groups").addEventListener("change", async (e) => {
   await reload();
 });
 
-// Page réservée aux admins (l'API refuse aussi : 403) : retour au tableau de bord
+// Page réservée aux admins (l'API refuse aussi : 403) : retour aux offres
 boot(async () => {
   const me = await loadMe();
-  if (me.user.is_admin === false) return location.replace("/tableau-de-bord");
+  if (me.user.is_admin === false) return location.replace("/postes");
   await reload();
+  renderHealth();
 });

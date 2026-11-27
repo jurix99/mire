@@ -31,6 +31,7 @@ from .models import (
     ChatAction,
     ChatConversation,
     ChatMessage,
+    CompanyFeedback,
     GeneratedFile,
     JobAssessment,
     JobFeedback,
@@ -84,6 +85,7 @@ def export_data(db: Session, user: User) -> dict:
         "generated_files": [_file_row(f) for f in files],
         "application_generations": rows(ApplicationGeneration, ApplicationGeneration.user_id == user.id),
         "job_feedback": rows(JobFeedback, JobFeedback.user_id == user.id),
+        "company_feedback": rows(CompanyFeedback, CompanyFeedback.user_id == user.id),
         "job_assessments": rows(JobAssessment, JobAssessment.user_id == user.id),
         "profile_imports": rows(ProfileImport, ProfileImport.user_id == user.id),
         "chat_conversations": [_row(c) for c in convs],
@@ -114,7 +116,7 @@ def delete_account(db: Session, user: User) -> None:
     db.execute(delete(ChatAction).where(ChatAction.user_id == uid))
     db.execute(delete(ChatMessage).where(ChatMessage.conversation_id.in_(conv_ids)))
     db.execute(delete(ChatConversation).where(ChatConversation.user_id == uid))
-    for model in (JobFeedback, JobAssessment, ProfileImport, UserProfile, Subscription):
+    for model in (JobFeedback, CompanyFeedback, JobAssessment, ProfileImport, UserProfile, Subscription):
         db.execute(delete(model).where(model.user_id == uid))
     db.execute(update(Source).where(Source.added_by_user_id == uid).values(added_by_user_id=None))
     db.execute(delete(User).where(User.id == uid))

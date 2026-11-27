@@ -67,6 +67,14 @@ def test_old_landing_url(site):
     assert r.status_code == 301 and r.headers["location"] == "/?next=/postes"
 
 
+def test_removed_pages_lead_to_the_jobs(site):
+    site.get("/auth/test-login")
+    for path in ("/tableau-de-bord", "/tableau-de-bord.html", "/analytics"):
+        r = site.get(path)
+        assert (r.status_code, r.headers["location"]) == (302, "/postes")
+    assert site.get("/tableau-de-bord?pro=1").headers["location"] == "/postes?pro=1"
+
+
 def test_assets_cache(site):
     versioned = site.get("/assets/app.css?v=abc123")
     assert versioned.status_code == 200 and versioned.headers["cache-control"] == "public, max-age=31536000, immutable"

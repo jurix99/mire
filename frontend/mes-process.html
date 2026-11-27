@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Mes process · Mire</title>
+  <title>Candidatures · Mire</title>
   <link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
   <link rel="icon" href="/assets/favicon.png" sizes="32x32">
   <link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
@@ -16,12 +16,15 @@
     <main class="main" style="max-width:none">
       <header class="page-head">
         <div class="intro">
-          <p class="label">// Garder le rythme</p>
-          <h1>Mes process</h1>
-          <p class="muted">Glissez une carte d'une colonne à l'autre pour changer son statut.</p>
+          <h1>Candidatures</h1>
+          <p class="muted" id="summary"></p>
         </div>
-        <button class="btn" type="button" id="add">Nouveau process</button>
+        <a class="btn ghost" href="/postes?vue=aimees">Mes offres aimées</a>
       </header>
+      <div class="card empty" id="empty" hidden>
+        Aucune candidature pour l'instant. Ouvrez une offre et cliquez sur « Préparer ma candidature » ou « J'ai postulé ».
+        <p><a class="btn" href="/postes">Voir les offres pour moi</a></p>
+      </div>
       <div class="board" id="board"></div>
     </main>
   </div>

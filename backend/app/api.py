@@ -9,7 +9,8 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, undefer
 
-from . import entitlements, logos, services, tasks
+from . import entitlements, logos, ranking, services, tasks
+from . import taxonomy as tx
 from .assessments_api import invalidate_job
 from .db import get_db
 from .entitlements import RequireAdmin
@@ -42,6 +43,8 @@ from .schemas import (
     JobStatusIn,
     MeOut,
     NavCounts,
+    Option,
+    OptionsOut,
     StatusCount,
     StatusOut,
     UserOut,
@@ -68,7 +71,9 @@ Me = Annotated[User, Depends(current_user)]
 def me(db: DB, user: Me) -> MeOut:
     processes = db.scalar(
         select(func.count(Application.id)).where(
-            Application.user_id == user.id, Application.status != ProcessStatus.nouveau
+            Application.user_id == user.id,
+            # « Pas intéressé » n'est pas une candidature (voir Offres > Écartées)
+            Application.status.not_in((ProcessStatus.nouveau, ProcessStatus.pas_interesse)),
         )
     )
     counts = NavCounts(
@@ -93,7 +98,6 @@ def statuses() -> list[StatusOut]:
 @router.get("/companies")
 def list_companies(db: DB, user: Me) -> list[CompanyOut]:
     access = entitlements.access_for(db, user)
-    counts = _jobs_count_by_company(db, access)
     if access.full:
         order = (Company.funding_announced_on.desc().nulls_last(), Company.name)
     else:
@@ -102,7 +106,7 @@ def list_companies(db: DB, user: Me) -> list[CompanyOut]:
     if not access.full:
         # Entreprises floutées en dernier, triées par id : l'ordre alphabétique trahirait leur nom
         companies.sort(key=lambda c: (True, c.id) if access.company_is_locked(c.id) else (False, 0))
-    return [_company_out(c, counts.get(c.id, 0), access) for c in companies]
+    return services.ranked_companies(db, user, companies)
 
 
 @router.post("/companies", status_code=201, dependencies=[RequireAdmin])
@@ -115,9 +119,7 @@ def create_company(body: CompanyIn, db: DB, user: Me) -> CompanyOut:
 
 @router.get("/companies/{company_id}")
 def get_company(company_id: int, db: DB, user: Me) -> CompanyOut:
-    company = _get_or_404(db, Company, company_id)
-    access = entitlements.access_for(db, user)
-    return _company_out(company, _jobs_count_by_company(db, access).get(company_id, 0), access)
+    return services.ranked_companies(db, user, [_get_or_404(db, Company, company_id)])[0]
 
 
 @router.patch("/companies/{company_id}", dependencies=[RequireAdmin])
@@ -197,8 +199,28 @@ def refresh_company_logo(company_id: int, db: DB) -> Response:
 
 
 @router.get("/jobs")
-def list_jobs(db: DB, user: Me, company_id: int | None = None) -> list[JobOut]:
-    return services.list_jobs(db, user, company_id=company_id)
+def list_jobs(db: DB, user: Me, company_id: int | None = None, brief: bool = False) -> list[JobOut]:
+    """Offres classées par pertinence. brief : sans la description (listes : plusieurs Mo en moins)."""
+    jobs = services.list_jobs(db, user, company_id=company_id)
+    if brief:
+        for job in jobs:
+            job.summary = None
+    return jobs
+
+
+@router.get("/options")
+def options(db: DB) -> OptionsOut:
+    """Choix proposés par les filtres et par le profil : liste fermée, et lieux des offres ouvertes."""
+    cities = Counter(city for location in db.scalars(select(Job.location).where(Job.closed_at.is_(None)))
+                     if (city := ranking.city_of(location)))
+    return OptionsOut(
+        families=[Option(key=fid, label=label, group=tx.DOMAINS[domain])
+                  for fid, label, domain, _ in tx.ROLE_FAMILIES],
+        sectors=[Option(key=sid, label=label) for sid, label, _ in tx.SECTORS],
+        seniority=[Option(key=k, label=v) for k, v in tx.SENIORITY_LEVELS.items() if k != "inconnu"],
+        skills=sorted((label for _, label, family, *_ in tx.SKILLS if family != "langues"), key=str.lower),
+        locations=[city for city, _ in cities.most_common(40)],
+    )
 
 
 @router.get("/jobs/{job_id}")

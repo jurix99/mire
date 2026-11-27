@@ -6,8 +6,11 @@ Architecture
   frontend/   HTML/CSS/JS sans build (modules ES), reprend le design de la maquette Framer
               - assets/app.css      styles + couleurs des statuts (variables --st-*)
               - assets/js/app.js    code partagé : appels API, barre latérale, pastilles, logos, formulaires,
-                                    chat flottant de l'assistant
+                                    J'aime / Pas intéressé, fiche d'une offre, chat flottant de l'assistant
               - assets/js/<page>.js une page = un script
+              - pages de l'app      Offres (/postes, accueil), Entreprises, Candidatures (/mes-process), Profil
+                                    (/mon-profil), Sources (admin : sources, passages, santé du moteur) ;
+                                    /tableau-de-bord et /analytics (supprimées) redirigent vers /postes
               - index.html          landing publique à la racine « / », connecté ou non (assets/landing.css,
                                     assets/js/landing.js) ; l'app commence à /tableau-de-bord (tableau-de-bord.html).
                                     Un visiteur non connecté sur une page de l'app est renvoyé vers « / » (nginx en local,
@@ -20,6 +23,7 @@ Architecture
               - app/proposals.py    propositions de modification du profil, validées élément par élément
               - app/profile_api.py  /api/profile, imports (linkedin_export.py, pdf_import.py), analyse (analysis.py)
               - app/assessments.py  évaluation automatique des offres par utilisateur (+ tâche de fond)
+              - app/ranking.py      classement des offres et des entreprises (reclassement, sans LLM)
               - app/feedback.py     retours J'aime / Pas intéressé ; rules_synthesis.py : synthèse des règles
               - app/radar_api.py    sources, passages, vérification des offres via les ATS (ats.py), dedup.py
               - app/agent_api.py    API de l'agent de recherche (/api/agent, jeton AGENT_TOKEN)
@@ -27,8 +31,8 @@ Architecture
               - app/chat.py         /api/chat ; app/chat_tools.py : outils de l'assistant
               - app/tasks.py        file de tâches dans PostgreSQL (table tasks, SKIP LOCKED) ; handlers :
                                     task_handlers.py ; traitements hors API : python -m app.jobs (jobs.py)
-              - app/matching.py     présélection avant Gemini : exclusions dures + similarité pgvector
-                                    (embeddings.py, modèle multilingue local via fastembed)
+              - app/matching.py     présélection avant Gemini : exclusions dures + classement (ranking.py) ;
+                                    embeddings.py : modèle multilingue local via fastembed, textes lus en entier
               - app/frontend.py     front servi par FastAPI en production (sans nginx), limites de taille
               - app/taxonomy.py     LISTE FERMÉE des catégories (familles de postes, compétences, secteurs)
               - app/classify.py     classement de chaque offre sur la liste (règles, puis Gemini à énumérations)
@@ -81,7 +85,9 @@ Tables :
                         par élément (24 h)
   job_assessments       évaluation CALCULÉE d'une offre pour un utilisateur : note /10, détail par critère,
                         verdict (nouveau / écartée), raison, pourquoi, compétences ; note corrigée à la main
-  job_feedback          retours J'aime / Pas intéressé (raisons, commentaire), pour la synthèse des règles
+  job_feedback          retour courant sur une offre : J'aime / Pas intéressé (raisons, commentaire) ; classement et
+                      synthèse des règles
+company_feedback      retour courant sur une entreprise (J'aime / Pas intéressé) ; classement
   chat_conversations    conversations avec l'assistant (la plus récente est active)
   chat_messages         messages (utilisateur / assistant) et outils appelés
   chat_actions          écritures proposées par l'assistant, exécutées seulement après confirmation :
@@ -120,9 +126,11 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
          Collecte : COLLECTOR (true/false), COLLECT_TIME (HH:MM, heure de Paris, défaut 06:30).
          Tâches de fond : RUN_BACKGROUND_THREADS (défaut true : évaluation, planificateur de collecte et file de
            tâches tournent dans le processus de l'API, comme avant ; false en production), MATCH_TOP_K (offres
-           présélectionnées par similarité et envoyées à Gemini, défaut 50 ; sans modèle d'embeddings, comme en
-           local, les plus récentes), FINISH_BUDGET_S (fin de passage de l'agent, défaut 90).
-           Embeddings en local (facultatif) : uv sync --group worker et FASTEMBED_CACHE_PATH=<dossier du modèle>.
+           les mieux classées envoyées à Gemini, défaut 50), FINISH_BUDGET_S (fin de passage de l'agent, défaut 90).
+           Embeddings : activés avec docker compose (groupe uv « worker », modèle téléchargé au premier calcul dans le
+           volume embedding-models ; premier calcul de ~450 offres : environ 3 min). Hors Docker : uv sync
+           --group worker et FASTEMBED_CACHE_PATH=<dossier du modèle>. Sans eux, le classement se fait sans le
+           critère sémantique.
          Journaux : LOG_FORMAT (json par défaut ; text dans docker-compose.yml).
          Offre Pro (facultatif, voir « Offres Free / Pro et paiement Stripe ») : BILLING_ENABLED (défaut false :
            tout le monde est Pro et admin), PRO_USER_EMAILS, ADMIN_EMAILS, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET,
@@ -133,7 +141,7 @@ Config : copier .env.example en .env et renseigner LINKEDIN_CLIENT_ID / LINKEDIN
 
 Lancer (dans WSL, depuis ce dossier) :
   docker compose up -d
-  -> http://localhost:8080        site avec connexion LinkedIn (landing sur « / », tableau de bord sur /tableau-de-bord)
+  -> http://localhost:8080        site avec connexion LinkedIn (landing sur « / », offres sur /postes)
   -> http://localhost:8081        site sans connexion, avec un utilisateur "dev" (dev local uniquement)
   -> localhost:5432               PostgreSQL (base/utilisateur jobradar, mot de passe POSTGRES_PASSWORD, "jobradar" par défaut)
 
@@ -167,6 +175,10 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/public/barometer                        SANS session : baromètre (agrégats, 24 h de cache)
          /mentions-legales, /cgv, /confidentialite    pages légales, publiques (sans session)
          /api/companies[/{id}[/logo]], /api/jobs[/{id}[/status]], /api/applications[/{id}]
+                                                      offres et entreprises avec leur pertinence (match) ;
+                                                      /api/jobs?brief=true : sans les descriptions
+         /api/options                                 choix des filtres et du profil (métiers, secteurs, lieux…)
+         /api/companies/{id}/reaction                 PUT {value: like|dislike|null}
          /api/profile                                 GET, PATCH (champs envoyés remplacés)
          /api/profile/import/linkedin-export          POST, ZIP de l'export de données LinkedIn (20 Mo max)
          /api/profile/import/pdf                      POST, PDF du profil ou CV (10 Mo max, via Gemini)
@@ -175,7 +187,8 @@ Routes : /auth/login, /auth/callback, /auth/me, /auth/logout
          /api/profile/proposals/{id}/apply            POST {accept: [ids d'éléments]} (absent : éléments cochés)
          /api/profile/analyze                         POST, déductions sur le profil -> proposition
          /api/profile/rules/synthesize                POST, règles déduites des retours -> proposition
-         /api/jobs/{id}/feedback                      POST {sentiment: like|dislike, reasons, text}
+         /api/jobs/{id}/feedback                      POST {sentiment: like|dislike, reasons, text} (remplace le
+                                                      retour précédent) ; DELETE le retire
          /api/jobs/{id}/similar                       GET, 5 offres ouvertes les plus proches (pgvector, sans LLM)
          /api/jobs/{id}/application/prepare           POST {refresh?, want_letter?} : prépare la candidature (Pro)
          /api/jobs/{id}/application/draft             GET, PATCH {answers: [{field_id, value}], cv_text, cover_letter}
@@ -278,9 +291,28 @@ Profil appris et évaluation des offres (voir docs/processus-recherche.md)
    - note /10 et verdict calculés côté serveur avec VOTRE barème et VOTRE seuil (Mon profil > Barème) ;
    - règle d'or : un statut posé par vous ou une note corrigée ne sont jamais modifiés ; quand le profil
      change, seules les offres non traitées sont réévaluées.
-4. Retours : « J'aime » (offre de référence, direct) / « Pas intéressé » (statut + raisons). Après 3 nouveaux
-   retours, « Mettre à jour mes règles » : règles proposées citant les offres d'origine, validées une par une.
-   « Déjà passé en entretien » propose d'exclure l'entreprise.
+4. Retours : « J'aime » / « Pas intéressé » en un clic, sur les offres et les entreprises, annulables ; ils
+   reclassent tout de suite et NE relancent PAS la notation Gemini (un J'aime ajoute une offre de référence sans
+   changer la version du profil). Raisons facultatives (« Dire pourquoi ») ; « Déduire des règles de mes
+   retours » (Profil) : règles proposées citant les offres d'origine, validées une par une. « Déjà passé en
+   entretien » propose d'exclure l'entreprise.
+
+------------------------------------------------------------------
+Classement des offres et des entreprises (backend/app/ranking.py)
+------------------------------------------------------------------
+Calculé à la lecture (environ 0,1 s pour 450 offres), sans appel LLM. Pertinence de 0 à 99 :
+- adéquation : métier visé (liste fermée, familles proches), compétences exigées couvertes, niveau, lieu et
+  télétravail, salaire, secteur, stade, proximité sémantique (embeddings) ; mêlée à la note Gemini (60 %) quand
+  l'offre est évaluée ; une information absente n'est pas comptée ;
+- goût : critères communs avec les offres aimées / écartées (une raison « trop front » vise le front, pas tout le
+  profil de l'offre), proximité sémantique de ces offres, entreprises aimées ;
+- fraîcheur (petit bonus), malus aux candidatures spontanées.
+Les réglages sont en tête du fichier. « Pas dans les propositions » : offre ou entreprise écartée, exclusion
+dure (recalculée à la lecture : un changement de profil s'applique aussitôt), écartée par Gemini, fermée.
+Le même classement choisit les offres envoyées à Gemini. La visibilité Free (entitlements.rank_jobs) n'en
+dépend pas : écarter des offres ne doit pas en dévoiler d'autres.
+Les réglages ne sont pas encore mesurés sur des jugements réels : après quelques semaines de retours, comparer
+la pertinence (scripts/export_judged.py) avant de les ajuster.
 
 ------------------------------------------------------------------
 Radar et agent de recherche (voir docs/processus-recherche.md et docs/agent.md)
@@ -415,8 +447,11 @@ demande d'accès immédiat et renonciation (horodatée : subscriptions.withdrawa
 page Stripe (custom_text).
 
 ------------------------------------------------------------------
-Analytics du marché (onglets Marché et Toi face au marché)
+Classement des offres sur la liste fermée, et agrégats du marché
 ------------------------------------------------------------------
+La page Analytics a été retirée de l'app (peu utile pour trouver et postuler). Le classement des offres sur la
+liste fermée reste essentiel (filtres et pertinence) ; les agrégats et leurs API (/api/analytics*, baromètre
+public) existent toujours côté serveur, sans page.
 Liste fermée (backend/app/taxonomy.py, seule source de vérité) : 6 domaines, 20 familles de postes (+ autre),
 séniorité (4 niveaux), contrat (stage et alternance exclus des statistiques), 114 compétences en 13 familles
 avec synonymes, 16 secteurs du produit. On ne crée JAMAIS de catégorie à partir d'une offre : une valeur hors
@@ -444,7 +479,7 @@ Mire PRÉPARE la candidature ; il n'envoie RIEN. L'utilisateur ouvre la page de 
 « Ouvrir la page de candidature »), colle chaque réponse (bouton Copier), joint les PDF et clique lui-même sur
 « Envoyer ». Ni extension de navigateur, ni automatisation, ni connexion à un compte de l'utilisateur sur un ATS.
 
-Parcours : « Préparer ma candidature » (Postes, fiche d'une offre, cartes « À regarder » / « Prête » de Mes process)
+Parcours : « Préparer ma candidature » (Offres, fiche d'une offre, colonne « À préparer » des Candidatures)
 -> tâche fetch_apply_form (sauf formulaire en cache de moins de 7 jours) -> tâche prepare_application -> PDF
 -> page /candidature?job=<id> (le front interroge l'API toutes les 2 s, 2 min au plus).
   1. Formulaire (apply_forms.py), uniquement des GET publics, même client que ats.py :

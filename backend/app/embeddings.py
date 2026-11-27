@@ -5,16 +5,19 @@ Modèle : sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2 via fastem
 - multilingue (~50 langues, dont français et anglais : les offres sont dans les deux) ;
 - léger : 0,22 Go, 384 dimensions (models.EMBEDDING_DIM) ;
 - pas de préfixe attendu (contrairement à la famille e5 : « query: » / « passage: ») ;
-- textes tronqués à 128 jetons : les champs les plus discriminants passent en premier.
+- textes tronqués à 128 jetons : tout texte plus long est découpé en morceaux dont les vecteurs sont moyennés
+  (sinon seuls le titre et la présentation de l'entreprise comptaient, jamais les exigences du poste).
 Le modèle est téléchargé au build de l'image worker (FASTEMBED_CACHE_PATH, voir Dockerfile), jamais au
 premier appel. fastembed n'est installé que dans l'image worker (groupe uv « worker ») et importé à la demande :
 l'API ne le charge jamais. Sans fastembed (API, docker compose local), get_embedder() renvoie None et la
 présélection se rabat sur les offres les plus récentes.
 
-Texte d'une offre : titre, type de rôle, stack, lieu, puis description. Un seul calcul par offre (partagé entre
-utilisateurs), refait seulement si un de ces champs change (models.JOB_EMBEDDED_FIELDS remet embedded_at à None).
-Texte d'un profil : positionnement, titre, rôles visés, compétences fortes, offres de référence et offres aimées
-(J'aime). Recalculé quand la version du profil change.
+Texte d'une offre : titre, type de rôle, stack, lieu (en-tête, qui pèse plus), puis toute la description. Un seul
+calcul par offre (partagé entre utilisateurs), refait seulement si un de ces champs change
+(models.JOB_EMBEDDED_FIELDS remet embedded_at à None).
+Texte d'un profil : positionnement, titre, rôles visés, compétences fortes, expériences, offres de référence et
+offres aimées. Recalculé quand la version du profil change. Les J'aime récents sont pris en compte à part, au
+moment du classement (ranking.py), sans recalculer le profil.
 """
 
 import logging
@@ -36,7 +39,8 @@ MODEL_NAME = os.environ.get("EMBEDDING_MODEL", "sentence-transformers/paraphrase
 QUERY_PREFIX = ""  # profil (requête) ; « query: » pour un modèle e5
 PASSAGE_PREFIX = ""  # offre (document) ; « passage: » pour un modèle e5
 BATCH = 64
-SUMMARY_CHARS = 1500
+CHUNK_CHARS = 450  # environ 128 jetons de français ou d'anglais
+MAX_CHUNKS = 8  # au-delà (environ 3 600 caractères), le début et la fin sont gardés
 
 
 class Embedder(Protocol):
@@ -75,9 +79,48 @@ def _join(parts) -> str:
     return "\n".join(p.strip() for p in parts if p and p.strip())
 
 
-def job_text(job: Job) -> str:
-    return PASSAGE_PREFIX + _join([job.title, job.role_type, job.stack, job.location,
-                                   (job.summary or "")[:SUMMARY_CHARS]])
+def chunks(text: str | None, size: int = CHUNK_CHARS, limit: int = MAX_CHUNKS) -> list[str]:
+    """Découpe un texte en morceaux d'environ `size` caractères, entre deux mots. Trop long : le début et la fin
+    sont gardés (les exigences d'une offre sont souvent à la fin)."""
+    out: list[str] = []
+    current = ""
+    for word in (text or "").split():
+        if current and len(current) + len(word) + 1 > size:
+            out.append(current)
+            current = ""
+        current = f"{current} {word}".strip()
+    if current:
+        out.append(current)
+    if len(out) > limit:
+        head = limit // 3
+        out = out[:head] + out[-(limit - head):]
+    return out
+
+
+def job_texts(job: Job) -> list[str]:
+    """En-tête de l'offre, puis sa description en morceaux."""
+    head = _join([job.title, job.role_type, job.stack, job.location]) or job.title
+    return [PASSAGE_PREFIX + t for t in [head, *chunks(job.summary)]]
+
+
+def _pool(vectors: list[list[float]]) -> list[float]:
+    """Moyenne normalisée ; l'en-tête (premier morceau) pèse la moitié de tous les autres réunis."""
+    weights = [max(1.0, (len(vectors) - 1) / 2)] + [1.0] * (len(vectors) - 1)
+    mean = [sum(w * v[i] for w, v in zip(weights, vectors, strict=True)) for i in range(len(vectors[0]))]
+    length = math.sqrt(sum(x * x for x in mean)) or 1.0
+    return [x / length for x in mean]
+
+
+def embed_documents(embedder: Embedder, documents: list[list[str]]) -> list[list[float]]:
+    """Un vecteur par document, chaque document étant une liste de morceaux (un seul appel au modèle)."""
+    flat = [text for doc in documents for text in doc]
+    vectors = embedder.embed(flat)
+    _check(vectors, len(flat))
+    out, start = [], 0
+    for doc in documents:
+        out.append(_pool(vectors[start:start + len(doc)]))
+        start += len(doc)
+    return out
 
 
 def profile_text(db: Session, profile: UserProfile, data: ProfileData) -> str:
@@ -91,6 +134,7 @@ def profile_text(db: Session, profile: UserProfile, data: ProfileData) -> str:
         "Compétences : " + ", ".join(strong[:30]) if strong else None,
         *[f"{r.title} ({r.company})" for r in data.reference_jobs[:10]],
         *[f"{j.title} {j.stack or ''}" for j in liked],
+        *[_join([e.title, (e.description or "")[:600]]) for e in data.experiences[:4]],
     ])
 
 
@@ -111,8 +155,7 @@ def embed_pending_jobs(db: Session, embedder: Embedder | None = None, limit: int
                           .order_by(Job.id).limit(size)).all()
         if not jobs:
             break
-        vectors = embedder.embed([job_text(j) for j in jobs])
-        _check(vectors, len(jobs))
+        vectors = embed_documents(embedder, [job_texts(j) for j in jobs])
         now = datetime.now(UTC)
         for job, vector in zip(jobs, vectors, strict=True):
             job.embedding, job.embedded_at = vector, now
@@ -131,8 +174,7 @@ def ensure_profile_embedding(db: Session, profile: UserProfile, data: ProfileDat
     embedder = embedder or get_embedder()
     if embedder is None:
         return None
-    [vector] = embedder.embed([profile_text(db, profile, data)])
-    _check([vector], 1)
+    [vector] = embed_documents(embedder, [chunks(profile_text(db, profile, data)) or [""]])
     profile.embedding, profile.embedding_version = vector, profile.version
     db.commit()
     return vector
@@ -144,11 +186,14 @@ def _cosine(a, b) -> float:
     return dot / norm if norm else 0.0
 
 
-def nearest_jobs(db: Session, vector: Sequence[float], job_ids: list[int] | None = None, limit: int = 50,
+def nearest_jobs(db: Session, vector: Sequence[float], job_ids: list[int] | None = None, limit: int | None = 50,
                  exclude_id: int | None = None) -> list[tuple[int, float]]:
     """Offres ouvertes les plus proches du vecteur : [(job_id, similarité cosinus)], meilleures d'abord.
 
-    PostgreSQL : ORDER BY embedding <=> :vecteur (index HNSW vector_cosine_ops). SQLite (tests) : en Python.
+    PostgreSQL : distance calculée par pgvector. L'index HNSW ne sert qu'à la recherche sans filtre et avec une
+    limite courte (offres similaires) : il ne rend pas plus de hnsw.ef_search (40) lignes, et un filtre appliqué
+    après lui en laisse encore moins. Sinon : distance exacte, triée ici (quelques milliers d'offres au plus).
+    SQLite (tests) : en Python.
     """
     vector = [float(x) for x in vector]
     conditions = [Job.closed_at.is_(None), Job.embedding.is_not(None)]
@@ -158,8 +203,11 @@ def nearest_jobs(db: Session, vector: Sequence[float], job_ids: list[int] | None
         conditions.append(Job.id != exclude_id)
     if db.get_bind().dialect.name == "postgresql":
         distance = Job.embedding.cosine_distance(vector)
-        rows = db.execute(select(Job.id, distance).where(*conditions).order_by(distance).limit(limit)).all()
-        return [(job_id, round(1 - float(d), 4)) for job_id, d in rows]
+        query = select(Job.id, distance).where(*conditions)
+        if job_ids is None and limit is not None and limit <= 20:
+            query = query.order_by(distance).limit(limit)
+        rows = db.execute(query).all()
+        return sorted(((job_id, round(1 - float(d), 4)) for job_id, d in rows), key=lambda pair: -pair[1])[:limit]
     rows = db.execute(select(Job.id, Job.embedding).where(*conditions)).all()
     scored = [(job_id, round(_cosine(vector, [float(x) for x in emb]), 4)) for job_id, emb in rows]
     return sorted(scored, key=lambda pair: -pair[1])[:limit]

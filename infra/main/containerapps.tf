@@ -316,7 +316,7 @@ resource "azurerm_container_app_job" "daily" {
       memory  = "2Gi"
 
       dynamic "env" {
-        for_each = local.common_env
+        for_each = local.daily_env
         content {
           name  = env.key
           value = env.value

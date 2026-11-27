@@ -77,7 +77,7 @@ function renderBanner() {
   if (draft.job.closed) items.push(html`<div class="cand-banner warn">Cette offre semble fermée sur le site de l'entreprise.</div>`);
   const general = draft.warnings.filter((w) => ["gemini", "pdf", "profil"].includes(w.kind));
   for (const w of general) {
-    items.push(html`<div class="cand-banner warn">${w.message}${w.kind === "profil" ? html` <a href="/mon-profil">Compléter mon profil</a>` : ""}</div>`);
+    items.push(html`<div class="cand-banner warn">${w.message}${w.kind === "profil" ? html` <a href="/mon-profil#parcours">Compléter mon profil</a>` : ""}</div>`);
   }
   $("#cand-banner").innerHTML = html`${items}`.s;
 }
@@ -231,7 +231,7 @@ function renderCv() {
   if (!draft.cv_text) {
     const why = draft.warnings.find((w) => w.kind === "profil");
     box.innerHTML = html`${head}<p class="small">${why ? why.message : "Pas de CV adapté pour cette candidature."}</p>
-      <p><a class="btn ghost sm" href="/mon-profil">Compléter mon profil</a></p>
+      <p><a class="btn ghost sm" href="/mon-profil#parcours">Compléter mon profil</a></p>
       ${retired.length ? html`<ul class="cand-warn-list">${retired.map((w) => html`<li>${w.message}</li>`)}</ul>` : ""}`.s;
     return;
   }
@@ -254,7 +254,7 @@ function renderCv() {
       <ul class="cand-warn-list">${retired.map((w) => html`<li>${w.message}</li>`)}</ul></div>` : ""}
     ${suggestions.length ? html`<div class="cand-banner"><strong>Compétences demandées absentes de votre profil :</strong>
       <ul class="cand-warn-list">${suggestions.map((s) => html`<li>${s}</li>`)}</ul>
-      <a class="small" href="/mon-profil">Compléter mon profil</a></div>` : ""}`.s;
+      <a class="small" href="/mon-profil#parcours">Compléter mon profil</a></div>` : ""}`.s;
 }
 
 // --- Lettre ----------------------------------------------------------------------------------------------
@@ -298,7 +298,7 @@ function renderActions() {
   if (!SENDABLE.has(status)) {
     box.innerHTML = html`<p><strong>Candidature envoyée${draft.application.applied_on ? ` le ${fmtDate(draft.application.applied_on)}` : ""}.</strong>
       Ce que vous avez envoyé est gardé dans l'historique du process.</p>
-      <a class="btn ghost sm" href="/mes-process">Voir mes process</a>`.s;
+      <a class="btn ghost sm" href="/mes-process">Voir mes candidatures</a>`.s;
     return;
   }
   const busy = draft.status === "en_preparation";
@@ -361,7 +361,7 @@ async function reloadQuietly() {
 async function render() {
   if (!jobId) {
     $("#cand-head").innerHTML = html`<div class="intro"><p class="label">// Candidature</p><h1>Aucune offre choisie</h1>
-      <p class="muted">Ouvrez une offre dans <a href="/postes">Postes</a> puis « Préparer ma candidature ».</p></div>`.s;
+      <p class="muted">Ouvrez une offre dans <a href="/postes">Offres</a> puis « Préparer ma candidature ».</p></div>`.s;
     return;
   }
   try {

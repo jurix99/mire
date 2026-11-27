@@ -1,10 +1,18 @@
+// Candidatures : quatre colonnes, de la préparation à la réponse. Les offres « pas intéressé » n'y sont pas
+// (elles sont dans Offres > Écartées). On ajoute une candidature depuis une offre.
 import {
-  $, $$, STATUSES, STATUS_LABEL, api, applicationButton, attempt, boot, candidatureUrl, confirmDelete, daysUntil, fmtDate, html,
-  isLocked, logo, manualStatuses, openForm, pill, plain, proTag, refreshCounts, renderValue, toast,
+  $, $$, STATUS_LABEL, api, applicationButton, attempt, boot, candidatureUrl, confirmDelete, daysUntil, fmtDate, html,
+  isLocked, logo, manualStatuses, openForm, openJobDialog, pill, plain, proTag, refreshCounts, renderValue, toast,
 } from "./app.js";
 
-// Colonnes du tableau (le statut « nouveau » reste sur la page Postes)
-const LANES = STATUSES.filter(([k]) => k !== "nouveau");
+// [clé, titre, statuts, statut posé quand on y glisse une carte]
+const COLUMNS = [
+  ["preparer", "À préparer", ["a_postuler", "prete"], "a_postuler"],
+  ["envoyees", "Envoyées", ["postule", "relance"], "postule"],
+  ["entretiens", "Entretiens", ["entretien", "offre"], "entretien"],
+  ["terminees", "Terminées", ["refuse", "abandonne"], "refuse"],
+];
+const COLUMN_COLOR = { preparer: "a_postuler", envoyees: "postule", entretiens: "entretien", terminees: "abandonne" };
 let apps = [];
 
 function nextStep(a) {
@@ -16,28 +24,43 @@ function nextStep(a) {
   return html`<span class="next ${soon ? "soon" : ""}">${a.next_step ?? "Étape"}${when}</span>`;
 }
 
-// Cartes où préparer / revoir la candidature (page Candidature)
-const PREPARE_LANES = new Set(["a_postuler", "prete"]);
-
 const card = (a) => {
   // Offre ou entreprise réservée au Pro : un seul repère sur la carte, les valeurs floutées n'ont pas de badge
   const locked = isLocked(a.company.name) || isLocked(a.job.title);
-  const prepare = !locked && (PREPARE_LANES.has(a.status) || a.draft_status);
+  const prepare = !locked && (["a_postuler", "prete"].includes(a.status) || a.draft_status);
   return html`
   <div class="p-card ${locked ? "pro-quiet" : ""}" role="button" tabindex="0" draggable="true" data-id="${a.id}" id="process-${a.id}">
     <span class="co">${logo(a.company, "sm")}${renderValue(a.company.name)}</span>
     <span class="small">${renderValue(a.job.title)}${locked ? html` <span data-pro style="cursor:pointer">${proTag}</span>` : ""}</span>
+    <span class="p-card-meta">${pill(a.status)}${a.applied_on ? html`<span class="small muted">${fmtDate(a.applied_on)}</span>` : ""}</span>
     ${nextStep(a)}
     ${prepare ? html`<span class="p-card-action">${applicationButton({ id: a.job.id, draft_status: a.draft_status })}</span>` : ""}
   </div>`;
 };
 
+/** Où l'on en est, en une phrase (remplace les graphiques de suivi). */
+function summary() {
+  const reached = (a, statuses) => statuses.includes(a.status) || a.events.some((e) => statuses.includes(e.to_status));
+  const sent = apps.filter((a) => reached(a, ["postule", "relance", "entretien", "offre"]));
+  const interviews = sent.filter((a) => reached(a, ["entretien", "offre"]));
+  const parts = [`${sent.length} envoyée${sent.length > 1 ? "s" : ""}`];
+  if (interviews.length) {
+    parts.push(`${interviews.length} entretien${interviews.length > 1 ? "s" : ""} obtenu${interviews.length > 1 ? "s" : ""} `
+      + `(${Math.round((interviews.length / sent.length) * 100)} %)`);
+  } else if (sent.length) parts.push("pas encore d'entretien");
+  return parts.join(" · ");
+}
+
 function draw() {
-  $("#board").innerHTML = html`${LANES.map(([k, label]) => {
-    const items = apps.filter((a) => a.status === k);
+  const shown = apps.filter((a) => a.status !== "pas_interesse");
+  $("#summary").textContent = shown.length ? summary() : "";
+  $("#empty").hidden = shown.length > 0;
+  $("#board").hidden = !shown.length;
+  $("#board").innerHTML = html`${COLUMNS.map(([key, label, statuses]) => {
+    const items = shown.filter((a) => statuses.includes(a.status));
     return html`
-      <section class="lane st-${k}" data-status="${k}" aria-label="${label}">
-        <div class="lane-head">${pill(k)}<span class="n">${items.length}</span></div>
+      <section class="lane st-${COLUMN_COLOR[key]}" data-column="${key}" aria-label="${label}">
+        <div class="lane-head"><h2>${label}</h2><span class="n">${items.length}</span></div>
         ${items.map(card)}
       </section>`;
   })}`.s;
@@ -51,18 +74,13 @@ async function reload() {
 async function setStatus(id, status) {
   const app = apps.find((a) => a.id === id);
   if (!app || app.status === status) return;
-  if (status === "prete") {
-    // « Prête à envoyer » se pose depuis la page Candidature, une fois les champs obligatoires remplis
-    toast("Relisez la candidature, puis « Marquer prête à envoyer » sur la page Candidature.");
-    if (!isLocked(app.job.title)) setTimeout(() => (location.href = candidatureUrl(app.job.id)), 900);
-    return;
-  }
   app.status = status; // affichage immédiat
   draw();
   try {
-    await attempt(() => api(`/applications/${id}`, { method: "PATCH", body: { status } }), `Passé en « ${STATUS_LABEL[status]} »`);
+    await attempt(() => api(`/applications/${id}`, { method: "PATCH", body: { status } }), `Passée en « ${STATUS_LABEL[status]} »`);
   } finally {
     await reload();
+    refreshCounts();
   }
 }
 
@@ -92,7 +110,7 @@ async function openSnapshot(appId, eventId) {
     <div class="dialog-body">
       <div class="job-head"><div class="grow"><h2>Ce que j'ai envoyé</h2>
         <p class="muted small">${snap.job.title} · ${snap.job.company} · le ${fmtDate(snap.sent_at)}</p></div>
-        <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button></div>
+        <button type="button" class="icon-btn close" data-close aria-label="Fermer">×</button></div>
       <section class="job-section"><p class="label">// Formulaire</p>
         <div class="rows">${snap.answers.filter((x) => value(x.value) !== "").map((x) => html`
           <div class="row-item"><span class="muted small" style="min-width:160px">${x.label}</span><span class="grow prewrap small">${value(x.value)}</span></div>`)}
@@ -109,20 +127,23 @@ async function openSnapshot(appId, eventId) {
 
 async function editApp(a) {
   const result = await openForm({
-    title: [plain(a.company.name), plain(a.job.title)].filter(Boolean).join(" · ") || "Process (offre réservée au Pro)",
+    title: [plain(a.company.name), plain(a.job.title)].filter(Boolean).join(" · ") || "Candidature (offre réservée au Pro)",
     fields: [
-      { name: "status", label: "Statut", type: "select", options: manualStatuses(a.status), required: true },
-      { name: "applied_on", label: "Candidature envoyée le", type: "date" },
-      { name: "next_step", label: "Prochaine étape", placeholder: "Entretien technique", full: true },
+      { name: "status", label: "Statut", type: "select", required: true,
+        options: manualStatuses(a.status).filter(([k]) => !["nouveau", "pas_interesse"].includes(k) || k === a.status) },
+      { name: "applied_on", label: "Envoyée le", type: "date" },
+      { name: "next_step", label: "Prochaine étape", placeholder: "Entretien technique" },
       { name: "next_step_date", label: "Date de l'étape", type: "date" },
       { name: "notes", label: "Notes", type: "textarea", full: true },
     ],
     values: a,
-    extra: html`${a.draft_status ? html`<p class="small"><a href="${candidatureUrl(a.job.id)}">Voir ma candidature préparée</a></p>` : ""}${timeline(a)}`,
+    extra: html`<p class="small links">
+        ${isLocked(a.job.title) ? "" : html`<button type="button" class="link-btn" data-offer="${a.job.id}">Voir l'offre</button>`}
+        ${a.draft_status ? html`<a href="${candidatureUrl(a.job.id)}">Voir ma candidature préparée</a>` : ""}</p>${timeline(a)}`,
     danger: {
-      label: "Supprimer",
+      label: "Retirer",
       onClick: async () => {
-        if (!confirmDelete("ce process (le poste repassera en « Nouveau »)")) return false;
+        if (!confirmDelete("cette candidature (l'offre reste dans vos propositions)")) return false;
         await api(`/applications/${a.id}`, { method: "DELETE" });
         return true;
       },
@@ -132,37 +153,7 @@ async function editApp(a) {
   if (result) {
     await reload();
     refreshCounts();
-    toast(result.deleted ? "Process supprimé" : "Process mis à jour");
-  }
-}
-
-async function addApp() {
-  const jobs = await api("/jobs");
-  const free = jobs.filter((j) => j.status === "nouveau" && !j.locked);
-  if (!free.length) return toast("Tous les postes ont déjà un process. Ajoutez un poste depuis la page Postes.", true);
-  const result = await openForm({
-    title: "Nouveau process",
-    fields: [
-      { name: "job_id", label: "Poste", type: "select", required: true, full: true,
-        options: free.map((j) => [j.id, `${j.company.name} · ${j.title}`]) },
-      { name: "status", label: "Statut", type: "select", options: LANES.filter(([k]) => k !== "prete"), required: true },
-      { name: "applied_on", label: "Candidature envoyée le", type: "date" },
-      { name: "next_step", label: "Prochaine étape", full: true },
-      { name: "next_step_date", label: "Date de l'étape", type: "date" },
-    ],
-    values: { status: "a_postuler" },
-    submitLabel: "Créer",
-    onSubmit: async ({ job_id, ...values }) => {
-      // Le poste peut déjà avoir un process « nouveau » (créé depuis la page Postes) : on le met à jour
-      const job = free.find((j) => j.id === Number(job_id));
-      if (job.application_id) return api(`/applications/${job.application_id}`, { method: "PATCH", body: values });
-      return api("/applications", { method: "POST", body: { job_id: Number(job_id), ...values } });
-    },
-  });
-  if (result) {
-    await reload();
-    refreshCounts();
-    toast("Process créé");
+    toast(result.deleted ? "Candidature retirée" : "Candidature mise à jour");
   }
 }
 
@@ -191,7 +182,10 @@ board.addEventListener("drop", (e) => {
   if (!lane) return;
   e.preventDefault();
   lane.classList.remove("drop");
-  setStatus(Number(e.dataTransfer.getData("text/plain")), lane.dataset.status).catch(() => {});
+  const id = Number(e.dataTransfer.getData("text/plain"));
+  const [, , statuses, target] = COLUMNS.find(([key]) => key === lane.dataset.column);
+  const app = apps.find((a) => a.id === id);
+  if (app && !statuses.includes(app.status)) setStatus(id, target).catch(() => {});
 });
 board.addEventListener("click", (e) => {
   if (e.target.closest("[data-prepare], a")) return; // bouton de la carte : page Candidature
@@ -204,18 +198,18 @@ board.addEventListener("keydown", (e) => {
   e.preventDefault();
   editApp(apps.find((a) => a.id === Number(c.dataset.id)));
 });
-// Historique d'un process (fenêtre ouverte par editApp) : instantané de ce qui a été envoyé
+// Liens de la fenêtre d'une candidature : l'offre, et ce qui a été envoyé
 document.addEventListener("click", (e) => {
-  const btn = e.target.closest?.("[data-snapshot]");
-  if (btn) openSnapshot(Number(btn.dataset.app), Number(btn.dataset.snapshot));
+  const snapshot = e.target.closest?.("[data-snapshot]");
+  if (snapshot) return openSnapshot(Number(snapshot.dataset.app), Number(snapshot.dataset.snapshot));
+  const offer = e.target.closest?.("[data-offer]");
+  if (offer) openJobDialog(Number(offer.dataset.offer));
 });
-
-$("#add").addEventListener("click", addApp);
 
 let firstLoad = true;
 boot(async () => {
   await reload();
-  // Lien direct vers un process depuis le tableau de bord (#process-12), au premier affichage seulement
+  // Lien direct vers une candidature (#process-12), au premier affichage seulement
   // (la page est aussi rechargée après une action confirmée dans le chat)
   if (!firstLoad) return;
   firstLoad = false;

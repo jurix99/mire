@@ -34,7 +34,7 @@
       <div class="head-cta">
         <a class="link" href="/auth/login" data-login data-guest>Se connecter</a>
         <a class="pill dark" href="#essai" data-guest>Essayer</a>
-        <a class="pill dark" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+        <a class="pill dark" href="/postes" data-member hidden>Ouvrir Mire</a>
         <button type="button" class="menu-btn" aria-controls="head-nav" aria-expanded="false" aria-label="Menu">
           <span></span><span></span>
         </button>
@@ -52,7 +52,7 @@
           <h1>Rejoignez l'avenir.<br><span class="soft">Avant tout le monde.</span></h1>
           <p class="lead">Mire repère les startups françaises qui viennent de lever des fonds, lit leurs offres chaque
             matin et les note selon votre profil. Vous ne regardez plus que celles qui valent le coup.</p>
-          <a class="pill dark lg member-cta" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+          <a class="pill dark lg member-cta" href="/postes" data-member hidden>Ouvrir Mire</a>
         </div>
 
         <form class="trial-card reveal" id="trial-form" novalidate>
@@ -99,7 +99,7 @@
             <p>Avec un compte, chaque offre de ces startups est notée sur 10 selon votre profil, chaque matin.</p>
           </div>
           <a class="pill light lg" href="/auth/login" data-login data-guest>Créer mon compte avec LinkedIn</a>
-          <a class="pill light lg" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+          <a class="pill light lg" href="/postes" data-member hidden>Ouvrir Mire</a>
         </div>
       </div>
     </section>
@@ -127,17 +127,15 @@
         <div class="app reveal" id="demo-app">
           <div class="app-bar">
             <span></span><span></span><span></span>
-            <em class="mono" id="demo-path">mire · tableau de bord</em>
+            <em class="mono" id="demo-path">mire · offres</em>
             <b class="hint">Démo interactive</b>
           </div>
           <div class="app-body">
             <nav class="app-side" aria-label="Démo : pages">
               <b>Mire</b>
-              <button type="button" data-view="dashboard" aria-pressed="true">Tableau de bord</button>
-              <button type="button" data-view="jobs">Postes</button>
-              <button type="button" data-view="analytics">Analytics <span class="new">Nouveau</span></button>
+              <button type="button" data-view="jobs" aria-pressed="true">Offres</button>
               <button type="button" data-view="companies">Entreprises</button>
-              <button type="button" data-view="process">Mes process</button>
+              <button type="button" data-view="process">Candidatures</button>
               <button type="button" data-view="chat">Assistant</button>
             </nav>
             <div class="app-main" id="demo-main"></div>
@@ -211,14 +209,14 @@
             <p class="muted">Pour essayer le radar avec votre profil.</p>
             <ul id="free-features"></ul>
             <a class="pill ghost block" href="/auth/login" data-login data-guest>Commencer gratuitement</a>
-            <a class="pill ghost block" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+            <a class="pill ghost block" href="/postes" data-member hidden>Ouvrir Mire</a>
           </article>
           <article class="plan pro reveal">
             <p class="mono tiny">Pro <span class="tag">Radar complet</span></p>
             <p class="price" data-price="monthly">—</p>
             <p class="muted">Sans engagement. Ou <strong data-price="pass_3m">—</strong>, sans renouvellement.</p>
             <ul id="pro-features"></ul>
-            <a class="pill light block" href="/auth/login?next=%2Ftableau-de-bord%3Fpro%3D1" data-login-pro>Passer Pro</a>
+            <a class="pill light block" href="/auth/login?next=%2Fpostes%3Fpro%3D1" data-login-pro>Passer Pro</a>
           </article>
         </div>
         <p class="mono note center">Prix TTC, TVA française incluse · Paiement sécurisé par Stripe · Résiliable en ligne</p>
@@ -269,7 +267,7 @@
         <div class="cta-row center">
           <a class="pill dark lg" href="#essai" data-guest>Voir mes 3 startups</a>
           <a class="pill ghost lg" href="/auth/login" data-login data-guest>Se connecter avec LinkedIn</a>
-          <a class="pill dark lg" href="/tableau-de-bord" data-member hidden>Ouvrir Mire</a>
+          <a class="pill dark lg" href="/postes" data-member hidden>Ouvrir Mire</a>
         </div>
       </div>
     </section>
@@ -284,7 +282,7 @@
       <nav aria-label="Produit"><p class="mono tiny">Produit</p>
         <a href="#essai">Essai gratuit</a><a href="#demo">Démo</a><a href="#comment">Comment ça marche</a><a href="#tarifs">Tarifs</a></nav>
       <nav aria-label="Compte"><p class="mono tiny">Compte</p>
-        <a href="/auth/login" data-login>Se connecter</a><a href="/tableau-de-bord">Tableau de bord</a><a href="#faq">FAQ</a></nav>
+        <a href="/auth/login" data-login>Se connecter</a><a href="/postes">Mes offres</a><a href="#faq">FAQ</a></nav>
     </div>
     <div class="wrap wordmark" aria-hidden="true">Mire</div>
     <div class="wrap foot-legal"><span>© <span id="year"></span> Mire</span>

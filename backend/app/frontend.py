@@ -5,7 +5,7 @@ Reproduit nginx.conf (toujours utilisé par docker compose en local) :
 - toute autre page exige une session valide (même règle que /auth/check), sinon 302 vers la landing
   « /?next=<chemin> » (le bouton LinkedIn ramène ensuite à la page demandée) ;
 - /auth/* et /api/* ne sont pas concernés (l'API répond 401 en JSON) ;
-- URLs propres : /entreprises sert entreprises.html ;
+- URLs propres : /entreprises sert entreprises.html ; les pages supprimées (REMOVED_PAGES) renvoient aux offres ;
 - /assets/* : fichiers statiques publics.
 Cache : pages HTML en « no-cache » ; dans le HTML, les URL /assets/… reçoivent « ?v=<ASSET_VERSION> » (SHA du
 commit, fixé au build de l'image) et sont mises en cache un an (immutable) : un déploiement change l'URL.
@@ -27,6 +27,7 @@ from starlette.staticfiles import StaticFiles
 # Pages publiques : landing et pages légales (accessibles sans compte, comme l'exige la loi)
 LEGAL_PAGES = ("/mentions-legales", "/cgv", "/confidentialite")
 PUBLIC_PAGES = {"/", "/index.html", *LEGAL_PAGES, *(f"{p}.html" for p in LEGAL_PAGES)}
+REMOVED_PAGES = ("/tableau-de-bord", "/analytics")  # pages supprimées : redirigées vers les offres
 LONG_CACHE = "public, max-age=31536000, immutable"
 ASSET_URL = re.compile(r'((?:href|src)=")(/assets/[^"?#]+)(")')
 
@@ -84,6 +85,9 @@ def mount_frontend(app: FastAPI, directory: Path, asset_version: str | None = No
             return RedirectResponse("/" + (f"?{query}" if query else ""), status_code=301)
         if url_path not in PUBLIC_PAGES and not request.session.get("user"):
             return RedirectResponse(f"/?next={quote(url_path, safe='/')}", status_code=302)
+        if url_path.removesuffix(".html") in REMOVED_PAGES:  # anciens liens et favoris : les offres
+            query = request.url.query
+            return RedirectResponse("/postes" + (f"?{query}" if query else ""), status_code=302)
         file = resolve(url_path)
         if file is None:
             return HTMLResponse("<!doctype html><meta charset=utf-8><title>Page introuvable</title>"

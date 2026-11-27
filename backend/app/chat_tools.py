@@ -60,7 +60,8 @@ TOOLS: list[ToolSpec] = [
     # Lectures
     ToolSpec("get_profile", "Lit le profil complet de l'utilisateur (identité, expériences, compétences, préférences, règles).",
              {"type": "object", "properties": {}}),
-    ToolSpec("list_jobs", "Liste les postes suivis (partagés), avec le statut de l'utilisateur pour chacun, triés par note décroissante.",
+    ToolSpec("list_jobs", "Liste les offres avec le statut de l'utilisateur, les plus pertinentes pour lui d'abord "
+             "(pertinence de 0 à 100 ; « ecartee_car » : offre qui n'est pas proposée).",
              {"type": "object", "properties": {
                  "status": {**_status, "enum": [*STATUS_KEYS, "ecartee"],
                             "description": f"Statut affiché : {STATUS_HELP}, ou ecartee (écartée par l'évaluation)"},
@@ -191,6 +192,7 @@ def _num(value) -> str:
 def _job_row(job) -> dict:
     return _compact({
         "job_id": job.id, "title": _v(job.title), "company": _v(job.company.name), "score": _v(job.score),
+        "pertinence": job.match.score if job.match else None, "ecartee_car": job.hidden_reason,
         "status": job.display_status, "location": job.location, "stack": _short(job.stack, 120),
         "verrouillee": True if job.locked else None,
         "pourquoi": _text(job.assessment.why, 200) if job.assessment else None,

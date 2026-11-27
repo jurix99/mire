@@ -270,13 +270,13 @@ export const ICONS = {
   arrow: raw(`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>`),
   plus: raw(`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>`),
   heart: raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 14c1.5-1.5 3-3.2 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.8 0-3 .5-4.5 2-1.5-1.5-2.7-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4 3 5.5l7 7Z"/></svg>`),
-  thumbDown: raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17 14V2"/><path d="M9 18.1 10 14H4.2a2 2 0 0 1-2-2.4l1.4-7A2 2 0 0 1 5.6 3H17v11l-4 8a2.4 2.4 0 0 1-4-.9Z"/></svg>`),
+  cross: raw(`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>`),
 };
 
 // --- Notifications ----------------------------------------------------------
 
 let toastTimer;
-/** action : { label, onClick } pour un bouton dans la notification (ex. « Passer Pro »). */
+/** action : { label, onClick } (ou une liste) pour des boutons dans la notification (ex. « Annuler »). */
 export function toast(message, error = false, action = null) {
   let el = $(".toast");
   if (!el) {
@@ -286,14 +286,20 @@ export function toast(message, error = false, action = null) {
     document.body.append(el);
   }
   el.textContent = message;
-  if (action) {
+  const actions = action ? [action].flat() : [];
+  for (const a of actions) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "toast-action";
-    btn.textContent = action.label;
-    btn.addEventListener("click", () => { el.hidden = true; action.onClick(); });
+    btn.textContent = a.label;
+    btn.addEventListener("click", () => { el.hidden = true; a.onClick(); });
     el.append(btn);
   }
+  // Une fiche ouverte (<dialog> modal) passe au-dessus de tout : la notification s'affiche dedans
+  const host = document.querySelector("dialog[open]") ?? document.body;
+  if (el.parentElement !== host) host.append(el);
+  // La fiche se ferme : la notification (et ses boutons) reste visible
+  if (host !== document.body) host.addEventListener("close", () => document.body.append(el), { once: true });
   el.classList.toggle("error", error);
   el.hidden = false;
   clearTimeout(toastTimer);
@@ -526,62 +532,122 @@ function fieldHtml(f, value) {
 
 export const confirmDelete = (what) => window.confirm(`Supprimer ${what} ? Cette action est définitive.`);
 
-// --- Retours sur une offre (J'aime / Pas intéressé) -------------------------------
+// --- Retours (J'aime / Pas intéressé) : un clic, annulable ------------------------
 
-let reasonsPromise;
+const WORK_MODE_LABEL = { sur_site: "Sur site", hybride: "Hybride", remote: "Remote" };
+const httpUrl = (u) => (u && /^https?:\/\//i.test(u) ? u : null);
+
+/** Pertinence pour l'utilisateur (0-100), calculée par le serveur (ranking.py). */
+export const matchBadge = (m) => (m
+  ? html`<span class="match ${m.score >= 70 ? "high" : m.score >= 50 ? "mid" : "low"}"
+      title="Pertinence pour vous, sur 100" aria-label="Pertinence ${m.score} sur 100">${m.score}</span>`
+  : "");
+
+/** Ce qui joue pour et contre. */
+export const reasonList = (m) => (m && (m.reasons.length || m.warnings.length)
+  ? html`<ul class="reasons">${m.reasons.map((r) => html`<li class="plus">${r}</li>`)}${m.warnings.map(
+      (r) => html`<li class="minus">${r}</li>`)}</ul>`
+  : "");
+
+export function salaryText(job) {
+  if (job.salary) return renderValue(job.salary);
+  const { salary_min_keur: min, salary_max_keur: max } = job;
+  if (!min && !max) return "";
+  return min && max && min !== max ? `${min}–${max} k€` : `${max ?? min} k€`;
+}
+
+/** Lieu, mode, salaire et ancienneté d'une offre, sur une ligne. */
+export function jobFacts(job) {
+  const parts = [job.city ?? job.location, WORK_MODE_LABEL[job.work_mode], salaryText(job),
+    fmtAgo(job.published_on ?? job.created_at)].filter(Boolean);
+  return parts.map((p, i) => html`${i ? " · " : ""}${p}`);
+}
+
+/** Boutons J'aime / Pas intéressé (offre ou entreprise) ; state : "like" | "dislike" | null. */
+export const reactionButtons = (state, { labels = false } = {}) => html`
+  <button type="button" class="${labels ? "btn ghost" : "icon-btn"} fb-btn fb-like ${state === "like" ? "is-on" : ""}"
+    data-react="like" aria-pressed="${state === "like"}"
+    title="${state === "like" ? "Retirer de mes J'aime" : "J'aime"}" aria-label="J'aime">${ICONS.heart}${labels ? " J'aime" : ""}</button>
+  <button type="button" class="${labels ? "btn ghost" : "icon-btn"} fb-btn fb-dislike ${state === "dislike" ? "is-on" : ""}"
+    data-react="dislike" aria-pressed="${state === "dislike"}"
+    title="${state === "dislike" ? "Remettre dans les propositions" : "Pas intéressé"}"
+    aria-label="Pas intéressé">${ICONS.cross}${labels ? " Pas intéressé" : ""}</button>`;
 
 /**
- * Demande la raison (facultative) puis enregistre le retour. « J'aime » ajoute l'offre aux références ;
- * « Pas intéressé » pose ce statut. Retourne la réponse de l'API (ou null si annulé).
+ * Enregistre ou retire un retour sur une offre. value : "like" | "dislike" | null.
+ * Retourne l'offre mise à jour (null si l'action n'a pas abouti).
  */
-export async function openFeedback(job, sentiment) {
-  const like = sentiment === "like";
-  reasonsPromise ??= api("/feedback/reasons");
-  const reasons = like ? [] : await reasonsPromise;
-  if (job.locked) return openProModal(); // offre récente verrouillée (Free)
-  const values = await openForm({
-    title: like ? `J'aime : ${plain(job.title)}` : `Pas intéressé : ${plain(job.title)}`,
-    fields: [
-      ...(like ? [] : [{ name: "reasons", label: "Pourquoi ? (facultatif)", type: "checks", full: true,
-                         options: reasons.map((r) => [r.key, r.label]) }]),
-      { name: "text", label: like ? "Qu'est-ce qui vous plaît ? (facultatif)" : "Précisez (facultatif)",
-        type: "textarea", full: true, maxlength: 1000,
-        hint: like ? "L'offre rejoint vos offres de référence : les offres qui lui ressemblent seront mieux notées."
-                   : "Vos retours servent à proposer de nouvelles règles, que vous validez une par une." },
-    ],
-    submitLabel: like ? "J'aime" : "Pas intéressé",
-  });
-  if (!values) return null;
-  const res = await attempt(() => api(`/jobs/${job.id}/feedback`, {
-    method: "POST", body: { sentiment, reasons: values.reasons ?? [], text: values.text },
-  }), like ? "Ajoutée à vos offres de référence" : "Noté : pas intéressé");
+export async function reactToJob(job, value) {
+  if (job.locked) { openProModal(); return null; }
+  let updated;
+  try {
+    updated = value
+      ? (await api(`/jobs/${job.id}/feedback`, { method: "POST", body: { sentiment: value, reasons: [], text: null } })).job
+      : await api(`/jobs/${job.id}/feedback`, { method: "DELETE" });
+  } catch (err) {
+    if (!err.handled) toast(err.message, true);
+    return null;
+  }
+  const undo = { label: "Annuler", onClick: () => reactToJob(updated, null).then(refreshPage) };
+  if (value === "like") toast("Ajoutée à vos J'aime", false, [undo]);
+  else if (value === "dislike") {
+    toast("Offre écartée", false, [undo, { label: "Dire pourquoi", onClick: () => askReasons(updated) }]);
+  } else toast("Retour retiré");
+  return updated;
+}
 
+/** « Dire pourquoi » après un « Pas intéressé » : affine le classement et la synthèse des règles. */
+export async function askReasons(job) {
+  const reasons = await api("/feedback/reasons");
+  const values = await openForm({
+    title: `Pas intéressé : ${plain(job.title)}`,
+    fields: [
+      { name: "reasons", label: "Pourquoi ?", type: "checks", full: true, options: reasons.map((r) => [r.key, r.label]) },
+      { name: "text", label: "Précisez (facultatif)", type: "textarea", full: true, maxlength: 1000 },
+    ],
+    submitLabel: "Enregistrer",
+  });
+  if (!values) return;
+  const res = await attempt(() => api(`/jobs/${job.id}/feedback`, {
+    method: "POST", body: { sentiment: "dislike", reasons: values.reasons ?? [], text: values.text },
+  }), "Noté, le classement en tient compte").catch(() => null);
+  if (!res) return;
   // « Déjà passé en entretien » : proposer d'exclure l'entreprise (validation explicite)
   const it = res.proposal?.items?.[0];
   if (it && window.confirm(`Exclure ${it.value.name} des prochaines offres ? (vous êtes déjà passé en entretien)`)) {
     await attempt(() => api(`/profile/proposals/${res.proposal.import_id}/apply`, { method: "POST", body: { accept: [it.id] } }),
       `${it.value.name} ajoutée aux entreprises exclues`);
   }
-  if (res.suggest_synthesis) {
-    setTimeout(() => toast(`${res.new_feedback} nouveaux retours : mettez à jour vos règles depuis « Mon profil ».`), 2600);
-  }
   refreshPage();
-  return res;
 }
 
-// --- Fiche d'un poste (contenu de l'offre) ------------------------------------
+/** J'aime / Pas intéressé sur une entreprise (value null : retiré). Retourne l'entreprise mise à jour. */
+export async function reactToCompany(company, value) {
+  let updated;
+  try {
+    updated = await api(`/companies/${company.id}/reaction`, { method: "PUT", body: { value } });
+  } catch (err) {
+    if (!err.handled) toast(err.message, true);
+    return null;
+  }
+  const undo = { label: "Annuler", onClick: () => reactToCompany(updated, null).then(refreshPage) };
+  if (value === "like") toast(`${plain(updated.name)} : ses offres remontent`, false, [undo]);
+  else if (value === "dislike") toast(`${plain(updated.name)} écartée avec ses offres`, false, [undo]);
+  else toast("Retour retiré");
+  return updated;
+}
 
-const WORK_MODE_LABEL = { sur_site: "Sur site", hybride: "Hybride", remote: "Remote" };
-const httpUrl = (u) => (u && /^https?:\/\//i.test(u) ? u : null);
+// --- Fiche d'une offre ---------------------------------------------------------
 
 /**
- * Ouvre la fiche d'un poste dans un <dialog> : contenu de l'offre, stack, et process de l'utilisateur.
- * onEdit(job) : facultatif, ajoute un bouton « Modifier » (la fiche se ferme puis onEdit est appelé).
+ * Fiche d'une offre dans un <dialog> : pourquoi elle est proposée, analyse, texte de l'annonce, et les actions
+ * (J'aime, Pas intéressé, préparer la candidature, marquer « postulé »).
+ * onEdit(job) : facultatif, ajoute un bouton « Modifier » (administrateurs).
  */
 export async function openJobDialog(jobId, { onEdit } = {}) {
   const dlg = document.createElement("dialog");
   dlg.className = "job-dialog";
-  dlg.setAttribute("aria-label", "Détail du poste");
+  dlg.setAttribute("aria-label", "Détail de l'offre");
   dlg.innerHTML = `<div class="dialog-body"><p class="muted small">Chargement…</p></div>`;
   document.body.append(dlg);
   dlg.addEventListener("close", () => dlg.remove());
@@ -597,156 +663,104 @@ export async function openJobDialog(jobId, { onEdit } = {}) {
     return;
   }
   const draw = () => {
-    const stack = (job.stack ?? "").split(/[,;·\n]/).map((s) => s.trim()).filter(Boolean);
-    const meta = [job.location, job.seniority, job.category].filter(Boolean).join(" · ");
     const url = httpUrl(job.url);
     const app = job.application;
-    const appRows = app ? [
-      ["Statut", pill(app.status)],
-      ["Candidature", app.applied_on ? fmtDate(app.applied_on) : ""],
-      ["Prochaine étape", [app.next_step, app.next_step_date ? `le ${fmtDate(app.next_step_date)}` : ""].filter(Boolean).join(" ")],
-    ].filter(([, v]) => v) : [];
-    const a = job.assessment;
-
+    const followed = app && !["nouveau", "pas_interesse"].includes(app.status);
+    const sent = followed && !["a_postuler", "prete"].includes(app.status);
     dlg.innerHTML = html`
       <div class="dialog-body">
         <div class="job-head">
           ${logo(job.company, "lg")}
           <div class="grow">
             <h2>${renderValue(job.title)}</h2>
-            <p class="muted small">${renderValue(job.company.name)}${meta ? ` · ${meta}` : ""}</p>
+            <p class="muted small">${renderValue(job.company.name)} · ${jobFacts(job)}</p>
           </div>
-          <button type="button" class="icon-btn" data-close aria-label="Fermer">×</button>
+          ${matchBadge(job.match)}
+          <button type="button" class="icon-btn close" data-close aria-label="Fermer">×</button>
         </div>
-        ${job.locked ? proBar(`Offre publiée ${fmtAgo(job.published_on ?? job.created_at)} : réservée au Pro.`) : ""}
-        <div class="meta">
-          ${pill(job.display_status)}${score(job.score)}
-          ${a?.manual_score != null ? html`<span class="small muted">note corrigée par vous</span>` : ""}
-          ${job.source ? html`<span class="small muted">Source : ${job.source}</span>` : ""}
-        </div>
-        <div class="job-facts small">
-          ${job.locked ? "" : job.closed_at ? html`<span class="fact closed">Offre fermée le ${fmtDate(job.closed_at)}</span>`
-            : job.verified_open_at ? html`<span class="fact open">Ouverture vérifiée le ${fmtDate(job.verified_open_at)}</span>`
-            : html`<span class="fact muted">Ouverture non vérifiée</span>`}
-          ${job.salary ? html`<span class="fact">Salaire : ${renderValue(job.salary)}</span>` : ""}
-          ${job.work_mode ? html`<span class="fact">${WORK_MODE_LABEL[job.work_mode] ?? job.work_mode}</span>` : ""}
-          ${job.travel ? html`<span class="fact">Déplacements : ${job.travel}</span>` : ""}
-          ${job.role_type ? html`<span class="fact">${job.role_type}</span>` : ""}
-          ${job.published_on ? html`<span class="fact muted">Publiée le ${fmtDate(job.published_on)}</span>` : ""}
-        </div>
-        ${stack.length ? html`<div class="tags">${stack.map((s) => html`<span class="tag">${s}</span>`)}</div>` : ""}
-        ${job.locked ? "" : assessmentSection(a)}
+        ${job.locked ? proBar("Cette offre est réservée au Pro.") : ""}
+        ${job.closed_at ? html`<p class="notice warn small">Offre fermée le ${fmtDate(job.closed_at)}.</p>`
+          : job.hidden_reason ? html`<p class="notice warn small">Pas dans vos propositions : ${job.hidden_reason}</p>` : ""}
+        ${followed ? html`<p class="notice small">Dans vos candidatures : ${pill(app.status)}
+            ${app.applied_on ? ` envoyée le ${fmtDate(app.applied_on)}` : ""}
+            · <a href="/mes-process#process-${app.id}">Suivre</a></p>` : ""}
+        ${reasonList(job.match)}
+        ${job.locked ? "" : analysisSection(job.assessment)}
         <section class="job-section">
-          <p class="label">// L'offre</p>
+          <p class="label">// L'annonce</p>
           ${isLocked(job.summary) ? renderValue(job.summary, { block: true })
             : job.summary ? html`<div class="job-text prewrap">${job.summary}</div>`
-            : html`<p class="muted small">Pas de description enregistrée pour ce poste.${url ? " Consultez l'offre originale." : ""}</p>`}
+            : html`<p class="muted small">Pas de description enregistrée.${url ? " Consultez l'annonce originale." : ""}</p>`}
         </section>
-        ${app ? html`<section class="job-section">
-          <p class="label">// Mon process</p>
-          <div class="rows">${appRows.map(([k, v]) => html`
-            <div class="row-item"><span class="muted small" style="min-width:120px">${k}</span><span class="grow">${v}</span></div>`)}
-          </div>
-          ${app.notes ? html`<div class="job-text prewrap small">${app.notes}</div>` : ""}
-        </section>` : ""}
-        <p class="small muted">Ajouté le ${fmtDate(job.created_at)}</p>
       </div>
       <div class="dialog-foot">
-        <div class="feedback-buttons">
-          ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Voir l'offre originale ${ICONS.link}</a>`
-            : isLocked(job.url) ? html`<button type="button" class="btn ghost" data-pro>Voir l'offre originale ${proTag}</button>` : ""}
-          ${job.locked ? "" : html`
-          <button type="button" class="btn ghost fb-btn fb-like ${job.feedback === "like" ? "is-on" : ""}" data-feedback="like"
-            aria-pressed="${job.feedback === "like"}" title="Offre de référence">${ICONS.heart} ${job.feedback === "like" ? "Vous aimez" : "J'aime"}</button>
-          <button type="button" class="btn ghost fb-btn fb-dislike ${job.feedback === "dislike" ? "is-on" : ""}" data-feedback="dislike"
-            aria-pressed="${job.feedback === "dislike"}">${ICONS.thumbDown} ${job.feedback === "dislike" ? "Pas intéressé (noté)" : "Pas intéressé"}</button>`}
-        </div>
+        <div class="feedback-buttons">${job.locked ? "" : reactionButtons(job.feedback, { labels: true })}</div>
         <div class="right">
           ${onEdit && !job.locked ? html`<button type="button" class="btn ghost" data-edit data-admin>Modifier</button>` : ""}
+          ${url ? html`<a class="btn ghost" href="${url}" target="_blank" rel="noopener noreferrer">Annonce ${ICONS.link}</a>`
+            : isLocked(job.url) ? html`<button type="button" class="btn ghost" data-pro>Annonce ${proTag}</button>` : ""}
+          ${job.locked || sent ? "" : html`<button type="button" class="btn ghost" data-applied>J'ai postulé</button>`}
           ${job.locked ? "" : applicationButton(job, { cls: "btn" })}
-          <button type="button" class="btn ghost" data-close>Fermer</button>
         </div>
       </div>`.s;
   };
 
-  const saveManual = async (value) => {
-    job = { ...job, ...(await attempt(() => api(`/jobs/${job.id}/assessment/manual`, { method: "PUT", body: { score: value } }),
-      value == null ? "Note calculée rétablie" : "Note corrigée")) };
+  const reload = async () => {
+    job = await api(`/jobs/${job.id}`);
     draw();
-    refreshPage();
   };
 
   draw();
-  dlg.addEventListener("click", (e) => {
-    if (e.target.closest("[data-close]")) dlg.close();
-    if (e.target.closest("[data-reset-score]")) saveManual(null).catch(() => {});
-    const fb = e.target.closest("[data-feedback]");
-    if (fb) {
-      openFeedback(job, fb.dataset.feedback).then((res) => {
-        if (res) { job = { ...job, ...res.job }; draw(); }
-      }).catch(() => {});
+  dlg.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-close]")) return dlg.close();
+    const reaction = e.target.closest("[data-react]");
+    if (reaction) {
+      const value = job.feedback === reaction.dataset.react ? null : reaction.dataset.react;
+      if (!(await reactToJob(job, value))) return;
+      if (value === "dislike") dlg.close();
+      else await reload().catch(() => {});
+      return refreshPage();
+    }
+    if (e.target.closest("[data-applied]")) {
+      const ok = await attempt(() => api(`/jobs/${job.id}/status`, { method: "PUT", body: { status: "postule" } }),
+        "Ajoutée à vos candidatures envoyées").catch(() => null);
+      if (!ok) return;
+      await reload().catch(() => {});
+      return refreshPage();
     }
     if (e.target.closest("[data-edit]")) {
       dlg.close();
       onEdit(job);
     }
   });
-  dlg.addEventListener("submit", (e) => {
-    if (!e.target.matches(".manual-score")) return;
-    e.preventDefault();
-    const raw = e.target.elements.score.value;
-    if (raw === "") return toast("Indiquez une note entre 0 et 10", true);
-    saveManual(Number(raw)).catch(() => {});
-  });
   $("[data-close]", dlg).focus();
 }
 
-/** Section « Mon évaluation » de la fiche : verdict, raisons, détail du barème, compétences, correction. */
-function assessmentSection(a) {
-  if (!a) {
-    return html`<section class="job-section"><p class="label">// Mon évaluation</p>
-      <p class="small muted">Pas encore évaluée pour vous : l'évaluation se fait automatiquement dès que votre profil est rempli.</p>
-    </section>`;
-  }
+/** Analyse de Gemini quand l'offre a été évaluée : note, pourquoi, compétences. */
+function analysisSection(a) {
+  if (!a || (a.score == null && !a.why)) return "";
   const tags = (label, list, cls) => (isLocked(list)
     ? html`<div class="tags"><span class="small muted">${label}</span>${renderValue(list)}</div>`
     : list.length ? html`<div class="tags"><span class="small muted">${label}</span>${list.map((s) => html`<span class="tag ${cls}">${s}</span>`)}</div>` : "");
-  const auto = plain(a.auto_score);
+  const note = a.score == null ? "" : isLocked(a.score) ? renderValue(a.score)
+    : html`${Number(a.score).toLocaleString("fr-FR")}/10`;
   return html`<section class="job-section">
-    <p class="label">// Mon évaluation</p>
-    ${a.exclusion ? html`<p class="small exclusion">Écartée : ${renderValue(a.exclusion)}</p>` : ""}
+    <p class="label">// Analyse de l'IA ${note}</p>
     ${a.why ? html`<p class="small">${renderValue(a.why, { block: true })}</p>` : ""}
-    ${isLocked(a.criteria) ? html`<div class="criteria">${renderValue(a.criteria, { block: true })}</div>`
-      : a.criteria.length ? html`<div class="criteria">${a.criteria.map((c) => html`
-      <div class="criterion">
-        <span class="small">${c.label}</span>
-        <span class="bar-track"><span class="bar-fill" style="width:${Math.round((c.points / (c.max || 1)) * 100)}%"></span></span>
-        <span class="small n">${c.points.toLocaleString("fr-FR")} / ${c.max.toLocaleString("fr-FR")}</span>
-      </div>`)}</div>` : ""}
     ${tags("Vous avez :", a.skills_have, "have")}
-    ${tags("Manque :", a.skills_missing, "missing")}
-    <form class="manual-score">
-      <label class="small">Ma note
-        <input class="input" name="score" type="number" min="0" max="10" step="0.5" value="${a.manual_score ?? ""}"
-          placeholder="${auto}" aria-label="Corriger la note (sur 10)">
-      </label>
-      <button class="btn ghost sm">Corriger</button>
-      ${a.manual_score != null ? html`<button type="button" class="btn ghost sm" data-reset-score>Revenir à la note calculée${auto !== "" ? ` (${auto})` : ""}</button>` : ""}
-      <span class="small muted">${a.stale ? "Réévaluation en attente (profil modifié)" : `Évaluée le ${fmtDate(a.assessed_at)}`}</span>
-    </form>
+    ${tags("À acquérir :", a.skills_missing, "missing")}
+    ${a.stale ? html`<p class="small muted">Analyse faite avant la dernière modification de votre profil : elle sera refaite.</p>` : ""}
   </section>`;
 }
 
 // --- Barre latérale ---------------------------------------------------------
 
 const NAV = [
-  ["/tableau-de-bord", "Tableau de bord", null],
-  ["/entreprises", "Entreprises", "companies"],
-  ["/postes", "Postes", "jobs"],
-  ["/sources", "Sources", null, true], // réservée aux admins (gestion du radar partagé)
-  ["/mes-process", "Mes process", "processes"],
-  ["/analytics", "Analytics", null],
-  ["/mon-profil", "Mon profil", null],
+  ["/postes", "Offres", null],
+  ["/entreprises", "Entreprises", null],
+  ["/mes-process", "Candidatures", "processes"],
+  ["/mon-profil", "Profil", null],
+  ["/sources", "Sources", null, true], // réservée aux admins (gestion du radar partagé, santé du moteur)
 ];
 
 let mePromise;
@@ -765,27 +779,6 @@ export async function refreshCounts() {
   // Radar partagé : seuls les admins voient les boutons qui le modifient (l'API refuse aussi : 403)
   const notAdmin = me.user.is_admin === false;
   document.body.classList.toggle("not-admin", notAdmin);
-  // Le bloc « Veille » mène à la page Sources, réservée aux admins
-  const watch = $("#watch");
-  if (watch) notAdmin ? watch.removeAttribute("href") : watch.setAttribute("href", "/sources");
-  refreshWatch();
-}
-
-/** Bloc « Veille » de la barre latérale : planning de l'agent et dernier passage. */
-async function refreshWatch() {
-  if (!$("#watch")) return;
-  let data;
-  try {
-    data = await api("/runs?limit=1");
-  } catch {
-    return;
-  }
-  const set = (key, text) => { const el = $(`[data-watch="${key}"]`); if (el) el.textContent = text; };
-  set("schedule", data.schedule ?? "Non configurés");
-  const last = data.runs[0];
-  set("last", last ? `${fmtDate(last.started_at)} · +${last.jobs_added}` : "Aucun");
-  const n = last?.mine?.nouvelles;
-  set("mine", n ? `${n} nouvelle${n > 1 ? "s" : ""} offre${n > 1 ? "s" : ""} retenue${n > 1 ? "s" : ""} pour vous` : "");
 }
 
 /** Logo Mire (anneau ouvert + point central + satellite), coloré via currentColor. */
@@ -806,19 +799,13 @@ export async function renderShell() {
   } else {
     aside.dataset.ready = "1";
     aside.innerHTML = html`
-    <a class="brand" href="/tableau-de-bord" aria-label="Mire, tableau de bord">${raw(LOGO_SVG)}<span>Mire</span></a>
+    <a class="brand" href="/postes" aria-label="Mire, offres pour vous">${raw(LOGO_SVG)}<span>Mire</span></a>
     <nav class="nav" aria-label="Navigation principale">
       ${NAV.map(([href, label, count, adminOnly]) => html`
         <a href="${href}" ${raw(path === href ? 'aria-current="page"' : "")} ${raw(adminOnly ? "data-admin" : "")}>
           <span>${label}</span>${count ? html`<span class="count" data-count="${count}"></span>` : ""}
         </a>`)}
     </nav>
-    <a class="watch" href="/sources" id="watch" style="text-decoration:none">
-      <p class="label">// Veille personnelle</p>
-      <p class="small" data-watch="schedule">…</p>
-      <div class="row"><span class="muted">Dernier passage</span><span data-watch="last">…</span></div>
-      <p class="small muted" data-watch="mine"></p>
-    </a>
     <div class="watch" id="plan-box" hidden>
       <p class="label">// Offre Free</p>
       <p class="small muted">L'offre la plus pertinente, toutes les autres, les levées de fonds et les notes de l'IA : réservées au Pro.</p>

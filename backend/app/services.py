@@ -18,11 +18,12 @@ from fastapi import HTTPException
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from . import entitlements
+from . import entitlements, ranking
 from .entitlements import FULL_ACCESS, Access, lock
 from .models import (
     ACTIVE_STATUSES,
     TODO_STATUSES,
+    CompanyFeedback,
     Application,
     ApplicationDraft,
     ApplicationEvent,
@@ -46,6 +47,8 @@ from .schemas import (
     JobMini,
     JobOut,
     Locked,
+    MatchOut,
+    TopJob,
 )
 
 
@@ -96,6 +99,13 @@ class AssessmentContext:
     access: Access = dc_field(default_factory=Access)  # ce que l'utilisateur peut voir (Free : masquage)
     feedback: dict[int, str] = dc_field(default_factory=dict)  # job_id -> dernier retour (like | dislike)
     drafts: dict[int, str] = dc_field(default_factory=dict)  # job_id -> statut de la candidature préparée
+    ranker: ranking.Ranker | None = None  # classement pour l'utilisateur
+
+
+def match_out(m: ranking.Match, access: Access) -> MatchOut:
+    """En Free, la pertinence des éléments visibles sans ses explications (compétences, goûts : réservés au Pro)."""
+    return MatchOut(score=m.value, reasons=m.reasons if access.full else [],
+                    warnings=m.warnings if access.full else [])
 
 
 def assessment_context(db: Session, user: User) -> AssessmentContext:
@@ -110,7 +120,8 @@ def assessment_context(db: Session, user: User) -> AssessmentContext:
     drafts = dict(db.execute(select(Application.job_id, ApplicationDraft.status).join(
         ApplicationDraft, ApplicationDraft.application_id == Application.id).where(Application.user_id == user.id)).all())
     return AssessmentContext({a.job_id: a for a in rows}, profile_data(profile).scoring.weights, criteria_labels(),
-                             profile.version, entitlements.access_for(db, user), feedback, drafts)
+                             profile.version, entitlements.access_for(db, user), feedback, drafts,
+                             ranking.Ranker(db, user))
 
 
 def assessment_out(a: JobAssessment, ctx: AssessmentContext, treated: bool = False) -> AssessmentOut:
@@ -174,9 +185,13 @@ def job_out(job: Job, app: Application | None, ctx: AssessmentContext | None = N
     if app is not None:
         out.status = app.status
         out.application_id = app.id
+    out.city = ranking.city_of(job.location)
     if ctx:
         out.feedback = ctx.feedback.get(job.id)  # le plus récent l'emporte (dict construit par ordre d'id)
         out.draft_status = ctx.drafts.get(job.id)
+        if ctx.ranker:
+            m = ctx.ranker.match(job)
+            out.match, out.hidden_reason = match_out(m, access), m.hidden
     a = ctx.assessments.get(job.id) if ctx else None
     if a is not None:
         out.assessment = assessment_out(a, ctx, treated=app is not None)
@@ -215,6 +230,33 @@ def company_out(company: Company, jobs_count: int, access: Access, *, hide_ident
         for field in COMPANY_LOCKED_FIELDS:
             setattr(out, field, lock(getattr(out, field)))
         out.jobs_count = Locked(placeholder="3")
+    return out
+
+
+def ranked_companies(db: Session, user: User, companies: list[Company]) -> list[CompanyOut]:
+    """Entreprises avec leur pertinence pour l'utilisateur, leurs meilleures offres et son retour (ordre inchangé ;
+    une entreprise floutée en Free ne reçoit rien de tout cela)."""
+    access = entitlements.access_for(db, user)
+    counts = jobs_count_by_company(db, access)
+    ranker = ranking.Ranker(db, user)
+    wanted = {c.id for c in companies}
+    jobs: dict[int, list[Job]] = {}
+    for job in db.scalars(select(Job).where(Job.company_id.in_(wanted or {-1})).options(selectinload(Job.company))):
+        if not access.job_is_locked(job):
+            jobs.setdefault(job.company_id, []).append(job)
+    reactions = dict(db.execute(select(CompanyFeedback.company_id, CompanyFeedback.sentiment)
+                                .where(CompanyFeedback.user_id == user.id)).all())
+    out = []
+    for company in companies:
+        item = company_out(company, counts.get(company.id, 0), access)
+        if not item.locked:
+            m = ranker.company_match(company, [(j, ranker.match(j)) for j in jobs.get(company.id, [])])
+            item.match, item.hidden_reason = match_out(m, access), m.hidden
+            item.open_jobs = m.open_jobs
+            item.top_jobs = [TopJob(id=j.id, title=j.title, city=ranking.city_of(j.location), score=jm.value)
+                             for j, jm in m.top]
+            item.reaction = reactions.get(company.id)
+        out.append(item)
     return out
 
 
@@ -284,10 +326,11 @@ def visible_score(j: JobOut) -> float | None:
     return None if isinstance(j.score, Locked) else j.score
 
 
-def _by_score(jobs: list[JobOut]) -> list[JobOut]:
-    # Tri sur ce que l'utilisateur voit (une note masquée ne doit pas trahir son rang)
-    return sorted(jobs, key=lambda j: (j.locked, visible_score(j) is None, -(visible_score(j) or 0),
-                                       j.title.lower() if isinstance(j.title, str) else "", j.id))
+def by_relevance(jobs: list[JobOut]) -> list[JobOut]:
+    """Offres proposées par pertinence, puis les offres écartées ; à égalité, les plus récentes.
+    Tri sur ce que l'utilisateur voit : les offres floutées (sans classement) viennent après, par date."""
+    return sorted(jobs, key=lambda j: (j.locked, j.hidden_reason is not None, -(j.match.score if j.match else 0),
+                                       -(j.published_on or j.created_at.date()).toordinal(), -j.id))
 
 
 def list_jobs(
@@ -299,11 +342,11 @@ def list_jobs(
     status: ProcessStatus | str | None = None,
     min_score: float | None = None,
 ) -> list[JobOut]:
-    """Postes avec le statut et la note DE L'UTILISATEUR, triés par note décroissante.
+    """Postes avec le statut, la note et le classement DE L'UTILISATEUR, les plus pertinents d'abord.
 
     status : statut affiché (statut posé par l'utilisateur, ou verdict « nouveau » / « ecartee »).
     """
-    query = select(Job).options(selectinload(Job.company))
+    query = select(Job).options(selectinload(Job.company)).order_by(Job.id)
     if company_id is not None:
         query = query.where(Job.company_id == company_id)
     if company_name:
@@ -319,7 +362,7 @@ def list_jobs(
         out = [j for j in out if j.display_status == wanted]
     if min_score is not None:
         out = [j for j in out if (s := visible_score(j)) is not None and s >= min_score]
-    return _by_score(out)
+    return by_relevance(out)
 
 
 def get_job(db: Session, user: User, job_id: int) -> JobOut:
@@ -420,7 +463,7 @@ def dashboard(db: Session, user: User) -> DashboardOut:
 
     # À traiter : nouveau ou « à regarder », jamais les offres écartées par l'évaluation
     todo_keys = {s.value for s in TODO_STATUSES}
-    todo = _by_score([o for o in outs if o.display_status in todo_keys])
+    todo = by_relevance([o for o in outs if o.display_status in todo_keys])
     active = [a for a in apps.values() if a.status in ACTIVE_STATUSES]
     active.sort(key=lambda a: (a.next_step_date or date.max, -a.updated_at.timestamp()))
 

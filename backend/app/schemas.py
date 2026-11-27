@@ -102,6 +102,42 @@ class StatusOut(BaseModel):
     label: str
 
 
+# --- Classement (ranking.py) -------------------------------------------------
+
+
+class MatchOut(BaseModel):
+    """Pertinence pour l'utilisateur connecté. En Free, les explications ne sont pas envoyées."""
+
+    score: int  # 0-100
+    reasons: list[str] = []  # ce qui joue pour
+    warnings: list[str] = []  # ce qui joue contre
+
+
+class TopJob(BaseModel):
+    """Une des meilleures offres ouvertes d'une entreprise."""
+
+    id: int
+    title: str
+    city: str | None = None
+    score: int
+
+
+class Option(BaseModel):
+    key: str
+    label: str
+    group: str | None = None
+
+
+class OptionsOut(BaseModel):
+    """GET /api/options : choix des filtres et du profil."""
+
+    families: list[Option]
+    sectors: list[Option]
+    seniority: list[Option]
+    skills: list[str]  # libellés de la liste : ceux que le classement sait comparer
+    locations: list[str]
+
+
 # --- Entreprises -------------------------------------------------------------
 
 
@@ -140,6 +176,12 @@ class CompanyOut(CompanyMini):
     last_checked_at: datetime | Locked | None = None
     no_relevant_jobs_at: datetime | Locked | None = None
     jobs_count: int | Locked = 0
+    # Classement pour l'utilisateur (liste et fiche d'une entreprise ; absent d'une entreprise floutée)
+    match: MatchOut | None = None
+    open_jobs: int = 0  # offres ouvertes visibles
+    top_jobs: list[TopJob] = []
+    reaction: str | None = None  # like | dislike
+    hidden_reason: str | None = None
 
 
 class CompanyPatch(BaseModel):
@@ -250,6 +292,15 @@ class JobOut(JobMini):
     feedback: str | None = None
     # Candidature préparée : en_preparation | brouillon | prete | envoyee | None (bouton « Voir ma candidature »)
     draft_status: str | None = None
+    # Classement pour l'utilisateur (ranking.py) et raison pour laquelle l'offre n'est pas proposée
+    match: MatchOut | None = None
+    hidden_reason: str | None = None
+    # Filtres (offre en clair seulement) : métier, niveau, salaire brut annuel en k€, ville principale
+    role_family: str | None = None
+    seniority_level: str | None = None
+    salary_min_keur: int | None = None
+    salary_max_keur: int | None = None
+    city: str | None = None
 
 
 class ManualScoreIn(BaseModel):

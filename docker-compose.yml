@@ -18,8 +18,8 @@ services:
     working_dir: /app
     # Applique les migrations de la base, puis démarre l'API
     command: >
-      sh -c "uv run --frozen alembic upgrade head &&
-             uv run --frozen uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
+      sh -c "uv run --frozen --group worker alembic upgrade head &&
+             uv run --frozen --group worker uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'"
     env_file: .env
     environment:
       PUBLIC_URL: http://localhost:8080
@@ -30,10 +30,15 @@ services:
       UV_PROJECT_ENVIRONMENT: /venv   # venv dans un volume Docker, pas dans le dossier Windows
       UV_NATIVE_TLS: "1"              # uv utilise les certificats système (proxy HTTPS de l'entreprise)
       UV_LINK_MODE: copy
+      # Embeddings en local (groupe uv « worker ») : modèle multilingue (~220 Mo) téléchargé au premier calcul,
+      # avec les certificats système (proxy HTTPS de l'entreprise)
+      FASTEMBED_CACHE_PATH: /models
+      SSL_CERT_FILE: /etc/ssl/certs/ca-certificates.crt
     volumes:
       - ./backend:/app
       - backend-venv:/venv
       - uv-cache:/root/.cache/uv
+      - embedding-models:/models
       # Certificats racines de WSL (inclut la CA Cloudflare Gateway du réseau de l'entreprise)
       - /etc/ssl/certs/ca-certificates.crt:/etc/ssl/certs/ca-certificates.crt:ro
     depends_on:
@@ -64,4 +69,5 @@ services:
 volumes:
   backend-venv:
   uv-cache:
+  embedding-models:
   postgres-data:

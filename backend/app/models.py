@@ -10,7 +10,8 @@ users ──< applications >── jobs >── companies
   ├──< profile_imports   aperçus d'import de profil en attente de confirmation
   ├──< chat_conversations ──< chat_messages   conversations avec l'assistant Gemini
   ├──< chat_actions      écritures proposées par l'assistant (confirmées ou non) = journal des actions
-  ├──< job_feedback      retours sur les offres (j'aime / pas intéressé + raisons) -> synthèse de règles
+  ├──< job_feedback      retours sur les offres (j'aime / pas intéressé + raisons) -> classement et règles
+  ├──< company_feedback  retours sur les entreprises (j'aime / pas intéressé) -> classement
   └──< job_assessments   évaluation CALCULÉE d'une offre pour l'utilisateur (note, verdict, raisons)
 
 sources ──< jobs (source_id)   où chercher (ATS, job boards, radars de levées, requêtes…), partagées
@@ -451,6 +452,19 @@ class JobFeedback(Base):
     synthesized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     job: Mapped["Job"] = relationship()
+
+
+class CompanyFeedback(Base):
+    """Retour de l'utilisateur sur une entreprise : un seul par entreprise, modifiable ou retiré (ranking.py)."""
+
+    __tablename__ = "company_feedback"
+    __table_args__ = (UniqueConstraint("user_id", "company_id"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id", ondelete="CASCADE"), index=True)
+    sentiment: Mapped[str] = mapped_column(String(10))  # like | dislike
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class JobAssessment(TimestampMixin, Base):

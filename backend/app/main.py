@@ -19,7 +19,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse, Response
-from sqlalchemy import text
+from sqlalchemy import select, text
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -37,6 +37,7 @@ from .chat import router as chat_router
 from .db import SessionLocal
 from .feedback import router as feedback_router
 from .llm import get_llm
+from .models import Job
 from .net import TLS_CONTEXT
 from .profile_api import router as profile_router
 from .public_api import router as public_router
@@ -100,6 +101,10 @@ async def lifespan(_: FastAPI):
         # File de tâches (collecte à la demande, présélection…) traitée dans ce processus
         tasks.local_worker = tasks.LocalWorker(SessionLocal)
         tasks.local_worker.start()
+        if os.environ.get("FASTEMBED_CACHE_PATH"):  # embeddings en local : rattraper les offres sans vecteur
+            with SessionLocal() as db:
+                if db.scalar(select(Job.id).where(Job.embedded_at.is_(None), Job.closed_at.is_(None)).limit(1)):
+                    tasks.enqueue(db, "embed_jobs", dedup_key="embed_jobs")
     yield
     if assessments.assessor is not None:
         assessments.assessor.stop()
@@ -147,7 +152,7 @@ def _save_user(info: dict, invited: bool = False) -> int | None:
 BETA_WAITLIST = "/?acces=beta"  # la landing explique que l'accès se fait sur invitation
 
 
-APP_HOME = "/tableau-de-bord"  # « / » est la landing publique
+APP_HOME = "/postes"  # les offres pour l'utilisateur ; « / » est la landing publique
 
 
 def _safe_next(value: str | None) -> str:

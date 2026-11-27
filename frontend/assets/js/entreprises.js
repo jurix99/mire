@@ -1,9 +1,19 @@
+// Entreprises : trouver celles qui valent la peine. Classées d'après leurs meilleures offres pour l'utilisateur et
+// ses retours (ranking.py). J'aime : leurs offres remontent. Pas intéressé : elles sortent, offres comprises.
 import {
-  $, ICONS, api, attempt, boot, confirmDelete, fmtDate, fmtMoney, html, isLocked, loadMe, lockedBlock, logo, openForm, plain,
-  proBar, refreshCounts, renderPaged, renderValue, shown, toast,
+  $, ICONS, api, attempt, boot, confirmDelete, fmtDate, fmtMoney, html, isLocked, loadMe, lockedBlock, logo,
+  matchBadge, openForm, openJobDialog, plain, proBar, reactToCompany, reactionButtons, reasonList, refreshCounts,
+  renderPaged, renderValue, shown, toast,
 } from "./app.js";
 
+const VIEWS = ["pour-vous", "aimees", "ecartees"];
+const params = new URLSearchParams(location.search);
+const state = {
+  view: VIEWS.includes(params.get("vue")) ? params.get("vue") : "pour-vous",
+  q: "", secteur: "", stade: "", sort: "match", all: false,
+};
 let companies = [];
+let order = [];
 
 const ATS_OPTIONS = [["ashby", "Ashby"], ["lever", "Lever"], ["greenhouse", "Greenhouse"], ["recruitee", "Recruitee"],
   ["teamtailor", "Teamtailor"], ["yc", "YC (Work at a Startup)"], ["autre", "Autre"]];
@@ -11,7 +21,7 @@ const AUTO_ATS = new Set(["ashby", "lever", "greenhouse", "recruitee"]);
 
 const FIELDS = [
   { name: "name", label: "Nom", required: true },
-  { name: "website", label: "Site web", type: "url", placeholder: "https://…", hint: "Sert aussi à trouver le logo automatiquement" },
+  { name: "website", label: "Site web", type: "url", placeholder: "https://…", hint: "Sert aussi à trouver le logo" },
   { name: "sector", label: "Secteur", placeholder: "SaaS & IA métier" },
   { name: "city", label: "Ville" },
   { name: "funding_stage", label: "Tour de financement", placeholder: "Série A" },
@@ -28,6 +38,170 @@ const FIELDS = [
   { name: "logo_url", label: "URL du logo (facultatif)", type: "url", full: true, hint: "Sinon le favicon du site est utilisé" },
   { name: "logo_file", label: "Ou importer un logo", type: "file", accept: "image/png,image/jpeg,image/gif,image/webp,image/svg+xml,image/x-icon", full: true, hint: "PNG, JPEG, SVG, WebP… 512 Ko max" },
 ];
+
+// --- Vues, filtres, tri ---------------------------------------------------------------------------------
+
+// Secteurs : le champ est libre (« SaaS, IA, finance ») : découpé en tags pour un filtre court
+const tagKey = (t) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+const sectorTags = (sector) => (sector ?? "").split(/\s*(?:[,/&·;+]|\set\s)\s*/).map((t) => t.trim()).filter((t) => t.length > 1);
+
+const inView = {
+  "pour-vous": (c) => !c.hidden_reason,
+  aimees: (c) => c.reaction === "like",
+  ecartees: (c) => !!c.hidden_reason,
+};
+
+function matches(c) {
+  if (!inView[state.view](c)) return false;
+  // Par défaut, seulement les entreprises qui ont une offre ouverte pour l'utilisateur : c'est là qu'on postule
+  if (state.view === "pour-vous" && !state.all && !c.locked && !c.top_jobs.length) return false;
+  if (state.secteur && !sectorTags(c.sector).some((t) => tagKey(t) === state.secteur)) return false;
+  if (state.stade && plain(c.funding_stage) !== state.stade) return false;
+  const q = state.q.trim().toLowerCase();
+  return !q || [c.name, c.sector, c.description, c.investors, c.city].some((v) => plain(v).toLowerCase().includes(q));
+}
+
+const SORTS = {
+  recent: (a, b) => (plain(b.funding_announced_on) || "").localeCompare(plain(a.funding_announced_on) || ""),
+  name: (a, b) => plain(a.name).localeCompare(plain(b.name), "fr", { sensitivity: "base" }),
+};
+
+/** Ordre par pertinence : classées d'abord, les entreprises floutées (Free) toujours à la fin. */
+const byMatch = (list) => [...list].sort((a, b) => (a.locked - b.locked)
+  || ((b.match?.score ?? -1) - (a.match?.score ?? -1)) || SORTS.recent(a, b) || SORTS.name(a, b));
+
+function visible() {
+  const byId = new Map(companies.map((c) => [c.id, c]));
+  const list = order.map((id) => byId.get(id)).filter(Boolean).filter(matches);
+  return state.sort === "match" ? list : list.sort((a, b) => (a.locked - b.locked) || SORTS[state.sort](a, b));
+}
+
+function counted(values) {
+  return [...values.reduce((acc, [key, label]) => {
+    const entry = acc.get(key) ?? { label, n: 0 };
+    entry.n += 1;
+    return acc.set(key, entry);
+  }, new Map())].sort((a, b) => b[1].n - a[1].n);
+}
+
+function drawFilters() {
+  const pool = companies.filter((c) => inView[state.view](c) && (state.view !== "pour-vous" || state.all || c.top_jobs.length));
+  const sectors = counted(pool.flatMap((c) => [...new Map(sectorTags(c.sector).map((t) => [tagKey(t), t]))]))
+    .filter(([k, e]) => e.n >= 2 || k === state.secteur);
+  const stages = counted(pool.map((c) => plain(c.funding_stage)).filter(Boolean).map((s) => [s, s]));
+  const option = (current) => ([k, e]) => html`<option value="${k}" ${k === current ? "selected" : ""}>${e.label} (${e.n})</option>`;
+  $("#f-secteur").innerHTML = html`<option value="">Tous les secteurs</option>${sectors.map(option(state.secteur))}`.s;
+  $("#f-stade").innerHTML = html`<option value="">Tous les stades</option>${stages.map(option(state.stade))}`.s;
+  $("#f-stade").hidden = !stages.length;
+  $("#f-all-wrap").hidden = state.view !== "pour-vous";
+  for (const view of VIEWS) {
+    const btn = $(`[data-view="${view}"]`);
+    btn.setAttribute("aria-selected", String(view === state.view));
+    $(".n", btn).textContent = companies.filter((c) => inView[view](c)
+      && (view !== "pour-vous" || state.all || c.locked || c.top_jobs.length)).length;
+  }
+}
+
+// --- Cartes ---------------------------------------------------------------------------------------------
+
+const lockedCard = (c) => html`
+  <article class="card card-locked" data-id="${c.id}">
+    ${lockedBlock(html`
+      <div class="co-head"><span class="logo lg is-locked" data-initials="?"></span>
+        <div><h2>${shown(c.name)}</h2><p class="small muted">${c.sector ?? "Secteur à préciser"}</p></div></div>
+      <p class="small">${shown(c.description) || "Lorem ipsum dolor sit amet consectetur adipiscing elit."}</p>
+      <p class="small muted">Série A · 12,5 M€</p>
+      <p class="small">${shown(c.jobs_count)} offres</p>`)}
+  </article>`;
+
+/** Levée en une ligne (floutée d'un seul tenant en Free). */
+function funding(c) {
+  const fields = [c.funding_stage, c.funding_amount_meur, c.funding_announced_on];
+  if (fields.some(isLocked)) {
+    return lockedBlock(html`<p class="small">Série A · 12,5 M€ · 12/03/2026</p>`, { cls: "funding-lock" });
+  }
+  const parts = [c.funding_stage, c.funding_amount_meur != null ? fmtMoney(c.funding_amount_meur) : "",
+    c.funding_announced_on ? `levée le ${fmtDate(c.funding_announced_on)}` : ""].filter(Boolean);
+  return parts.length ? html`<p class="small muted">${parts.join(" · ")}</p>` : "";
+}
+
+function card(c) {
+  if (c.locked) return lockedCard(c);
+  const rest = c.open_jobs - c.top_jobs.length;
+  return html`
+  <article class="card company-card ${state.view === "ecartees" ? "is-excluded" : ""}" data-id="${c.id}">
+    <div class="co-head">
+      ${logo(c, "lg")}
+      <div class="grow">
+        <h2>${c.name}</h2>
+        <p class="small muted">${c.sector ?? ""}${c.sector && c.city ? " · " : ""}${c.city ? renderValue(c.city) : ""}</p>
+      </div>
+      ${state.view === "ecartees" ? "" : matchBadge(c.match)}
+    </div>
+    ${funding(c)}
+    ${c.description ? html`<p class="small clamp">${renderValue(c.description, { block: true })}</p>` : ""}
+    ${state.view === "ecartees" ? html`<p class="small exclusion-note">${c.hidden_reason}</p>` : reasonList(c.match)}
+    ${c.top_jobs.length && state.view !== "ecartees" ? html`<ul class="top-jobs">${c.top_jobs.map((j) => html`
+      <li><button type="button" class="link-btn" data-job="${j.id}">
+        <span class="grow">${j.title}${j.city ? html`<span class="muted"> · ${j.city}</span>` : ""}</span>
+        <span class="small muted">${j.score}</span></button></li>`)}</ul>` : ""}
+    <div class="job-card-actions">
+      ${reactionButtons(c.reaction)}
+      <span class="spacer"></span>
+      ${c.open_jobs ? html`<a class="small" href="/postes?entreprise=${c.id}">${rest > 0 ? `Les ${c.open_jobs} offres` : "Voir les offres"}</a>`
+        : html`<span class="small muted">Pas d'offre ouverte</span>`}
+      ${c.careers_url && !isLocked(c.careers_url) ? html`<a class="small" href="${c.careers_url}" target="_blank" rel="noopener">Carrières</a>` : ""}
+      ${c.website && !isLocked(c.website) ? html`<a class="icon-btn" href="${c.website}" target="_blank" rel="noopener" title="Site web">${ICONS.link}</a>` : ""}
+    </div>
+    <div class="admin-actions" data-admin>
+      <button class="link-btn small" type="button" data-action="edit">Modifier</button>
+      ${AUTO_ATS.has(c.ats) && c.ats_slug ? html`<button class="link-btn small" type="button" data-action="check">Vérifier les offres</button>` : ""}
+      <button class="link-btn small" type="button" data-action="refresh-logo">Recharger le logo</button>
+    </div>
+  </article>`;
+}
+
+const EMPTY = {
+  "pour-vous": "Aucune entreprise ne correspond. Cochez « Aussi sans offre pour moi » ou élargissez les filtres.",
+  aimees: "Rien pour l'instant : cliquez sur le cœur d'une entreprise, ses offres remontent dans vos propositions.",
+  ecartees: "Aucune entreprise écartée.",
+};
+
+function draw({ keep = false } = {}) {
+  drawFilters();
+  const list = visible();
+  $("#count").textContent = `${list.length} entreprise${list.length > 1 ? "s" : ""}`;
+  renderPaged($("#list"), list, card, { page: 24, keep, empty: html`<p class="empty card">${EMPTY[state.view]}</p>` });
+}
+
+// --- Données ----------------------------------------------------------------------------------------------
+
+async function load() {
+  companies = await api("/companies");
+  const v = Date.now(); // force le rechargement des logos modifiés
+  companies.forEach((c) => (c._v = v));
+}
+
+async function reload(message) {
+  const first = !order.length;
+  await load();
+  if (first || message) order = byMatch(companies).map((c) => c.id);
+  draw({ keep: !first });
+  drawProBanner().catch(() => {});
+  if (message) {
+    refreshCounts();
+    toast(message);
+  }
+}
+
+/** Offre Free : nombre de levées récentes floutées (calculé par l'API). */
+async function drawProBanner() {
+  const b = (await loadMe()).billing;
+  const n = b?.enabled && b.plan === "free" ? b.locked_fundings : 0;
+  $("#pro-banner").innerHTML = n ? proBar(`${n} levée${n > 1 ? "s" : ""} récente${n > 1 ? "s" : ""} floutée${n > 1 ? "s" : ""}`).s : "";
+}
+
+// --- Administration ---------------------------------------------------------------------------------------
 
 async function uploadLogo(id, file) {
   const form = new FormData();
@@ -46,7 +220,7 @@ async function editCompany(company) {
     danger: company && {
       label: "Supprimer",
       onClick: async () => {
-        if (!confirmDelete(`${company.name} et ses ${company.jobs_count} poste(s)`)) return false;
+        if (!confirmDelete(`${company.name} et ses ${company.jobs_count} offre(s)`)) return false;
         await api(`/companies/${company.id}`, { method: "DELETE" });
         return true;
       },
@@ -65,75 +239,6 @@ async function editCompany(company) {
   });
   if (result) await reload(result.deleted ? "Entreprise supprimée" : "Entreprise enregistrée");
 }
-
-const atsLabel = (c) => `${Object.fromEntries(ATS_OPTIONS)[c.ats] ?? c.ats}${c.ats_slug && !isLocked(c.ats_slug) ? ` (${c.ats_slug})` : ""}`;
-
-/** Levée, investisseurs et ATS : en clair (Pro), ou floutés d'un seul tenant avec un seul badge (Free). */
-function fundingSection(c) {
-  const fields = [c.funding_stage, c.funding_amount_meur, c.funding_announced_on, c.investors, c.ats, c.last_checked_at];
-  if (fields.some(isLocked)) {
-    return lockedBlock(html`
-      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        <span class="pill plain">${shown(c.funding_stage) || "Série A"}</span>
-        <strong>${shown(c.funding_amount_meur) || "12,5"} M€</strong>
-        <span class="small muted">${shown(c.funding_announced_on) || "12/03/2026"}</span>
-      </div>
-      <p class="small muted">${shown(c.investors) || "Lorem ipsum dolor sit amet"}</p>
-      <p class="small muted">ATS : ${shown(c.ats) || "lorem"} · vérifiée le ${shown(c.last_checked_at) || "02/11/2026"}</p>`,
-    { cls: "funding-lock" });
-  }
-  return html`
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      ${c.funding_stage ? html`<span class="pill plain">${c.funding_stage}</span>` : ""}
-      ${c.funding_amount_meur != null ? html`<strong>${fmtMoney(c.funding_amount_meur)}</strong>` : ""}
-      ${c.funding_announced_on ? html`<span class="small muted">${fmtDate(c.funding_announced_on)}</span>` : ""}
-    </div>
-    ${c.investors ? html`<p class="small muted">${c.investors}</p>` : ""}
-    ${c.ats || c.last_checked_at ? html`<p class="small muted">
-      ${c.ats ? html`ATS : ${atsLabel(c)}` : ""}
-      ${c.last_checked_at ? html` · vérifiée le ${fmtDate(c.last_checked_at)}` : ""}
-      ${c.no_relevant_jobs_at ? " · sans offre pertinente" : ""}</p>` : ""}`;
-}
-
-/** Entreprise réservée au Pro (Free) : la carte entière est floutée d'un seul tenant, un seul badge ; le secteur reste lisible. */
-const lockedCard = (c) => html`
-  <article class="card card-locked" data-id="${c.id}">
-    ${lockedBlock(html`
-      <div style="display:flex;align-items:center;gap:14px">
-        <span class="logo lg is-locked" data-initials="?"></span>
-        <div style="flex:1;min-width:0">
-          <h2>${shown(c.name)}</h2>
-          <p class="small muted">${c.sector ?? "Secteur à préciser"}</p>
-        </div>
-      </div>
-      <p class="small">${shown(c.description) || "Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod."}</p>
-      <div style="display:flex;align-items:center;gap:8px"><span class="pill plain">Série A</span><strong>12,5 M€</strong></div>
-      <p class="small muted">Lorem ipsum dolor sit amet</p>
-      <p class="small">${shown(c.jobs_count)} postes</p>`)}
-  </article>`;
-
-const card = (c) => c.locked ? lockedCard(c) : html`
-  <article class="card" style="display:grid;gap:14px;align-content:start" data-id="${c.id}">
-    <div style="display:flex;align-items:center;gap:14px">
-      ${logo(c, "lg")}
-      <div style="flex:1;min-width:0">
-        <h2>${c.name}</h2>
-        <p class="small muted">${c.sector ?? "Secteur à préciser"}${c.city ? html` · ${renderValue(c.city)}` : ""}</p>
-      </div>
-      <button class="icon-btn" type="button" data-action="edit" data-admin title="Modifier">${ICONS.edit}</button>
-    </div>
-    <p class="small">${renderValue(c.description, { block: true })}</p>
-    ${fundingSection(c)}
-    <div class="card-foot" style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:auto">
-      <a class="link-more" href="/postes?entreprise=${c.id}">${c.jobs_count} poste${c.jobs_count > 1 ? "s" : ""}</a>
-      <span style="display:flex;gap:2px">
-        ${AUTO_ATS.has(c.ats) && c.ats_slug ? html`<button class="btn ghost sm" type="button" data-action="check" data-admin
-          title="Vérifier les offres ouvertes dans la liste de l'ATS">Vérifier les offres</button>` : ""}
-        <button class="icon-btn" type="button" data-action="refresh-logo" data-admin title="Récupérer à nouveau le logo">${ICONS.image}</button>
-        ${c.website && !isLocked(c.website) ? html`<a class="icon-btn" href="${c.website}" target="_blank" rel="noopener" title="Site web">${ICONS.link}</a>` : ""}
-      </span>
-    </div>
-  </article>`;
 
 /** Vérifie les offres dans la liste actuelle de l'ATS, puis propose d'ajouter les nouvelles. */
 async function checkCompany(company, btn) {
@@ -164,7 +269,7 @@ async function checkCompany(company, btn) {
     title: `${company.name} : nouvelles offres`,
     fields: [{ name: "ids", label: `${res.new_postings.length} offre${res.new_postings.length > 1 ? "s" : ""} pas encore dans Mire`,
                type: "checks", full: true, options: res.new_postings.map((p) => [p.ats_job_id, fmt(p)]),
-               hint: "Les offres ajoutées sont vérifiées ouvertes, puis notées pour chaque utilisateur." }],
+               hint: "Les offres ajoutées sont vérifiées ouvertes, puis classées pour chaque utilisateur." }],
     extra: html`<p class="small muted">${summary}</p>`,
     submitLabel: "Ajouter au radar",
   });
@@ -177,93 +282,54 @@ async function checkCompany(company, btn) {
   reload();
 }
 
-// --- Secteurs : le champ est libre (« SaaS, IA, finance », « Assurance santé / healthtech »…) : il est découpé en
-// tags (IA, SaaS, Santé…) pour un filtre court et utile
+// --- Événements ---------------------------------------------------------------------------------------------
 
-const tagKey = (t) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-
-function sectorTags(sector) {
-  return (sector ?? "").split(/\s*(?:[,/&·;+]|\set\s)\s*/).map((t) => t.trim()).filter((t) => t.length > 1);
-}
-
-function buildSectorOptions() {
-  const labels = new Map(); // clé normalisée -> {libellé le plus fréquent, nombre d'entreprises}
-  for (const c of companies) {
-    const seen = new Set();
-    for (const tag of sectorTags(c.sector)) {
-      const key = tagKey(tag);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const entry = labels.get(key) ?? { n: 0, forms: new Map() };
-      entry.n += 1;
-      entry.forms.set(tag, (entry.forms.get(tag) ?? 0) + 1);
-      labels.set(key, entry);
-    }
-  }
-  return [...labels.entries()]
-    .filter(([, e]) => e.n >= 2) // un tag porté par une seule entreprise n'aide pas à filtrer
-    .map(([key, e]) => ({ key, n: e.n, label: [...e.forms.entries()].sort((a, b) => b[1] - a[1])[0][0] }))
-    .sort((a, b) => b.n - a.n || a.label.localeCompare(b.label, "fr"));
-}
-
-// --- Tri : les entreprises floutées (Free) restent toujours à la fin, dans l'ordre de l'API (rien à trahir)
-
-const num = (v) => (isLocked(v) || v == null ? null : Number(v));
-const SORTS = {
-  name: (a, b) => plain(a.name).localeCompare(plain(b.name), "fr", { sensitivity: "base" }),
-  recent: (a, b) => (plain(b.funding_announced_on) || "").localeCompare(plain(a.funding_announced_on) || ""),
-  amount: (a, b) => (num(b.funding_amount_meur) ?? -1) - (num(a.funding_amount_meur) ?? -1),
-  jobs: (a, b) => (num(b.jobs_count) ?? -1) - (num(a.jobs_count) ?? -1),
-};
-
-function draw() {
-  const q = $("#search").value.trim().toLowerCase();
-  const sector = $("#sector").value;
-  const sort = SORTS[$("#sort").value] ?? SORTS.name;
-  const filtered = companies.filter(
-    (c) =>
-      (!sector || sectorTags(c.sector).some((t) => tagKey(t) === sector)) &&
-      (!q || [c.name, c.sector, c.description, c.investors].some((v) => plain(v).toLowerCase().includes(q)))
-  );
-  const open = filtered.filter((c) => !c.locked).sort((a, b) => sort(a, b) || SORTS.name(a, b));
-  const locked = filtered.filter((c) => c.locked);
-  $("#count").textContent = `${filtered.length} entreprise${filtered.length > 1 ? "s" : ""}`;
-  renderPaged($("#list"), [...open, ...locked], card, { page: 24, empty: html`<p class="empty card">Aucune entreprise ne correspond.</p>` });
-}
-
-async function reload(message) {
-  companies = await api("/companies");
-  const v = Date.now(); // force le rechargement des logos modifiés
-  companies.forEach((c) => (c._v = v));
-  const current = $("#sector").value;
-  $("#sector").innerHTML = html`<option value="">Tous les secteurs</option>
-    ${buildSectorOptions().map((t) => html`<option value="${t.key}" ${t.key === current ? "selected" : ""}>${t.label} (${t.n})</option>`)}`.s;
+function changed() {
+  order = byMatch(companies).map((c) => c.id);
   draw();
-  drawProBanner().catch(() => {});
-  if (message) {
-    refreshCounts();
-    toast(message);
-  }
 }
 
-/** Offre Free : nombre de levées récentes floutées (calculé par l'API). */
-async function drawProBanner() {
-  const b = (await loadMe()).billing;
-  const n = b?.enabled && b.plan === "free" ? b.locked_fundings : 0;
-  $("#pro-banner").innerHTML = n ? proBar(`${n} levée${n > 1 ? "s" : ""} récente${n > 1 ? "s" : ""} floutée${n > 1 ? "s" : ""}`).s : "";
-}
-
-$("#search").addEventListener("input", draw);
-$("#sector").addEventListener("change", draw);
-$("#sort").addEventListener("change", draw);
+$("#views").addEventListener("click", (e) => {
+  const btn = e.target.closest("[data-view]");
+  if (!btn) return;
+  state.view = btn.dataset.view;
+  const url = new URL(location.href);
+  if (state.view === "pour-vous") url.searchParams.delete("vue");
+  else url.searchParams.set("vue", state.view);
+  history.replaceState(null, "", url);
+  changed();
+});
+$("#q").addEventListener("input", (e) => { state.q = e.target.value; draw(); });
+$("#f-secteur").addEventListener("change", (e) => { state.secteur = e.target.value; changed(); });
+$("#f-stade").addEventListener("change", (e) => { state.stade = e.target.value; changed(); });
+$("#f-all").addEventListener("change", (e) => { state.all = e.target.checked; changed(); });
+$("#sort").addEventListener("change", (e) => { state.sort = e.target.value; changed(); });
 $("#add").addEventListener("click", () => editCompany(null));
 $("#list").addEventListener("click", async (e) => {
-  const btn = e.target.closest("[data-action]");
-  if (!btn) return;
-  const company = companies.find((c) => c.id === Number(btn.closest("[data-id]").dataset.id));
-  if (btn.dataset.action === "edit") editCompany(company);
-  if (btn.dataset.action === "check") checkCompany(company, btn);
-  if (btn.dataset.action === "refresh-logo") {
+  const cardEl = e.target.closest("[data-id]");
+  if (!cardEl) return;
+  const company = companies.find((c) => c.id === Number(cardEl.dataset.id));
+  const job = e.target.closest("[data-job]");
+  if (job) return openJobDialog(Number(job.dataset.job));
+  const react = e.target.closest("[data-react]");
+  if (react) {
+    const value = company.reaction === react.dataset.react ? null : react.dataset.react;
+    const updated = await reactToCompany(company, value);
+    if (!updated) return;
+    updated._v = company._v;
+    companies = companies.map((c) => (c.id === updated.id ? updated : c));
+    if (matches(updated)) cardEl.outerHTML = card(updated).s;
+    else {
+      cardEl.classList.add("leaving");
+      setTimeout(() => cardEl.remove(), 180);
+    }
+    drawFilters();
+    return;
+  }
+  const action = e.target.closest("[data-action]")?.dataset.action;
+  if (action === "edit") editCompany(company);
+  if (action === "check") checkCompany(company, e.target.closest("[data-action]"));
+  if (action === "refresh-logo") {
     await attempt(() => api(`/companies/${company.id}/logo`, { method: "DELETE" }));
     await reload("Logo récupéré à nouveau");
   }
