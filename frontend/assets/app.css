@@ -306,6 +306,7 @@ img { display: block; }
 .reasons .minus::before { content: "!"; }
 .why-line { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .exclusion-note { color: #9a3412; }
+.verified { color: #15803d; white-space: nowrap; }
 
 .notice {
   display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px;

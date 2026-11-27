@@ -8,6 +8,8 @@ pertinence (0-100) = adéquation + goût + fraîcheur
   quand l'offre est évaluée ;
 - goût : J'aime / Pas intéressé sur les offres et les entreprises (feedback.py) ; effet immédiat, réversible ;
 - fraîcheur : petit bonus aux offres récentes.
+Mémoire par entreprise : un refus, un entretien ou une candidature sur une autre offre de la même entreprise est
+rappelé en tête des réserves (company_history), sans changer la note.
 Règle : une information absente (de l'offre ou du profil) ne pénalise pas, le critère n'est simplement pas compté.
 
 `hidden` : pourquoi l'offre n'est pas proposée (écartée par l'utilisateur, exclusion dure, écartée par
@@ -105,6 +107,13 @@ SPONTANEOUS_PENALTY = 25.0
 
 DISLIKED_JOB = "Vous l'avez écartée"
 DISLIKED_COMPANY = "Entreprise que vous avez écartée"
+
+# Mémoire par entreprise : ce qui s'est passé sur ses AUTRES offres, rappelé sur celle-ci (sans changer la note :
+# c'est à l'utilisateur de juger). Du plus au moins important.
+HISTORY = (ProcessStatus.refuse, ProcessStatus.offre, ProcessStatus.entretien, ProcessStatus.relance,
+           ProcessStatus.postule)
+MONTHS = ("janvier", "février", "mars", "avril", "mai", "juin", "juillet", "août", "septembre", "octobre",
+          "novembre", "décembre")
 
 
 # --- Outils ---------------------------------------------------------------------------------------------------
@@ -252,6 +261,13 @@ class Ranker:
         self.company_reactions: dict[int, str] = dict(db.execute(
             select(CompanyFeedback.company_id, CompanyFeedback.sentiment)
             .where(CompanyFeedback.user_id == user.id)).all())
+        # Process par entreprise : (statut, offre, intitulé, dernière mise à jour)
+        self.history: dict[int, list[tuple[ProcessStatus, int, str, datetime | None]]] = {}
+        for company_id, job_id, title, status, updated in db.execute(
+                select(Job.company_id, Job.id, Job.title, Application.status, Application.updated_at)
+                .join(Application, Application.job_id == Job.id)
+                .where(Application.user_id == user.id, Application.status.in_(HISTORY))):
+            self.history.setdefault(company_id, []).append((status, job_id, title, updated))
 
         self._learn(db)
         self._semantic(db, profile)
@@ -459,6 +475,23 @@ class Ranker:
             return a.exclusion or "Écartée par l'analyse"
         return None
 
+    def company_history(self, job: Job) -> str | None:
+        """Le plus marquant des process de l'utilisateur sur les autres offres de l'entreprise, en une phrase."""
+        others = [h for h in self.history.get(job.company_id, []) if h[1] != job.id]
+        if not others:
+            return None
+        # Le statut le plus marquant ; à égalité, le plus récent
+        status, _, title, updated = min(others, key=lambda h: (HISTORY.index(h[0]), -(h[3].timestamp() if h[3] else 0)))
+        name = job.company.name
+        if status == ProcessStatus.refuse:
+            when = f" en {MONTHS[updated.month - 1]} {updated.year}" if updated else ""
+            return f"{name} vous a déjà refusé pour « {title} »{when}"
+        if status == ProcessStatus.offre:
+            return f"Offre déjà reçue de {name} pour « {title} »"
+        if status == ProcessStatus.entretien:
+            return f"Déjà en entretien chez {name} pour « {title} »"
+        return f"Candidature déjà envoyée chez {name} pour « {title} »"
+
     def _llm_score(self, job: Job) -> float | None:
         a = self.assessments.get(job.id)
         if a is not None:
@@ -499,6 +532,8 @@ class Ranker:
         ordered = sorted(signals, key=lambda s: -WEIGHTS[s[0]])
         reasons += [text for _, value, text, _ in ordered if text and value >= 0.5]
         warnings += [text for _, value, _, text in ordered if text and value <= 0.5]
+        if history := self.company_history(job):
+            warnings.insert(0, history)
 
         score = max(0.0, min(99.0, fit * 100 + points + fresh))  # jamais « parfait »
         return Match(score, reasons[:3], warnings[:2], self._hidden(job, liked))

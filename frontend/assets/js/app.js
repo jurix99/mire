@@ -556,10 +556,22 @@ export function salaryText(job) {
   return min && max && min !== max ? `${min}–${max} k€` : `${max ?? min} k€`;
 }
 
-/** Lieu, mode, salaire et ancienneté d'une offre, sur une ligne. */
+/**
+ * Offre vue ouverte sur le site de l'entreprise (liste de son ATS) dans les 7 derniers jours : la preuve qu'elle
+ * n'est pas une offre fantôme. Plus ancien, ou offre fermée : rien.
+ */
+export function verifiedTag(job) {
+  if (!job.verified_open_at || job.closed_at) return "";
+  const hours = Math.max(0, Math.floor((Date.now() - new Date(job.verified_open_at)) / 3600000));
+  if (hours > 24 * 7) return "";
+  const when = hours < 1 ? "il y a moins d'une heure" : hours < 48 ? `il y a ${hours} h` : `il y a ${Math.floor(hours / 24)} jours`;
+  return html`<span class="verified" title="Offre vue ouverte sur le site de l'entreprise ${when}">✓ vérifiée ${when}</span>`;
+}
+
+/** Lieu, mode, salaire, ancienneté et vérification d'une offre, sur une ligne. */
 export function jobFacts(job) {
   const parts = [job.city ?? job.location, WORK_MODE_LABEL[job.work_mode], salaryText(job),
-    fmtAgo(job.published_on ?? job.created_at)].filter(Boolean);
+    fmtAgo(job.published_on ?? job.created_at), verifiedTag(job)].filter(Boolean);
   return parts.map((p, i) => html`${i ? " · " : ""}${p}`);
 }
 

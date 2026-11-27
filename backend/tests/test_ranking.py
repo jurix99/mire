@@ -65,6 +65,29 @@ def test_jobs_are_ranked_without_any_llm_note(alice, market, as_user):
     assert jobs[0]["city"] == "Paris" and jobs[0]["summary"] is None
 
 
+def test_company_history_is_recalled_on_its_other_offers(db, alice, market, as_user):
+    client = setup(as_user, alice)
+    platform = add_job(db, market["acme"], "Platform Engineer", "platform_devops_sre", ["kubernetes"])
+    db.add(Application(user_id=alice.id, job_id=market["backend"].id, status="refuse"))
+    db.commit()
+    jobs = by_id(client)
+    first = jobs[platform.id]["match"]["warnings"][0]
+    assert first.startswith("Acme vous a déjà refusé pour « Backend Engineer » en ")
+    before = jobs[platform.id]["match"]["score"]
+    # Le rappel n'est qu'une information : la note ne bouge pas ; rien sur l'offre refusée elle-même ni ailleurs
+    assert not any("refusé" in w for w in jobs[market["backend"].id]["match"]["warnings"])
+    assert not any("refusé" in w for w in jobs[market["data"].id]["match"]["warnings"])
+
+    # Sans le refus : un entretien en cours sur une autre offre de l'entreprise est rappelé à son tour
+    db.add(Application(user_id=alice.id, job_id=add_job(db, market["acme"], "SRE", "platform_devops_sre").id,
+                       status="entretien"))
+    db.execute(Application.__table__.delete().where(Application.job_id == market["backend"].id))
+    db.commit()
+    after = by_id(client)[platform.id]["match"]
+    assert after["warnings"][0] == "Déjà en entretien chez Acme pour « SRE »"
+    assert after["score"] == before
+
+
 def test_like_reranks_immediately_and_unlike_restores(db, alice, market, as_user):
     client = setup(as_user, alice)
     before = by_id(client)
